@@ -273,11 +273,11 @@ iOS thread; no slice edits it.
 
 ## Phase 11 — Mac: Add, Replace, Edit, Delete sheets (PR-11)
 
-- [ ] T031 [US5] Build G-07 in `macos/Sources/BrainBuddyMac/Settings/AddAgentSheet.swift`
+- [x] T031 [US5] Build G-07 in `macos/Sources/BrainBuddyMac/Settings/AddAgentSheet.swift`
   and G-08 in `macos/Sources/BrainBuddyMac/Settings/AgentConnectionSheets.swift` (secure
   fields, conditional password on Edit, "Delete <name>?" with Cancel as default, error
   lines, Return and Esc). 030-FR-031 – 030-FR-035, 030-FR-040, 030-FR-041. PR-11.
-- [ ] T032 [US5] Tests in `macos/Tests/BrainBuddyMacTests/AgentSheetsTests.swift`: Add and
+- [x] T032 [US5] Tests in `macos/Tests/BrainBuddyMacTests/AgentSheetsTests.swift`: Add and
   test is disabled until every field is filled; Edit shows the password only after the
   address or type changes; Delete is never the default button; closing a sheet empties the
   secure fields. 030-FR-031 – 030-FR-035, 030-FR-040. PR-11.
@@ -632,6 +632,7 @@ iOS thread; no slice edits it.
         "Delete is never the default button and closing any sheet empties its secure fields"
       ],
       "budget": {"product_loc": 360, "files": 2},
+      "oversize_reason": "Third file is a 3-line .sheet wiring in AgentsSettingsTab.swift (PR-10 only opens the editor); the two sheet files carry the rest.",
       "implementer": "feature-implementer"
     },
     {

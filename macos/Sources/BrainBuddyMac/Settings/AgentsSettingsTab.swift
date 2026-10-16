@@ -133,6 +133,9 @@ struct AgentsManagerView: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, minHeight: 220, alignment: .topLeading)
+        .sheet(isPresented: Binding(get: { controller.editor != nil }, set: { if !$0 { controller.closeEditor() } })) {
+            if let editor = controller.editor { AgentEditorSheet(editor: editor, onClose: { controller.closeEditor() }) }
+        }
     }
 
     private var list: some View {
