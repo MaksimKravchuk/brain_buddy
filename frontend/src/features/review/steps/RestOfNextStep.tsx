@@ -23,7 +23,7 @@ export function RestOfNextStep(): React.JSX.Element {
         const nextCount = meta.next_count as number;
         return (
           <>
-            <div className="flex flex-col gap-1 rounded-xl border border-slate-200 bg-white p-4 text-base font-medium text-slate-900">
+            <div className="flex flex-col gap-1 rounded-card bg-card p-4 text-co-body font-medium text-ink">
               <p className="m-0">{plural(nextCount, "next action")}</p>
               {meta.weekly_average_4w !== null && meta.weekly_average_4w !== undefined ? (
                 <>
@@ -33,15 +33,15 @@ export function RestOfNextStep(): React.JSX.Element {
               ) : null}
             </div>
             {nextCount === 0 ? (
-              <p className="m-0 text-sm text-slate-600">Next is empty.</p>
+              <p className="m-0 text-co-meta text-ink-muted">Next is empty.</p>
             ) : meta.weekly_average_4w === null ? (
-              <p className="m-0 text-sm text-slate-600">After a few weeks of finished tasks, this will also show your weekly pace and how many weeks of work Next holds.</p>
+              <p className="m-0 text-co-meta text-ink-muted">After a few weeks of finished tasks, this will also show your weekly pace and how many weeks of work Next holds.</p>
             ) : (
-              <p className="m-0 text-sm text-slate-600">No limit. Just a mirror of what you&apos;ve asked of yourself.</p>
+              <p className="m-0 text-co-meta text-ink-muted">No limit. Just a mirror of what you&apos;ve asked of yourself.</p>
             )}
-            <ul className="m-0 flex list-none flex-col divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white p-0 text-sm text-slate-800">
+            <ul className="m-0 flex list-none flex-col gap-2 p-0 text-co-meta text-ink">
               {items.map((task) => (
-                <li key={task.id} className="px-3 py-2.5">{task.title}</li>
+                <li key={task.id} className="rounded-card bg-card px-3 py-2.5">{task.title}</li>
               ))}
             </ul>
           </>

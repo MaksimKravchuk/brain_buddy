@@ -18,7 +18,7 @@ import { formatReviewDate } from "./formulation";
 
 const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const HOURS = Array.from({ length: 24 }, (_, hour) => `${String(hour).padStart(2, "0")}:00`);
-const selectClass = "min-h-11 rounded-lg border border-slate-300 bg-white px-3 text-base text-slate-900 sm:text-sm";
+const selectClass = "min-h-11 rounded-card bg-quiet px-3 text-co-body text-ink";
 
 export function OnboardingDialog({
   state,
@@ -93,36 +93,36 @@ export function OnboardingDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-[150] flex items-stretch justify-center bg-slate-50/80 backdrop-blur-xs sm:items-center sm:p-6">
+    <div className="fixed inset-0 z-[150] flex items-stretch justify-center bg-ground/80 backdrop-blur-xs sm:items-center sm:p-6">
       <section
         ref={sectionRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={headingId}
         onKeyDown={onKeyDown}
-        className="relative flex h-full w-full flex-col gap-3 overflow-y-auto bg-white p-5 shadow-floating sm:h-auto sm:max-h-[calc(100vh-48px)] sm:w-[560px] sm:rounded-[20px] sm:border sm:border-slate-200"
+        className="relative flex h-full w-full flex-col gap-3 overflow-y-auto bg-card p-5 shadow-floating sm:h-auto sm:max-h-[calc(100vh-48px)] sm:w-[560px] sm:rounded-sheet"
       >
         <div className="flex items-start gap-3">
-          <h2 id={headingId} ref={headingRef} tabIndex={-1} className="m-0 flex-1 text-[20px] font-semibold leading-[1.3] text-slate-900 outline-hidden">
+          <h2 id={headingId} ref={headingRef} tabIndex={-1} className="m-0 flex-1 font-voice text-co-step text-ink outline-hidden focus-visible:shadow-ring-focus">
             A weekly reset
           </h2>
-          <button type="button" aria-label="Close" className="-mr-1.5 -mt-1 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-surface-sunken hover:text-slate-900" onClick={() => onClose(false)}>
+          <button type="button" aria-label="Close" className="-mr-1.5 -mt-1 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-control text-ink-muted hover:bg-quiet-pressed hover:text-ink" onClick={() => onClose(false)}>
             <X className="h-4 w-4" aria-hidden />
           </button>
         </div>
-        <p className="m-0 text-sm leading-relaxed text-slate-600">
-          <b className="text-slate-900">Why.</b> Once a week: see what you got done, empty your head, and choose what&apos;s next.
+        <p className="m-0 text-co-meta leading-relaxed text-ink-muted">
+          <b className="text-ink">Why.</b> Once a week: see what you got done, empty your head, and choose what&apos;s next.
         </p>
-        <p className="m-0 text-sm leading-relaxed text-slate-600">
-          <b className="text-slate-900">When a task stalls.</b> {`If a next action keeps the same wording for ${threshold} days, it asks for a decision. A stall is feedback on the wording, not on you.`}
+        <p className="m-0 text-co-meta leading-relaxed text-ink-muted">
+          <b className="text-ink">When a task stalls.</b> {`If a next action keeps the same wording for ${threshold} days, it asks for a decision. A stall is feedback on the wording, not on you.`}
         </p>
-        <p className="m-0 text-sm leading-relaxed text-slate-600">
-          <b className="text-slate-900">If it stays undecided.</b> 7 days later it moves to Someday / maybe. You&apos;ll see what moved and can bring it back in one click.
+        <p className="m-0 text-co-meta leading-relaxed text-ink-muted">
+          <b className="text-ink">If it stays undecided.</b> 7 days later it moves to Someday / maybe. You&apos;ll see what moved and can bring it back in one click.
         </p>
-        <p className="m-0 text-sm leading-relaxed text-slate-600">
+        <p className="m-0 text-co-meta leading-relaxed text-ink-muted">
           {`It's the only thing the app moves on its own.${state.grace_until ? ` Tasks you had when you first saw this rule won't move before ${formatReviewDate(state.grace_until)}.` : ""}`}
         </p>
-        <div className="flex flex-wrap items-center gap-3 text-sm text-slate-700">
+        <div className="flex flex-wrap items-center gap-3 text-co-meta text-ink-muted">
           <label className="flex items-center gap-2">
             Day
             <select className={selectClass} value={day} onChange={(event) => setDay(Number(event.currentTarget.value))}>
@@ -140,16 +140,16 @@ export function OnboardingDialog({
             </select>
           </label>
         </div>
-        <div className="flex flex-wrap items-center gap-3 text-sm text-slate-700">
+        <div className="flex flex-wrap items-center gap-3 text-co-meta text-ink-muted">
           <span id={`${headingId}-threshold`}>Ask for a decision after</span>
-          <div role="radiogroup" aria-labelledby={`${headingId}-threshold`} className="inline-flex gap-1 rounded-lg bg-slate-100 p-[3px]">
+          <div role="radiogroup" aria-labelledby={`${headingId}-threshold`} className="inline-flex gap-1 rounded-card bg-quiet p-[3px]">
             {THRESHOLD_OPTIONS.map((option) => (
               <button
                 key={option}
                 type="button"
                 role="radio"
                 aria-checked={threshold === option}
-                className={`min-h-11 rounded-md px-3 text-[13px] ${threshold === option ? "bg-white font-semibold text-slate-900 shadow-soft" : "font-medium text-slate-600"}`}
+                className={`min-h-11 rounded-control px-3 text-co-meta ${threshold === option ? "bg-card font-semibold text-ink" : "font-medium text-ink-muted"}`}
                 onClick={() => setThreshold(option)}
               >
                 {`${option} days`}
@@ -157,21 +157,21 @@ export function OnboardingDialog({
             ))}
           </div>
         </div>
-        <p className="m-0 text-xs text-slate-500">
+        <p className="m-0 text-co-meta text-ink-muted">
           Times are in your local time zone. The web doesn&apos;t send reminders; the sidebar shows when your last review was. If you use the iPhone app, it sends one reminder on your review day.
         </p>
-        {!online ? <p role="status" className="m-0 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">You&apos;re offline. Try again when you&apos;re back online.</p> : null}
+        {!online ? <p role="status" className="m-0 rounded-card bg-quiet px-3 py-2 text-co-meta text-ink-muted">You&apos;re offline. Try again when you&apos;re back online.</p> : null}
         {failure ? (
-          <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <div role="alert" className="flex flex-wrap items-center gap-2 rounded-card bg-quiet px-3 py-2 text-co-meta text-warning">
             <span>Your review settings couldn&apos;t be saved.</span>
             <Ref id={failure.referenceId} />
-            <button type="button" disabled={!online || pending} className="min-h-11 rounded-lg px-3 font-semibold hover:bg-amber-100 disabled:opacity-60" onClick={() => void save()}>
+            <button type="button" disabled={!online || pending} className="min-h-11 rounded-control px-3 font-semibold hover:bg-quiet-pressed disabled:opacity-60" onClick={() => void save()}>
               Retry
             </button>
           </div>
         ) : null}
         <div className="flex justify-end">
-          <button type="button" disabled={!online || pending} className="min-h-11 rounded-lg bg-sky-700 px-5 text-sm font-semibold text-white hover:bg-sky-800 disabled:opacity-60" onClick={() => void save()}>
+          <button type="button" disabled={!online || pending} className="min-h-11 rounded-control bg-ink px-5 text-co-meta font-semibold text-ground hover:bg-ink/85 disabled:opacity-60" onClick={() => void save()}>
             {pending ? "Saving…" : "Continue"}
           </button>
         </div>

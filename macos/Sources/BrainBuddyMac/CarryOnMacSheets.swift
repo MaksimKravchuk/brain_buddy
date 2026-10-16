@@ -183,7 +183,7 @@ struct MacSheetEmptyState<Actions: View>: View {
     var body: some View {
         VStack(spacing: 10) {
             MacEmptyState(title: title, systemImage: systemImage, description: description)
-            actions.buttonStyle(.macSecondaryPill)
+            actions.buttonStyle(.carryOnSecondary)
         }
         .frame(maxWidth: .infinity)
     }
@@ -213,7 +213,7 @@ struct MacReviewHeader: View {
                 .lineLimit(1)
             Spacer(minLength: 8)
             Button("Close review", action: onClose)
-                .buttonStyle(.macQuietPill)
+                .buttonStyle(.carryOnQuiet)
                 .keyboardShortcut(.cancelAction)
         }
     }

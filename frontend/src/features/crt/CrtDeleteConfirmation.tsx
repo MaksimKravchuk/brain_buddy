@@ -117,7 +117,7 @@ function useAsyncAction(): {
 }
 
 function SupportReference({ reference }: { reference?: string }): React.JSX.Element | null {
-  return reference ? <p className="mt-3 font-mono text-xs text-slate-500">Support reference: {reference}</p> : null;
+  return reference ? <p className="mt-3 font-mono text-co-meta text-ink-muted">Support reference: {reference}</p> : null;
 }
 
 export type CrtDeleteTreeDialogProps = Readonly<{
@@ -147,7 +147,7 @@ export function CrtDeleteTreeDialog({
   useModalBehavior(panelRef, cancelRef, onCancel, returnFocusRef, pending);
 
   return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/40 p-6" data-crt-native="true">
+    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-ink/40 p-6" data-crt-native="true">
       <section
         ref={panelRef}
         role="alertdialog"
@@ -156,22 +156,22 @@ export function CrtDeleteTreeDialog({
         aria-describedby="crt-delete-tree-description"
         aria-busy={pending}
         tabIndex={-1}
-        className="w-full max-w-lg rounded-2xl border border-rose-200 bg-white p-6 shadow-floating outline-hidden"
+        className="w-full max-w-lg co-glass-dense rounded-card p-6 outline-hidden"
       >
-        <p className="text-xs font-bold uppercase tracking-[0.08em] text-rose-700">Delete tree</p>
-        <h1 id="crt-delete-tree-title" className="mt-2 text-xl font-semibold text-slate-900">Delete ‘{treeName}’?</h1>
-        <p id="crt-delete-tree-description" className="mt-2 text-sm leading-6 text-slate-600">
+        <p className="text-co-meta font-semibold text-danger">Delete tree</p>
+        <h1 id="crt-delete-tree-title" className="mt-2 text-co-body font-semibold text-ink">Delete ‘{treeName}’?</h1>
+        <p id="crt-delete-tree-description" className="mt-2 text-co-meta leading-6 text-ink-muted">
           Deletes {cardCount} {cardCount === 1 ? "card" : "cards"} and {relationCount} {relationCount === 1 ? "relation" : "relations"} from BrainBuddy.
         </p>
-        {offline ? <p className="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">Reconnect before deleting this tree.</p> : null}
-        {progressVisible ? <p className="mt-4 text-sm text-slate-600" role="status" aria-label="Deleting tree…">Deleting tree…</p> : null}
-        {error ? <p className="mt-4 text-sm text-rose-700" role="alert">{error}</p> : null}
+        {offline ? <p className="mt-4 rounded-lg bg-sunken p-3 text-co-meta text-warning">Reconnect before deleting this tree.</p> : null}
+        {progressVisible ? <p className="mt-4 text-co-meta text-ink-muted" role="status" aria-label="Deleting tree…">Deleting tree…</p> : null}
+        {error ? <p className="mt-4 text-co-meta text-danger" role="alert">{error}</p> : null}
         <SupportReference reference={supportReference} />
         <div className="mt-6 flex flex-wrap justify-end gap-3">
           <button
             ref={cancelRef}
             type="button"
-            className="rounded-lg bg-brand-primary px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-lg bg-ink px-4 py-2 text-co-meta font-semibold text-card disabled:cursor-not-allowed disabled:opacity-60"
             disabled={pending}
             onClick={onCancel}
           >
@@ -180,7 +180,7 @@ export function CrtDeleteTreeDialog({
           <button
             type="button"
             aria-label="Delete tree"
-            className="rounded-lg border border-rose-300 px-4 py-2 text-sm font-semibold text-rose-800 disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-lg bg-quiet hover:bg-quiet-pressed px-4 py-2 text-co-meta font-semibold text-danger disabled:cursor-not-allowed disabled:opacity-60"
             disabled={pending || offline}
             onClick={() => void run(onConfirm, "Tree deletion completed.", "We couldn't delete this tree. Nothing was deleted. Retry when ready.")}
           >
@@ -224,7 +224,7 @@ export function CrtPendingWorkDialog({
   useModalBehavior(panelRef, safeActionRef, onCancel, returnFocusRef, pending);
 
   return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/40 p-6" data-crt-native="true">
+    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-ink/40 p-6" data-crt-native="true">
       <section
         ref={panelRef}
         role="dialog"
@@ -233,27 +233,27 @@ export function CrtPendingWorkDialog({
         aria-describedby="crt-pending-work-description"
         aria-busy={pending}
         tabIndex={-1}
-        className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-floating outline-hidden"
+        className="w-full max-w-lg co-glass-dense rounded-card p-6 outline-hidden"
       >
-        <h1 id="crt-pending-work-title" className="text-xl font-semibold text-slate-900">Resolve unsynced changes before continuing</h1>
-        <p id="crt-pending-work-description" className="mt-2 text-sm leading-6 text-slate-600">
+        <h1 id="crt-pending-work-title" className="text-co-body font-semibold text-ink">Resolve unsynced changes before continuing</h1>
+        <p id="crt-pending-work-description" className="mt-2 text-co-meta leading-6 text-ink-muted">
           These trees have local work that has not been saved online. Resolve it before leaving, switching trees, importing, signing out, or changing accounts.
         </p>
-        <ul aria-label="Affected trees" className="mt-4 space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+        <ul aria-label="Affected trees" className="mt-4 space-y-2 rounded-lg bg-sunken p-4 text-co-meta text-warning">
           {affectedTrees.map((tree) => (
             <li key={tree.id}>{tree.name} · {tree.editCount} unsynced {tree.editCount === 1 ? "edit" : "edits"}</li>
           ))}
         </ul>
-        {offline ? <p className="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">Reconnect before discarding or continuing.</p> : null}
-        {progressVisible ? <p className="mt-4 text-sm text-slate-600" role="status">Working…</p> : null}
-        {error ? <p className="mt-4 text-sm text-rose-700" role="alert">{error}</p> : null}
-        {actionError ? <p className="mt-4 text-sm text-rose-700" role="alert">{actionError}</p> : null}
+        {offline ? <p className="mt-4 rounded-lg bg-sunken p-3 text-co-meta text-warning">Reconnect before discarding or continuing.</p> : null}
+        {progressVisible ? <p className="mt-4 text-co-meta text-ink-muted" role="status">Working…</p> : null}
+        {error ? <p className="mt-4 text-co-meta text-danger" role="alert">{error}</p> : null}
+        {actionError ? <p className="mt-4 text-co-meta text-danger" role="alert">{actionError}</p> : null}
         <SupportReference reference={supportReference} />
         <div className="mt-6 flex flex-wrap justify-end gap-3">
           <button
             ref={safeActionRef}
             type="button"
-            className="rounded-lg bg-brand-primary px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-lg bg-ink px-4 py-2 text-co-meta font-semibold text-card disabled:cursor-not-allowed disabled:opacity-60"
             disabled={pending}
             onClick={() => void run(onStayAndRetry, "Save retry started.", "We couldn't retry the save. Nothing was discarded.")}
           >
@@ -261,7 +261,7 @@ export function CrtPendingWorkDialog({
           </button>
           <button
             type="button"
-            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-lg bg-quiet hover:bg-quiet-pressed px-4 py-2 text-co-meta font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-60"
             disabled={pending}
             onClick={() => void run(onDownloadBackup, "Backup download started.", "We couldn't prepare the backup. Nothing was discarded.")}
           >
@@ -269,7 +269,7 @@ export function CrtPendingWorkDialog({
           </button>
           <button
             type="button"
-            className="rounded-lg border border-rose-300 px-4 py-2 text-sm font-semibold text-rose-800 disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-lg bg-quiet hover:bg-quiet-pressed px-4 py-2 text-co-meta font-semibold text-danger disabled:cursor-not-allowed disabled:opacity-60"
             disabled={pending || offline}
             onClick={() => void run(onDiscardAndContinue, "Unsynced changes discarded.", "We couldn't discard the unsynced changes. Transition cancelled.")}
           >

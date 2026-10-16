@@ -169,7 +169,7 @@ struct QuickOpenFooter: View {
                 .foregroundStyle(CarryOnColorStyle.coTextSecondary)
             Spacer()
             Button("Close", action: onClose)
-                .buttonStyle(.macQuietPill)
+                .buttonStyle(.carryOnQuiet)
                 .keyboardShortcut(.cancelAction)
         }
     }

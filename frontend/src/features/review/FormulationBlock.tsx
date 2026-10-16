@@ -22,12 +22,12 @@ type Tone = "asks" | "tomorrow" | "neutral";
 
 function Chip({ tone, icon, children }: { tone: Tone; icon: ReactNode; children: ReactNode }): React.JSX.Element {
   const toneClass = tone === "asks"
-    ? "border-indigo-200 bg-indigo-50 text-indigo-700"
+    ? "bg-quiet text-ink-muted"
     : tone === "tomorrow"
-      ? "border-amber-200 bg-amber-50 text-amber-800"
-      : "border-slate-200 bg-slate-100 text-slate-600";
+      ? "bg-quiet text-warning"
+      : "bg-quiet text-ink-muted";
   return (
-    <span className={`inline-flex h-[22px] items-center gap-1 rounded-full border px-2 text-[11px] font-medium ${toneClass}`}>
+    <span className={`inline-flex h-[22px] items-center gap-1 rounded-full px-2 text-co-meta font-medium ${toneClass}`}>
       {icon}
       {children}
     </span>
@@ -121,9 +121,9 @@ export function FormulationBlock({
   }
 
   return (
-    <section aria-labelledby={titleId} className="mx-4 mb-3 flex flex-col gap-1.5 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2.5 text-[12.5px] text-slate-700">
-      <h3 id={titleId} className="m-0 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">This wording</h3>
-      <p className="m-0 flex flex-wrap items-center gap-1.5 text-slate-600">{chip}</p>
+    <section aria-labelledby={titleId} className="mx-4 mb-3 flex flex-col gap-1.5 rounded-card bg-quiet px-3 py-2.5 text-co-meta text-ink-muted">
+      <h3 id={titleId} className="m-0 text-co-meta font-semibold text-ink-muted">This wording</h3>
+      <p className="m-0 flex flex-wrap items-center gap-1.5 text-ink-muted">{chip}</p>
       {lines.map((line) => <p key={line} className="m-0 leading-relaxed">{line}</p>)}
       {decide ? (
         <>
@@ -132,7 +132,7 @@ export function FormulationBlock({
             type="button"
             aria-disabled={online ? undefined : "true"}
             aria-describedby={online ? undefined : offlineId}
-            className="mt-1 inline-flex min-h-11 items-center justify-center self-start rounded-lg bg-sky-700 px-4 text-sm font-semibold text-white hover:bg-sky-800 aria-disabled:opacity-60 max-sm:w-full"
+            className="mt-1 inline-flex min-h-11 items-center justify-center self-start rounded-control bg-ink px-4 text-co-meta font-semibold text-ground hover:bg-ink/85 aria-disabled:opacity-60 max-sm:w-full"
             onClick={() => setDialogOpen(true)}
           >
             Decide
