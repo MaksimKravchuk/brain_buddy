@@ -43,9 +43,13 @@ struct MacSettingsView: View {
         .onChange(of: launch.model?.agentAvailability.addAgentRequested ?? false) { _, requested in
             selection = Self.selection(current: selection, addAgentRequested: requested)
         }
+        .onChange(of: launch.model?.agentAvailability.agentsTabRequested ?? false) { _, requested in
+            if requested { showRequestedAgentsTab() }
+        }
         .onAppear {
             selection = Self.selection(
                 current: selection, addAgentRequested: launch.model?.agentAvailability.addAgentRequested ?? false)
+            showRequestedAgentsTab()
         }
         .toolbar {
             ToolbarItem(placement: .principal) {
@@ -64,6 +68,16 @@ struct MacSettingsView: View {
     /// The canvas's "Add new agent" request brings the Agents tab forward; the tab opens the sheet once.
     static func selection(current: MacSettingsTab, addAgentRequested: Bool) -> MacSettingsTab {
         addAgentRequested ? .agents : current
+    }
+
+    /// The hand-off sheet's "Open Settings" brings Agents forward, whether Settings was closed or open elsewhere.
+    private func showRequestedAgentsTab() {
+        guard let availability = launch.model?.agentAvailability else { return }
+        selection = Self.selection(current: selection, agentsTabRequested: availability.consumeAgentsTabRequest())
+    }
+
+    static func selection(current: MacSettingsTab, agentsTabRequested: Bool) -> MacSettingsTab {
+        agentsTabRequested ? .agents : current
     }
 
     private func tabButton(_ tab: MacSettingsTab) -> some View {
