@@ -6,6 +6,7 @@ import { Button } from "../components/ui/Button";
 import { useAuthStore } from "../stores/authStore";
 import { AuthLayout } from "./LoginPage";
 import { AuthEntry } from "../features/auth/AuthEntry";
+import { authInputClass } from "../features/auth/AuthControls";
 
 const PASSWORD_MIN_LENGTH = 12;
 
@@ -62,51 +63,51 @@ export default function SignupPage(): React.JSX.Element {
 
   return (
     <AuthLayout title="Create your account">
-      {!legacy ? <><AuthEntry destination="/" intent="signup" /><Button variant="secondary" className="mt-4 min-h-11 w-full" onClick={() => setLegacy(true)}>Use a password and invite code</Button></> : <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-slate-700">Email</span>
+      {!legacy ? <><AuthEntry destination="/" intent="signup" /><Button variant="ghost" className="mt-2 min-h-11 w-full" onClick={() => setLegacy(true)}>Use a password and invite code</Button></> : <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
+        <label className="flex flex-col gap-1 text-co-meta">
+          <span className="font-medium text-ink">Email</span>
           <input
             type="email"
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="min-h-11 rounded-md border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-soft transition-colors duration-200 ease-smooth focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-700"
+            className={`${authInputClass}`}
             autoComplete="email"
           />
         </label>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-slate-700">Password</span>
+        <label className="flex flex-col gap-1 text-co-meta">
+          <span className="font-medium text-ink">Password</span>
           <input
             type="password"
             required
             minLength={PASSWORD_MIN_LENGTH}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="min-h-11 rounded-md border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-soft transition-colors duration-200 ease-smooth focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-700"
+            className={`${authInputClass}`}
             autoComplete="new-password"
           />
-          <span className="text-xs text-slate-500">
+          <span className="text-co-meta text-ink-muted">
             At least {PASSWORD_MIN_LENGTH} characters. Longer is better.
           </span>
         </label>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-slate-700">Invite code</span>
+        <label className="flex flex-col gap-1 text-co-meta">
+          <span className="font-medium text-ink">Invite code</span>
           <input
             type="text"
             required
             value={inviteCode}
             onChange={(e) => setInviteCode(e.target.value)}
-            className="min-h-11 rounded-md border border-slate-200 bg-white px-3 py-2 font-mono text-slate-900 shadow-soft transition-colors duration-200 ease-smooth focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-700"
+            className={`${authInputClass} font-mono`}
             autoComplete="off"
           />
         </label>
-        {error ? <p role="alert" className="text-sm text-rose-700">{error}</p> : null}
+        {error ? <p role="alert" className="text-co-meta text-danger">{error}</p> : null}
         <Button className="min-h-11" type="submit" variant="primary" size="md" isLoading={submitting}>
           Create account
         </Button>
-        <p className="text-center text-xs text-slate-500">
+        <p className="text-center text-co-meta text-ink-muted">
           Already have an account?{" "}
-          <Link to="/login" className="text-brand-primary underline">
+          <Link to="/login" className="text-ink underline focus-visible:outline-2 focus-visible:outline-focus">
             Sign in
           </Link>
         </p>

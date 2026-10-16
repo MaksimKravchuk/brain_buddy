@@ -3,6 +3,7 @@ import { ApiError } from "../../api/client";
 import { signupComplete } from "../../api/invite";
 import type { Completion } from "../../api/modernAuth";
 import { Button } from "../../components/ui/Button";
+import { authInputClass } from "./AuthControls";
 import { Spinner } from "../../components/ui/Spinner";
 
 export const INVITE_INVALID = "That invite code isn't valid or has already been used. Check it and try again.";
@@ -65,19 +66,19 @@ export function InviteStep({ pending, onSignedIn, onRestart, onCancel }: Props):
 
   if (expired) return <div><p role="alert">{INVITE_EXPIRED}</p><Button ref={restart} variant="primary" className="mt-4 min-h-11 w-full" onClick={onRestart}>Back to sign in</Button></div>;
   return <form className="flex flex-col gap-3" onSubmit={submit} aria-labelledby="invite-step-title">
-    <h2 id="invite-step-title" className="text-xl font-semibold tracking-tight text-slate-900">Enter your invite code</h2>
-    <p id="invite-step-help" className="text-sm text-slate-600">Brain Buddy is invite-only. No account uses this sign-in yet. Enter your invite code to create one.</p>
-    <label className="flex flex-col gap-1 text-sm">
-      <span className="font-medium text-slate-700">Invite code</span>
+    <h2 id="invite-step-title" className="font-voice text-2xl text-ink">Enter your invite code</h2>
+    <p id="invite-step-help" className="text-co-meta text-ink-muted">Brain Buddy is invite-only. No account uses this sign-in yet. Enter your invite code to create one.</p>
+    <label className="flex flex-col gap-1 text-co-meta">
+      <span className="font-medium text-ink">Invite code</span>
       <input ref={field} type="text" value={code} readOnly={busy} autoComplete="off" autoCapitalize="off" spellCheck={false}
         aria-invalid={failure?.invalid ? true : undefined} aria-describedby={failure ? "invite-step-help invite-step-error" : "invite-step-help"}
         onChange={event => setCode(event.target.value)}
-        className="min-h-11 rounded-md border border-slate-200 bg-white px-3 py-2 font-mono text-slate-900 shadow-soft transition-colors duration-200 ease-smooth focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-700" />
+        className={`${authInputClass} font-mono`} />
     </label>
-    {failure ? <p id="invite-step-error" role="alert" className="text-sm text-rose-700">{failure.text}</p> : null}
+    {failure ? <p id="invite-step-error" role="alert" className="text-co-meta text-danger">{failure.text}</p> : null}
     <div className="flex flex-col gap-2 sm:flex-row">
       <Button type="submit" variant="primary" className="min-h-11 flex-1" disabled={busy || blocked}>{busy ? <>{showSpinner ? <Spinner size="sm" className="mr-2 border-current/30 border-t-current" /> : null}Please wait…</> : "Continue"}</Button>
-      <Button variant="secondary" className="min-h-11 flex-1" disabled={busy} onClick={onCancel}>Cancel</Button>
+      <Button variant="ghost" className="min-h-11 flex-1" disabled={busy} onClick={onCancel}>Cancel</Button>
     </div>
   </form>;
 }
