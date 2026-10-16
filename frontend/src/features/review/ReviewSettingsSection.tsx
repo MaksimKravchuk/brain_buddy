@@ -26,8 +26,8 @@ export function ThresholdControl({
   const labelId = useId();
   const name = useId();
   return (
-    <div className="flex flex-col gap-2 text-sm sm:flex-row sm:items-center sm:gap-4">
-      <span id={labelId} className="font-medium text-slate-700">Ask for a decision after</span>
+    <div className="flex flex-col gap-2 text-co-meta sm:flex-row sm:items-center sm:gap-4">
+      <span id={labelId} className="text-ink-muted">Ask for a decision after</span>
       <div role="radiogroup" aria-labelledby={labelId} className="inline-flex flex-wrap gap-1.5">
         {THRESHOLD_OPTIONS.map((days) => (
           <label key={days} className="inline-flex min-h-11 cursor-pointer items-center">
@@ -40,7 +40,7 @@ export function ThresholdControl({
               className="peer sr-only"
               onChange={() => onChange(days)}
             />
-            <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[13px] font-medium text-slate-700 peer-checked:border-sky-700 peer-checked:bg-sky-50 peer-checked:text-sky-800 peer-focus-visible:shadow-ring-focus peer-disabled:opacity-60">
+            <span className="rounded-control bg-quiet px-3 py-1.5 text-co-meta text-ink peer-checked:bg-ink peer-checked:font-semibold peer-checked:text-ground peer-focus-visible:shadow-ring-focus peer-disabled:opacity-60">
               {days} days
             </span>
           </label>
@@ -111,10 +111,10 @@ export function ReviewSettingsSection(): React.JSX.Element | null {
   if (stateQuery.isError) {
     const loadReference = describeReviewError(stateQuery.error).referenceId;
     body = (
-      <div role="alert" className="flex flex-wrap items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+      <div role="alert" className="flex flex-wrap items-center gap-2 rounded-card bg-quiet px-3 py-2 text-co-meta text-warning">
         <span>{COPY.loadFailed}</span>
-        {loadReference ? <span className="text-xs">Ref {loadReference}</span> : null}
-        <button type="button" className="min-h-11 rounded-lg px-3 font-semibold hover:bg-amber-100" onClick={() => void stateQuery.refetch()}>
+        {loadReference ? <span className="text-co-meta">Ref {loadReference}</span> : null}
+        <button type="button" className="min-h-11 rounded-control px-3 font-semibold text-ink hover:bg-quiet-pressed" onClick={() => void stateQuery.refetch()}>
           Retry
         </button>
       </div>
@@ -125,15 +125,15 @@ export function ReviewSettingsSection(): React.JSX.Element | null {
     body = (
       <div className="flex flex-col gap-3">
         <ThresholdControl value={shown} disabled={!online || update.isPending} onChange={(days) => save(days, settings.revision)} />
-        {!online ? <p role="status" className="m-0 text-sm text-slate-600">{COPY.offline}</p> : null}
-        {note ? <p role="status" className="m-0 text-sm text-slate-700">{note}</p> : null}
+        {!online ? <p role="status" className="m-0 text-co-meta text-ink-muted">{COPY.offline}</p> : null}
+        {note ? <p role="status" className="m-0 text-co-meta text-ink">{note}</p> : null}
         {failure ? (
-          <div role="alert" className="flex flex-wrap items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <div role="alert" className="flex flex-wrap items-center gap-2 rounded-card bg-quiet px-3 py-2 text-co-meta text-warning">
             <span>{`Your new threshold couldn't be saved. It's still ${settings.threshold_days} days.`}</span>
-            {failure.referenceId ? <span className="text-xs">Ref {failure.referenceId}</span> : null}
+            {failure.referenceId ? <span className="text-co-meta">Ref {failure.referenceId}</span> : null}
             <button
               type="button"
-              className="min-h-11 rounded-lg px-3 font-semibold hover:bg-amber-100"
+              className="min-h-11 rounded-control px-3 font-semibold text-ink hover:bg-quiet-pressed"
               onClick={() => save((attempt.current as { threshold: ThresholdDays }).threshold, settings.revision)}
             >
               Retry
@@ -143,7 +143,7 @@ export function ReviewSettingsSection(): React.JSX.Element | null {
       </div>
     );
   } else {
-    body = slow ? <div data-testid="review-settings-placeholder" aria-hidden className="h-11 w-2/3 rounded-lg bg-slate-100" /> : <div />;
+    body = slow ? <div data-testid="review-settings-placeholder" aria-hidden className="h-11 w-2/3 rounded-card bg-quiet" /> : <div />;
   }
 
   return (
