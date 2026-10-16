@@ -95,7 +95,8 @@ struct TaskAutosaveTests {
     func oneSaveInFlight() throws {
         var form = TaskAutosave(task: Self.task())
         form.set(\.title, to: "Call Sam", at: Self.at(0))
-        let request = try #require(form.beginSave(at: Self.at(1)))
+        let begun = form.beginSave(at: Self.at(1))
+        let request = try #require(begun)
         #expect(request.changes == TaskChanges(title: .set("Call Sam")))
         #expect(form.isSaving)
         #expect(!form.isDue(at: Self.at(5)))
@@ -106,7 +107,8 @@ struct TaskAutosaveTests {
     func typingDuringASaveIsKept() throws {
         var form = TaskAutosave(task: Self.task())
         form.set(\.title, to: "Call Sam", at: Self.at(0))
-        _ = try #require(form.beginSave(at: Self.at(1)))
+        let begun = form.beginSave(at: Self.at(1))
+        _ = try #require(begun)
         form.set(\.title, to: "Call Sam tonight", at: Self.at(1.2))
 
         form.finishSave(succeeded: true, current: Self.task("Call Sam"))
@@ -120,7 +122,8 @@ struct TaskAutosaveTests {
     func savedIsClean() throws {
         var form = TaskAutosave(task: Self.task())
         form.set(\.title, to: "Call Sam ", at: Self.at(0))
-        _ = try #require(form.beginSave(at: Self.at(1)))
+        let begun = form.beginSave(at: Self.at(1))
+        _ = try #require(begun)
         form.finishSave(succeeded: true, current: Self.task("Call Sam"))
         #expect(form.draft.title == "Call Sam ", "the space the person is about to type after stays")
         #expect(!form.isDirty && form.deadline == nil)
@@ -130,7 +133,8 @@ struct TaskAutosaveTests {
     func failedSaveStaysPending() throws {
         var form = TaskAutosave(task: Self.task())
         form.set(\.title, to: "Call Sam", at: Self.at(0))
-        _ = try #require(form.beginSave(at: Self.at(1)))
+        let begun = form.beginSave(at: Self.at(1))
+        _ = try #require(begun)
         form.finishSave(succeeded: false, current: nil)
         #expect(form.isDirty)
         #expect(!form.isDue(at: Self.at(10)), "no automatic retry")
