@@ -260,6 +260,7 @@ struct WorkspaceView: View {
     @State private var quickRenameError: String?
     @State private var capturingFirstItem = false
     @State private var handingOff: TaskRecord?
+    @State private var agentList: AgentSettingsModel?
     @FocusState private var addFocused: Bool
     @FocusState private var quickRenameFocused: Bool
     @FocusState private var collectionNameFocused: Bool
@@ -439,15 +440,28 @@ struct WorkspaceView: View {
     private var agentsSection: some View {
         if model.showsAgentsSection {
             let runs = model.listedRuns
-            let agents = Dictionary(runs.compactMap { run in run.connectionID.map { ($0, run.agentName) } }) { first, _ in first }
+            let rows = AgentSidebarRow.rows(
+                runs: runs, counts: model.agentRuns.perAgentCounts, connections: agentList?.rows ?? [])
             Section {
                 sidebarButton(
                     AgentsCopy.allRuns, symbol: "", destination: .agentRuns(.all), trailing: runs.isEmpty ? nil : "\(runs.count)")
-                ForEach(agents.sorted { $0.value < $1.value }, id: \.key) { id, name in
-                    sidebarButton(name, symbol: "", destination: .agentRuns(.agent(id)), trailing: "\(model.agentRuns.perAgentCounts[id] ?? 0)")
+                ForEach(rows) { row in
+                    sidebarButton(
+                        row.name, symbol: "", destination: .agentRuns(.agent(row.id)), trailing: row.trailing,
+                        attention: row.needsYou)
                 }
             } header: { MacSidebarSectionHeader(title: AgentsCopy.sidebar) }
+            .task(id: model.workspace.account?.id) { await loadAgentList() }
         }
+    }
+
+    /// The connection list behind the status words of agents with no listed runs (030-FR-004).
+    private func loadAgentList() async {
+        guard let account = model.workspace.account else { return agentList = nil }
+        let list = agentList ?? AgentSettingsModel(account: account, availability: model.agentAvailability)
+        list.update(account: account)
+        agentList = list
+        await list.reload()
     }
 
     /// F-04: Lists and Dates only while the first run shows.
@@ -701,7 +715,8 @@ struct WorkspaceView: View {
     }
 
     private func sidebarButton(
-        _ title: String, symbol: String, destination: WorkspaceDestination, tint: Color? = nil, trailing: String? = nil
+        _ title: String, symbol: String, destination: WorkspaceDestination, tint: Color? = nil, trailing: String? = nil,
+        attention: Bool = false
     ) -> some View {
         let count: Int? = {
             guard case .list(let list) = destination, !firstRun.showsFirstRunSidebar else { return nil }
@@ -714,10 +729,10 @@ struct WorkspaceView: View {
         } label: {
             MacSidebarRowLabel(
                 title: title, leading: leading(symbol: symbol, destination: destination, tint: tint),
-                trailing: count.map { "\($0)" } ?? trailing, selected: model.destination == destination
+                trailing: count.map { "\($0)" } ?? trailing, selected: model.destination == destination, attention: attention
             )
         }
-        .accessibilityLabel(count.map { "\(title), \($0) open tasks" } ?? title)
+        .accessibilityLabel(count.map { "\(title), \($0) open tasks" } ?? (attention ? "\(title), needs you" : title))
         .buttonStyle(.plain)
         .listRowBackground(Color.clear)
     }

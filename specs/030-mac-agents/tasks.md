@@ -260,7 +260,7 @@ iOS thread; no slice edits it.
 
 ## Phase 10b — Mac: sidebar agent rows as DSAgents (PR-16)
 
-- [ ] T036 [US2] PR-07 found two DSAgents details outside its paths: an agent row with a
+- [x] T036 [US2] PR-07 found two DSAgents details outside its paths: an agent row with a
   Needs-you run shows the accent dot before its count ("● 1"), and an agent with no listed
   runs that is not "Tested ready" shows its status word ("Home server Stale") from the
   connection list (PR-06). Add both to `MacSidebarRowLabel` in
