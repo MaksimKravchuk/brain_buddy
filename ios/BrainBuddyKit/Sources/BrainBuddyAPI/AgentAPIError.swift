@@ -1,15 +1,11 @@
 import Foundation
 
-/// How the external agent relay's failures read (spec 030, FR-002, FR-018, FR-034).
-///
-/// `APIError.from` is not changed: a 403 or 404 means something else on every other route, so
-/// only the agent calls ask `agentFailure`. The relay answers 403 only when a password-bearing
-/// call's `current_password` is wrong (`ReauthFailedError`), and 404 "External agent relay is not
-/// available." when the `external_agent_relay` flag is off for the account.
+/// How the external agent relay's failures read (spec 030). `APIError.from` is unchanged: a 403 or
+/// 404 means something else on every other route, so only agent calls ask `agentFailure`.
 public enum AgentFailure: Hashable, Sendable {
     /// 404 with the relay's own message: the flag is off. Refresh availability.
     case relayUnavailable
-    /// 403 on a password-bearing call: the Current password is wrong. Keep the form, clear the field.
+    /// 403 on a password-bearing call (`ReauthFailedError`): keep the form, clear the password.
     case wrongPassword
     /// 409: `expected_revision` is behind. Read again, then let the person decide.
     case staleRevision
@@ -24,7 +20,6 @@ public enum AgentFailure: Hashable, Sendable {
 extension APIError {
     /// The message of the relay's flag-off 404 (`require_external_agent_relay_enabled`).
     public static let agentRelayUnavailableMessage = "External agent relay is not available."
-
     static let agentChangedElsewhereSuffix = " changed elsewhere; reload and try again."
 
     /// The relay-specific reading of this failure. Only meaningful for an agent call.

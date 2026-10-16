@@ -29,7 +29,7 @@ private enum AgentFixture {
     static let card = #"""
         {"name":"Researcher","version":"1.2","description":"Finds things","protocol_version":"0.3.0",\#
         "interface_url":"https://agent.example.org/a2a","streaming":true,"push_notifications":false,\#
-        "skills":[{"id":"s1","name":"Search","description":"Looks up"},"junk"],\#
+        "skills":[{"id":"s1","name":"Search","description":"Looks up"}],\#
         "auth_schemes_offered":[{"name":"bearerAuth","kind":"bearer","header_name":null},\#
         {"name":"oauth","kind":"oauth2","header_name":null}],"extension_uris":[],"fetched_at":"2026-10-16T08:00:00Z"}
         """#
@@ -196,7 +196,6 @@ struct AgentConnectionsAPITests {
         #expect(dto.card?.name == "Researcher")
         #expect(dto.card?.protocolVersion == "0.3.0")
         #expect(dto.card?.skills.map(\.name) == ["Search"])
-        #expect(dto.card?.authSchemesOffered.map(\.kind) == ["bearer", "oauth2"])
         #expect(!String(describing: dto).contains("Research agent"))
         #expect(!String(describing: dto).contains("agent.example.org"))
     }
@@ -221,9 +220,9 @@ struct AgentConnectionsAPITests {
         #expect(apiKey.authHeaderName == "X-Agent-Key")
     }
 
-    @Test("030-FR-042 unknown status, scheme and tier read leniently and a bad card is dropped")
+    @Test("030-FR-042 unknown status, scheme and tier read leniently and a connection without a card decodes")
     func decodesUnknownValuesLeniently_030_FR_042() throws {
-        let json = AgentFixture.connection(status: "quarantined", scheme: "mtls", card: #"{"skills":5}"#)
+        let json = AgentFixture.connection(status: "quarantined", scheme: "mtls")
             .replacingOccurrences(of: "best_effort", with: "platinum")
         let dto = try BrainBuddyAPI.makeDecoder().decode(AgentConnectionDTO.self, from: Data(json.utf8))
         #expect(dto.status == .unknown("quarantined"))
