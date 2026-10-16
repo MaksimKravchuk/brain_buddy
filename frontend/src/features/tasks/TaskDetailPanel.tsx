@@ -42,14 +42,14 @@ const inlinePanelClass =
   "flex w-full min-w-0 flex-col overflow-x-hidden bg-card text-ink";
 
 const iconButtonClass =
-  "inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-control text-ink-muted transition-colors duration-200 ease-smooth hover:bg-quiet hover:text-ink disabled:cursor-default disabled:text-mark-open disabled:hover:bg-transparent";
+  "inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-control text-ink-muted transition-[background-color] duration-200 ease-smooth hover:bg-quiet hover:text-ink disabled:cursor-default disabled:text-mark-open disabled:hover:bg-transparent";
 
 const propLabelClass = "text-ink-muted";
 
 const sectionLabelClass = "m-0 text-co-meta font-semibold text-ink";
 
 const propFieldClass =
-  "w-full min-w-0 appearance-none rounded-control bg-transparent px-3 py-1.5 text-co-meta text-ink outline-hidden transition-colors duration-200 ease-smooth hover:bg-quiet focus:bg-quiet";
+  "w-full min-w-0 appearance-none rounded-control bg-transparent px-3 py-1.5 text-co-meta text-ink outline-hidden transition-[background-color] duration-200 ease-smooth placeholder:text-ink-muted hover:bg-quiet focus:bg-quiet";
 
 const dashedInputClass =
   "w-full rounded-card bg-quiet px-3 py-2 text-co-body text-ink outline-hidden placeholder:text-ink-muted";
@@ -149,7 +149,7 @@ export function TaskDetailPanel({
                   <div className="absolute right-0 top-12 z-50 w-44 origin-top-right rounded-card bg-quiet p-1.5 motion-safe:animate-scale-fade-in">
                     <button
                       type="button"
-                      className="w-full rounded-control px-3 py-2 text-left text-co-meta font-medium text-danger transition-colors duration-200 ease-smooth hover:bg-quiet-pressed"
+                      className="w-full rounded-control px-3 py-2 text-left text-co-meta font-medium text-danger transition-[background-color] duration-200 ease-smooth hover:bg-quiet-pressed"
                       onClick={() => {
                         setMenuOpen(false);
                         if (autosave) autosave.barrier("cancel");
@@ -387,7 +387,7 @@ function TaskDetailBody({
           value={draft?.title ?? title}
           rows={1}
           ref={autosizeTitle}
-          className={`w-full min-w-0 resize-none overflow-hidden rounded-card bg-transparent px-2 py-1 font-sans text-xl font-semibold leading-[1.25] outline-hidden transition-colors duration-200 ease-smooth hover:bg-quiet focus:bg-quiet ${
+          className={`w-full min-w-0 resize-none overflow-hidden rounded-card bg-transparent px-2 py-1 font-sans text-xl font-semibold leading-[1.25] outline-hidden transition-[background-color] duration-200 ease-smooth hover:bg-quiet focus:bg-quiet ${
             isTerminal ? "text-ink-done line-through" : "text-ink"
           }`}
           onChange={(event) => { setTitle(event.currentTarget.value); change("title", event.currentTarget.value as never, 500); }}
@@ -546,7 +546,7 @@ function TaskDetailBody({
                     if (autosave) change("tag_ids", nextTagIds as never, 0); else save({ tag_ids: nextTagIds });
                   }}
                 />
-                <span className="rounded-control bg-quiet px-3 py-1 text-co-meta font-medium text-ink transition-colors duration-200 ease-smooth hover:bg-quiet-pressed peer-checked:bg-ink peer-checked:text-card peer-focus-visible:shadow-ring-focus">
+                <span className="rounded-control bg-quiet px-3 py-1 text-co-meta font-medium text-ink transition-[background-color] duration-200 ease-smooth hover:bg-quiet-pressed peer-checked:bg-ink peer-checked:text-card peer-focus-visible:shadow-ring-focus">
                   #{tag.name.replace(/^[#@]/, "")}
                 </span>
               </label>
