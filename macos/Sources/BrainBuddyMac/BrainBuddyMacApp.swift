@@ -15,6 +15,8 @@ import SwiftUI
 struct BrainBuddyMacApp: App {
     @NSApplicationDelegateAdaptor(MacAppDelegate.self) private var appDelegate
     @State private var launch: MacLaunch
+    /// The Settings tab last chosen, kept while the app runs (028 S-01.02).
+    @State private var settingsTab = MacSettingsTab.account
     /// Held for the life of the process; the kernel releases it when the process ends.
     private let instance: SingleInstanceGuard
 
@@ -54,6 +56,10 @@ struct BrainBuddyMacApp: App {
             SyncMenuCommands()
             ProjectMenuCommands()
             TaskDetailsCommands()
+        }
+        Settings {
+            MacSettingsView(launch: launch, selection: $settingsTab)
+                .environment(\.carryOnPlatform, .mac)
         }
     }
 

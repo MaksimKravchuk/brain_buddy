@@ -40,9 +40,10 @@
   --shadow-ring-focus: 0 0 0 2px var(--role-ground), 0 0 0 4px var(--role-focus);
 }
 
-/* Dark values, for when every screen uses roles. Nothing sets data-theme yet:
- * a dark ground under screens that still carry white cards would be unreadable,
- * so dark mode stays off until the migration is complete. */
+/* Dark values (design system, 2026-10-16). `src/theme.ts` sets data-theme from
+ * the OS `prefers-color-scheme`. Accent, on-accent and mark-open keep their
+ * light values. Avoid chips on selected rows: quiet and selected are the same
+ * stone in dark. */
 :root[data-theme="dark"] {
   --role-ground: #1c1b19;
   --role-sunken: #141412;
@@ -52,8 +53,8 @@
   --role-ink-muted: #a8a196;
   --role-ink-done: #a8a196;
   --role-ink-accent: #e07055;
-  --role-quiet: #2a2926;
-  --role-quiet-pressed: #34322e;
+  --role-quiet: #34322e;
+  --role-quiet-pressed: #141412;
   --role-focus: #e9e5dd;
   --role-warning: #c9a04a;
   --role-danger: #e8a091;
@@ -122,4 +123,7 @@
 @utility co-glass-dense {
   @apply co-glass;
   background-color: rgba(244, 241, 235, 0.95);
+  :root[data-theme="dark"] & {
+    background-color: rgba(52, 50, 46, 0.95);
+  }
 }
