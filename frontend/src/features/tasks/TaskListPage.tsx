@@ -1,4 +1,4 @@
-import { AlertTriangle, Archive, CalendarDays, Check, ChevronDown, CircleHelp, Layers, Plus, RotateCcw, X } from "lucide-react";
+import { AlertTriangle, Archive, Check, ChevronDown, CircleHelp, Layers, Plus, RotateCcw, X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -668,7 +668,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
 
   const isSavedNotice = mutationError === "Saved";
   const mutationNotice = mutationError ? (
-    <div role={isSavedNotice ? "status" : "alert"} className={`relative mb-3 flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2 text-sm ${isSavedNotice ? "border-slate-200 bg-slate-50 text-slate-600" : "border-rose-200 bg-rose-50 text-rose-700"}`}>
+    <div role={isSavedNotice ? "status" : "alert"} className={`relative mb-3 flex flex-wrap items-center gap-2 rounded-card px-3 py-2 text-co-meta ${isSavedNotice ? "bg-quiet text-ink-muted" : "bg-quiet text-danger"}`}>
       <span>{mutationError}</span>
       {autosaveConflict ? <Button size="sm" variant="secondary" onClick={() => void autosaveConflict.retry().then(handleAutosaveResult).catch((caught: unknown) => setMutationError(getErrorMessage(caught)))}>Retry</Button> : recoveryAvailable ? <Button size="sm" variant="secondary" onClick={recoverAutosave}>Retry</Button> : null}
       {(autosaveConflict || recoveryAvailable) ? <Button size="sm" variant="ghost" onMouseDown={(event) => event.preventDefault()} onClick={discardAutosave}>Discard</Button> : null}
@@ -827,7 +827,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   ]);
 
   const selectionRecoveryNotice = taskId && !selectedTaskVisible && selectionRecoveryMessage ? (
-    <div role={detailQuery.isError ? "alert" : "status"} className="mb-3 flex flex-wrap items-center gap-2 border-y border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+    <div role={detailQuery.isError ? "alert" : "status"} className="mb-3 flex flex-wrap items-center gap-2 rounded-card bg-quiet px-3 py-2 text-co-meta text-ink-muted">
       <span>{selectionRecoveryMessage}</span>
       {!detailQuery.isError ? (
         <Button
@@ -848,7 +848,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     </div>
   ) : null;
   const agentSummaryNotice = agentRunSummariesQuery.isError && agentRunSummariesQuery.data ? (
-    <div role="status" className="mb-3 flex items-center gap-2 border-y border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+    <div role="status" className="mb-3 flex items-center gap-2 rounded-card bg-quiet px-3 py-2 text-co-meta text-ink-muted">
       <span>Agent statuses may be out of date.</span>
       <Button size="sm" variant="ghost" onClick={() => void agentRunSummariesQuery.refetch()}>Retry</Button>
     </div>
@@ -904,14 +904,14 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       <section aria-labelledby="task-list-title" className="mx-auto max-w-[760px]">
         {/* Below `sm` Sort stays beside the title and the two toggles take their
             own row, so a phone never squeezes a control into two-line text. */}
-        <div className="mb-5 flex flex-wrap items-end gap-x-1.5 gap-y-3">
-          <div className="mr-auto min-w-0 pr-1.5 max-sm:flex-1">
-            <h1 id="task-list-title" ref={listHeadingRef} tabIndex={-1} className="m-0 break-words text-title font-semibold text-slate-900 outline-hidden">
+        <div className="mb-5">
+          <div className="flex min-w-0 items-baseline justify-between gap-4">
+            <h1 id="task-list-title" ref={listHeadingRef} tabIndex={-1} className="m-0 min-w-0 break-words font-voice text-co-title font-normal text-ink outline-hidden">
               {title}
             </h1>
-            <p className="m-0 mt-1 text-xs text-slate-500">{meta}</p>
+            <p className="m-0 shrink-0 text-right text-co-meta text-ink-muted max-sm:max-w-[50%]">{meta}</p>
           </div>
-          <div className="flex items-center gap-1.5 whitespace-nowrap max-sm:order-last max-sm:w-full">
+          <div className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 whitespace-nowrap">
             {canGroupByProject ? (
               <Button
                 variant={groupByProject ? "secondary" : "ghost"}
@@ -931,10 +931,10 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
                 Group by project
               </Button>
             ) : null}
-            <label className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-lg px-2.5 text-xs font-medium text-slate-600 transition-colors duration-200 ease-smooth hover:bg-surface-sunken hover:text-slate-900 max-sm:first:-ml-2.5">
+            <label className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-control px-2.5 text-co-meta text-ink-muted transition-colors duration-200 ease-smooth hover:bg-quiet hover:text-ink max-sm:first:-ml-2.5">
               <input
                 type="checkbox"
-                className="h-3.5 w-3.5 rounded-sm border-slate-300 text-brand-primary accent-brand-primary"
+                className="h-3.5 w-3.5 rounded-sm accent-ink"
                 checked={showCancelled}
                 onChange={(event) => {
                   const next = new URLSearchParams(searchParams);
@@ -945,38 +945,38 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
               />
               Show cancelled
             </label>
+            <label className="ml-auto inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-control px-2 text-co-meta text-ink-muted transition-colors duration-200 ease-smooth hover:bg-quiet hover:text-ink">
+              <span>Sort</span>
+              <span className="relative inline-flex">
+                <select
+                  aria-label="Sort tasks"
+                  className="cursor-pointer appearance-none rounded-sm bg-transparent pr-5 text-co-meta text-ink outline-hidden"
+                  value={sort}
+                  onChange={(event) => {
+                    const next = new URLSearchParams(searchParams);
+                    const value = parseTaskSort(event.currentTarget.value);
+                    if (value === "manual") {
+                      next.delete("sort");
+                    } else {
+                      next.set("sort", value);
+                    }
+                    setSearchParams(next, { replace: true });
+                  }}
+                >
+                  <option value="manual">Manual</option>
+                  <option value="due">Due date</option>
+                  <option value="priority">Priority</option>
+                  <option value="title">Title</option>
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-0 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-mark-open" aria-hidden />
+              </span>
+            </label>
           </div>
-          <label className="inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg px-2 text-xs font-medium text-slate-600 transition-colors duration-200 ease-smooth hover:bg-surface-sunken hover:text-slate-900 max-sm:-mr-2">
-            <span className="text-slate-500">Sort</span>
-            <span className="relative inline-flex">
-              <select
-                aria-label="Sort tasks"
-                className="cursor-pointer appearance-none rounded-sm bg-transparent pr-5 text-xs font-medium text-slate-700 outline-hidden"
-                value={sort}
-                onChange={(event) => {
-                  const next = new URLSearchParams(searchParams);
-                  const value = parseTaskSort(event.currentTarget.value);
-                  if (value === "manual") {
-                    next.delete("sort");
-                  } else {
-                    next.set("sort", value);
-                  }
-                  setSearchParams(next, { replace: true });
-                }}
-              >
-                <option value="manual">Manual</option>
-                <option value="due">Due date</option>
-                <option value="priority">Priority</option>
-                <option value="title">Title</option>
-              </select>
-              <ChevronDown className="pointer-events-none absolute right-0 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" aria-hidden />
-            </span>
-          </label>
         </div>
 
         {!taskId ? mutationNotice : null}
         {reviewEnabled && !online ? (
-          <p id={REVIEW_OFFLINE_REASON_ID} role="status" className="mb-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+          <p id={REVIEW_OFFLINE_REASON_ID} role="status" className="mb-3 rounded-card bg-quiet px-3 py-2 text-co-meta text-ink">
             {REVIEW_OFFLINE_REASON}
           </p>
         ) : null}
@@ -1009,17 +1009,17 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
                   <div className="mb-2 flex items-baseline gap-2.5 px-1">
                     <span
                       className="h-2 w-2 shrink-0 self-center rounded-full"
-                      style={{ backgroundColor: group.color ?? "#cbd5e1" }}
+                      style={{ backgroundColor: group.color ?? "var(--role-mark-open)" }}
                       aria-hidden
                     />
                     <h2
                       id={`task-group-${group.key}`}
                       title={group.name}
-                      className="m-0 min-w-0 truncate text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500"
+                      className="m-0 min-w-0 truncate font-voice text-co-body font-normal text-ink-muted"
                     >
                       {group.name}
                     </h2>
-                    <span className="shrink-0 text-xs font-medium tabular-nums text-slate-400">{group.tasks.length}</span>
+                    <span className="shrink-0 text-co-meta tabular-nums text-ink-muted">{group.tasks.length}</span>
                   </div>
                   <TaskList {...taskListProps} tasks={group.tasks} label={group.name} inlineDetail={panel} />
                 </section>
@@ -1027,13 +1027,13 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
             {taskCreator}
             {completedTasks.length ? (
               <section aria-labelledby="completed-tasks-heading">
-                <h2 id="completed-tasks-heading" className="mb-2 px-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Completed</h2>
+                <h2 id="completed-tasks-heading" className="mb-2 px-1 font-voice text-co-body font-normal text-ink-muted">Completed</h2>
                 <TaskList {...taskListProps} tasks={completedTasks} label="Completed" inlineDetail={panel} />
               </section>
             ) : null}
             {cancelledTasks.length ? (
               <section aria-labelledby="cancelled-tasks-heading">
-                <h2 id="cancelled-tasks-heading" className="mb-2 px-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Cancelled</h2>
+                <h2 id="cancelled-tasks-heading" className="mb-2 px-1 font-voice text-co-body font-normal text-ink-muted">Cancelled</h2>
                 <TaskList {...taskListProps} tasks={cancelledTasks} label="Cancelled" inlineDetail={panel} />
               </section>
             ) : null}
@@ -1055,7 +1055,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
         </div>
 
         {taskQuery.isFetchNextPageError ? (
-          <div role="alert" className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+          <div role="alert" className="mt-3 rounded-card bg-quiet px-4 py-3 text-co-meta text-danger">
             Could not load more tasks: {getErrorMessage(taskQuery.error)}. The tasks above are still available.
           </div>
         ) : null}
@@ -1175,20 +1175,18 @@ function groupTasksByProject(tasks: TaskResponse[], projects: ProjectResponse[])
 // Every call site names its variant, so there is deliberately no default: a
 // silent fallback would let a new call site render the wrong chip unnoticed.
 function Chip({ variant, truncate = false, title, children }: {
-  variant: "due" | "neutral";
+  variant: "due" | "overdue" | "neutral";
   /** Lets a long label give way with an ellipsis instead of being clipped by the row. */
   truncate?: boolean;
   title?: string;
   children: ReactNode;
 }): React.JSX.Element {
   const variantClass =
-    variant === "due"
-      ? "border-due-border bg-due-bg text-due-fg"
-      : "border-transparent bg-context-bg text-context-fg";
+    variant === "overdue" ? "text-danger" : variant === "due" ? "text-warning" : "text-ink-muted";
   return (
     <span
       title={title}
-      className={`inline-flex h-[22px] items-center gap-1 whitespace-nowrap rounded-full border px-2 text-[11px] font-medium ${
+      className={`inline-flex h-[22px] items-center gap-1 whitespace-nowrap text-co-meta ${
         truncate ? "min-w-0 max-w-[160px] shrink" : "shrink-0"
       } ${variantClass}`}
     >
@@ -1220,8 +1218,8 @@ function ReviewMarkerChip({ marker, title, offline, onOpen }: {
       aria-label={`${label}. Open decision for ${title}`}
       aria-disabled={offline ? "true" : undefined}
       aria-describedby={offline ? REVIEW_OFFLINE_REASON_ID : undefined}
-      className={`relative inline-flex h-[22px] shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-2 text-[11px] font-medium after:absolute after:-inset-y-[11px] after:inset-x-0 after:content-[''] ${
-        asks ? "border-indigo-200 bg-indigo-50 text-indigo-700" : "border-amber-200 bg-amber-50 text-amber-800"
+      className={`relative inline-flex h-[26px] shrink-0 items-center gap-1 whitespace-nowrap rounded-control px-2.5 text-co-meta font-medium after:absolute after:-inset-y-[11px] after:inset-x-0 after:content-[''] ${
+        asks ? "bg-quiet text-ink" : "bg-quiet text-warning"
       }`}
       onClick={(event) => onOpen(event.currentTarget)}
     >
@@ -1238,7 +1236,7 @@ function ThresholdChangedNote({ notice, asking, onDismiss }: {
   onDismiss: () => void;
 }): React.JSX.Element {
   return (
-    <div role="status" className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+    <div role="status" className="mb-3 flex flex-wrap items-center gap-2 rounded-card bg-quiet px-3 py-2 text-co-meta text-ink">
       <span className="min-w-0 flex-1">
         {`Your threshold is now ${notice.threshold_days} days. ${asking} ${asking === 1 ? "task asks" : "tasks ask"} for a decision. Nothing moves to Someday before ${formatReviewDate(notice.floor)}.`}
       </span>
@@ -1301,7 +1299,7 @@ function TaskList({
   const tagById = new Map(tags.map((tag) => [tag.id, tag]));
 
   return (
-    <div className="overflow-hidden rounded-xl border border-slate-200" role="list" aria-label={label ?? "Tasks"}>
+    <div className="flex flex-col gap-0.5" role="list" aria-label={label ?? "Tasks"}>
       {tasks.map((task) => (
         <TaskRow
           key={task.id}
@@ -1375,14 +1373,14 @@ function TaskRow({
 
   return (
     <article
-      className="group border-b border-slate-200 bg-white last:border-b-0"
+      className="group"
       role="listitem"
       data-task-id={task.id}
       data-task-state={task.state}
     >
       <div
         data-testid="task-row-header"
-        className={`flex h-11 min-w-0 cursor-pointer items-center gap-2 pl-1.5 pr-3 transition-colors duration-150 ease-smooth ${isSelected ? "bg-slate-50" : "hover:bg-slate-50/70"} ${marker ? "max-sm:h-auto max-sm:min-h-11 max-sm:flex-wrap max-sm:gap-y-0 max-sm:pb-1.5" : ""}`}
+        className={`flex h-11 min-w-0 cursor-pointer items-center gap-2 pl-1.5 pr-3 transition-colors duration-150 ease-smooth rounded-card ${isSelected ? "bg-selected" : "hover:bg-selected/60"} ${marker ? "max-sm:h-auto max-sm:min-h-11 max-sm:flex-wrap max-sm:gap-y-0 max-sm:pb-1.5" : ""}`}
         onClick={(event) => {
           const target = event.target as HTMLElement;
           if (target.closest("a, button, input, textarea, select, label")) return;
@@ -1399,8 +1397,8 @@ function TaskRow({
               aria-label={task.state === "completed" ? "Completed" : "Cancelled"}
               className={`flex h-[18px] w-[18px] items-center justify-center rounded-full border-[1.5px] ${
                 task.state === "completed"
-                  ? "border-brand-primary bg-brand-primary text-white"
-                  : "border-slate-300 bg-slate-200 text-slate-500"
+                  ? "border-mark-open bg-mark-open text-card"
+                  : "border-mark-open bg-transparent text-ink-muted"
               }`}
             >
               {task.state === "completed" ? <Check className="h-[11px] w-[11px]" /> : <X className="h-2.5 w-2.5" />}
@@ -1414,7 +1412,7 @@ function TaskRow({
             disabled={completionPending}
             onClick={() => onComplete(task)}
           >
-            <span className="flex h-[18px] w-[18px] items-center justify-center rounded-full border-[1.5px] border-slate-300 bg-white text-transparent transition-colors duration-200 ease-smooth group-hover/complete:border-sky-700 group-hover/complete:text-sky-700/50">
+            <span className="flex h-[18px] w-[18px] items-center justify-center rounded-full border-[1.5px] border-mark-open bg-transparent text-transparent transition-colors duration-200 ease-smooth group-hover/complete:border-ink group-hover/complete:text-ink-muted">
               <Check className="h-[11px] w-[11px]" aria-hidden />
             </span>
           </button>
@@ -1429,8 +1427,8 @@ function TaskRow({
             onCloseSelectedTask();
           }}
           aria-expanded={isSelected}
-          className={`min-w-0 flex-1 truncate text-sm font-medium outline-hidden transition-colors duration-150 ease-smooth hover:text-sky-700 focus-visible:rounded-sm ${
-            isTerminal ? "text-slate-500 line-through decoration-slate-300" : "text-slate-900"
+          className={`min-w-0 flex-1 truncate text-co-meta outline-hidden transition-colors duration-150 ease-smooth focus-visible:rounded-sm ${
+            isTerminal ? "text-ink-done line-through" : "text-ink"
           }`}
         >
           {task.title}
@@ -1448,8 +1446,7 @@ function TaskRow({
         ) : null}
         {task.due_date ? (
           <span className="hidden md:inline-flex">
-            <Chip variant="due">
-              <CalendarDays className="h-[11px] w-[11px]" aria-hidden />
+            <Chip variant={!isTerminal && task.due_date < localDateIso() ? "overdue" : "due"}>
               {formatDueDate(task.due_date)}
             </Chip>
           </span>
@@ -1463,7 +1460,7 @@ function TaskRow({
         ) : null}
         <span className="ml-auto hidden min-w-0 shrink items-center gap-1.5 sm:flex sm:max-w-[40%]">
           {task.state === "waiting" && task.waiting_for ? (
-            <span title={task.waiting_for} className="mr-1 min-w-0 max-w-[140px] truncate text-[11px] text-slate-500">{task.waiting_for}</span>
+            <span title={task.waiting_for} className="mr-1 min-w-0 max-w-[140px] truncate text-co-meta text-ink-muted">{task.waiting_for}</span>
           ) : null}
           {tags.map((tag) => (
             <Chip key={tag.id} variant="neutral" truncate title={tagLabel(tag)}>{tagLabel(tag)}</Chip>
@@ -1480,7 +1477,7 @@ function TaskRow({
         />
       </div>
       {isSelected && inlineDetail ? (
-        <div className="border-t border-slate-200 bg-white motion-safe:animate-detail-enter" data-testid="inline-task-detail">
+        <div className="rounded-card bg-card motion-safe:animate-detail-enter" data-testid="inline-task-detail">
           {inlineDetail}
         </div>
       ) : null}
@@ -1611,13 +1608,13 @@ function TaskCreator({
           not grow and push the list down on the first keystroke. */}
       <form
         ref={composerRef}
-        className="flex min-h-12 w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-[12px] border-[1.5px] border-dashed border-slate-300 bg-transparent py-1.5 pl-4 pr-2 transition-[background-color,border-color] duration-200 ease-smooth focus-within:border-solid focus-within:border-brand-primary focus-within:bg-white hover:border-brand-primary"
+        className="flex min-h-12 w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-control bg-card py-1.5 pl-4 pr-2 transition-shadow duration-200 ease-smooth focus-within:shadow-ring-focus"
         onSubmit={(event) => {
           event.preventDefault();
           submitDraft();
         }}
       >
-        <Plus className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
+        <Plus className="h-4 w-4 shrink-0 text-mark-open" aria-hidden />
         <label className="sr-only" htmlFor="new-task-title">New task title</label>
         <input
           ref={inputRef}
@@ -1634,7 +1631,7 @@ function TaskCreator({
                 ? `${completionListboxId}-option-${activeCompletionIndex}`
                 : undefined
           }
-          className="min-w-0 flex-1 bg-transparent py-1.5 text-sm text-slate-900 outline-hidden placeholder:text-slate-500 focus-visible:shadow-none"
+          className="min-w-0 flex-1 bg-transparent py-1.5 text-co-meta text-ink outline-hidden placeholder:text-ink-muted focus-visible:shadow-none"
           placeholder={placeholder}
           value={newTitle}
           onChange={(event) => {
@@ -1699,7 +1696,7 @@ function TaskCreator({
             <input
               id="new-task-waiting-for"
               aria-label="Waiting for"
-              className="min-w-0 flex-1 bg-transparent py-1.5 text-sm text-slate-900 outline-hidden placeholder:text-slate-500 focus-visible:shadow-none"
+              className="min-w-0 flex-1 bg-transparent py-1.5 text-co-meta text-ink outline-hidden placeholder:text-ink-muted focus-visible:shadow-none"
               placeholder="Waiting for who or what?"
               value={newWaitingFor}
               onChange={(event) => onWaitingForChange(event.currentTarget.value)}
@@ -1726,7 +1723,7 @@ function TaskCreator({
         />
       ) : null}
       {!popupOpen && autocomplete.provider ? (
-        <label className="flex items-start gap-2 text-xs text-slate-600">
+        <label className="flex items-start gap-2 text-co-meta text-ink-muted">
           <input
             type="checkbox"
             checked={autocomplete.consent}
@@ -1748,21 +1745,21 @@ function TaskCreator({
       {/* Kept mounted so the live region exists before it speaks, but an empty
           region must not add a blank 12px row under the composer. */}
       <div
-        className="text-xs text-slate-500 empty:mt-0!"
+        className="text-co-meta text-ink-muted empty:mt-0!"
         role={autocomplete.loading || autocomplete.error ? "status" : undefined}
         aria-live="polite"
       >
         {autocomplete.loading ? "Finding title suggestions…" : autocomplete.error}
       </div>
       {chips.length ? (
-        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600" aria-label="Smart Add classification chips">
+        <div className="flex flex-wrap items-center gap-2 text-co-meta text-ink-muted" aria-label="Smart Add classification chips">
           <span>Will add:</span>
           {chips.map((chip) => (
-            <span key={`${chip.kind}-${chip.label}`} className="rounded-full bg-slate-100 px-2.5 py-0.5 text-slate-700">
+            <span key={`${chip.kind}-${chip.label}`} className="rounded-control bg-quiet px-2.5 py-0.5 text-ink">
               {chip.kind === "tag" ? "#" : "@"}{chip.label.replace(/^[#@]/, "")}
             </span>
           ))}
-          <span className="text-slate-500">Title: “{draft.cleanTitle}”</span>
+          <span className="text-ink-muted">Title: “{draft.cleanTitle}”</span>
         </div>
       ) : null}
     </div>
@@ -1771,7 +1768,7 @@ function TaskCreator({
 
 function DateViewCaptureHint(): React.JSX.Element {
   return (
-    <div className="mt-6 rounded-xl border border-info-border bg-info-bg px-4 py-3 text-[13px] leading-relaxed text-info-fg">
+    <div className="mt-6 rounded-card bg-quiet px-4 py-3 text-co-meta text-ink-muted">
       Date views are filters over existing tasks. Add a task from Inbox, Next, Waiting, Someday, a Project, or a Tag, then set its due date in task detail.
     </div>
   );
@@ -1781,13 +1778,13 @@ function LoadingState({ label }: { label: string }): React.JSX.Element {
   return (
     // Mirrors the loaded list — one card of 44px rows — so the rows arrive in
     // place instead of the page jumping when data lands.
-    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white" aria-label={`Loading ${label}`}>
+    <div className="flex flex-col gap-0.5" aria-label={`Loading ${label}`}>
       {[64, 48, 72, 40].map((width, item) => (
-        <div key={item} className="flex h-11 items-center gap-2 border-b border-slate-200 pl-1.5 pr-3 last:border-b-0">
+        <div key={item} className="flex h-11 items-center gap-2 pl-1.5 pr-3">
           <span className="-ml-1.5 flex h-11 w-11 shrink-0 items-center justify-center">
-            <span className="h-[18px] w-[18px] rounded-full border-[1.5px] border-slate-200" />
+            <span className="h-[18px] w-[18px] rounded-full border-[1.5px] border-mark-open/50" />
           </span>
-          <span className="h-2.5 rounded-full bg-slate-100 motion-safe:animate-pulse" style={{ width: `${width}%` }} />
+          <span className="h-2.5 rounded-full bg-quiet motion-safe:animate-pulse" style={{ width: `${width}%` }} />
         </div>
       ))}
     </div>
@@ -1797,8 +1794,8 @@ function LoadingState({ label }: { label: string }): React.JSX.Element {
 function EmptyState({ state, onClearSearch }: { state?: OpenTaskState; onClearSearch?: () => void }): React.JSX.Element {
   const label = state ? stateLabels[state] : "This view";
   return (
-    <div className="rounded-xl border border-dashed border-slate-200 bg-white/70 px-5 py-8 text-center text-sm text-slate-600">
-      <p className="font-medium text-slate-900">{onClearSearch ? "No tasks match your search" : `${label} is clear`}</p>
+    <div className="rounded-card bg-sunken px-5 py-8 text-center text-co-body text-ink-muted">
+      <p className="font-voice text-co-title text-ink">{onClearSearch ? "No tasks match your search" : `${label} is clear`}</p>
       {onClearSearch ? (
         <Button variant="secondary" className="mt-3" onClick={onClearSearch}>Clear search</Button>
       ) : (
@@ -1810,15 +1807,15 @@ function EmptyState({ state, onClearSearch }: { state?: OpenTaskState; onClearSe
 
 function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }): React.JSX.Element {
   return (
-    <div className="rounded-xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-900" role="alert">
+    <div className="rounded-card bg-quiet px-5 py-4 text-co-meta text-ink" role="alert">
       <div className="flex items-start gap-3">
-        <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" aria-hidden />
+        <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-danger" aria-hidden />
         <div className="min-w-0 flex-1">
           <p className="font-semibold">We couldn't load tasks</p>
-          <p className="mt-1 text-rose-800">{message}</p>
+          <p className="mt-1 text-danger">{message}</p>
           <Button
             variant="secondary"
-            className="mt-3 border-rose-200 text-rose-800 hover:border-rose-300 hover:text-rose-900"
+            className="mt-3"
             leftIcon={<RotateCcw aria-hidden />}
             onClick={onRetry}
           >

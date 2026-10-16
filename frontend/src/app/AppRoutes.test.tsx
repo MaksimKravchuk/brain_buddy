@@ -281,7 +281,7 @@ describe("AppRoutes", () => {
     const rowTitle = await screen.findByText("Fix onboarding drop-off");
     const row = rowTitle.closest("article");
     expect(row).not.toBeNull();
-    expect(row).toHaveClass("border-b", "border-slate-200", "bg-white");
+    expect(row).not.toHaveClass("border-b");
     expect(within(row as HTMLElement).getByTestId("task-row-header")).toHaveClass("h-11");
 
     // The per-row project column is gone (prototype default); the group heading
@@ -290,7 +290,7 @@ describe("AppRoutes", () => {
     expect(screen.getByRole("heading", { level: 2, name: "Onboarding drop-off" })).toBeInTheDocument();
 
     const addTaskForm = screen.getByLabelText("New task title").closest("form");
-    expect(addTaskForm).toHaveClass("rounded-[12px]", "border-dashed");
+    expect(addTaskForm).toHaveClass("rounded-control", "bg-card");
   });
 
   it("accepts a Smart Add suggestion by keyboard before submitting the clean classified task", async () => {

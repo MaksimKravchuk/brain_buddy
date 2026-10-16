@@ -220,7 +220,7 @@ test.describe("desktop task shell at the canonical 1240x800 viewport", () => {
           const contrast = await button.evaluate((element) => {
             const style = getComputedStyle(element);
             const background = style.backgroundColor === "rgba(0, 0, 0, 0)"
-              ? getComputedStyle(element.closest(".bg-surface-base")!).backgroundColor
+              ? getComputedStyle(element.closest(".bg-ground")!).backgroundColor
               : style.backgroundColor;
             // Tailwind 4 emits its palette in oklch and opacity modifiers as
             // oklab color-mix, so computed colours are no longer rgb(). Painting
