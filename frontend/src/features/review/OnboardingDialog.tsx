@@ -93,14 +93,14 @@ export function OnboardingDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-[150] flex items-stretch justify-center bg-ground/80 backdrop-blur-xs sm:items-center sm:p-6">
+    <div className="fixed inset-0 z-[150] flex items-stretch justify-center bg-ink/30 sm:items-center sm:p-6 motion-safe:animate-fade-in">
       <section
         ref={sectionRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={headingId}
         onKeyDown={onKeyDown}
-        className="relative flex h-full w-full flex-col gap-3 overflow-y-auto bg-card p-5 shadow-floating sm:h-auto sm:max-h-[calc(100vh-48px)] sm:w-[560px] sm:rounded-sheet"
+        className="relative flex h-full w-full flex-col gap-3 overflow-y-auto p-5 co-glass-dense sm:h-auto sm:max-h-[calc(100vh-48px)] sm:w-[560px] sm:rounded-sheet"
       >
         <div className="flex items-start gap-3">
           <h2 id={headingId} ref={headingRef} tabIndex={-1} className="m-0 flex-1 font-voice text-co-step text-ink outline-hidden focus-visible:shadow-ring-focus">

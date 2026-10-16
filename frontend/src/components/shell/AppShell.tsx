@@ -50,8 +50,6 @@ interface AppShellProps {
   /** Overlay detail surface, outside the inert workspace. */
   panel?: ReactNode;
   panelModal?: boolean;
-  /** Carry On limestone ground. Screens not yet migrated keep the legacy surface, so their palette text stays readable. */
-  ground?: boolean;
   counts: TaskCounts;
   projects: ProjectResponse[];
   tags: TagResponse[];
@@ -148,7 +146,7 @@ function WeeklyReviewLink(): React.JSX.Element {
 }
 
 export function AppShell(props: AppShellProps): React.JSX.Element {
-  const { children, panel, panelModal, ground } = props;
+  const { children, panel, panelModal } = props;
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const navigationTriggerRef = useRef<HTMLButtonElement>(null);
   const location = useLocation();
@@ -170,7 +168,7 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
 
   return (
     <ShellToastProvider>
-      <div className={`min-h-screen text-ink ${ground ? "bg-ground" : "bg-surface-base"}`}>
+      <div className="min-h-screen bg-ground text-ink">
         <div inert={panelModal}>
           <TopBar onOpenDrawer={() => setIsDrawerOpen(true)} navigationTriggerRef={navigationTriggerRef} />
           <DeletionCancelledBanner />

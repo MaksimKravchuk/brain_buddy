@@ -68,11 +68,9 @@ setting), and `styles/carryOn.css` switches the role values under
 `:root[data-theme="dark"]`. Screens that use roles (`bg-ground`, `text-ink`,
 `bg-card`, `bg-quiet`…) need nothing more.
 
-Screens that still use the legacy palette (slate text on `surface-*` or white
-cards: thinking canvas, agents, review, admin, privacy) stay light in dark mode
-as self-consistent islands, so they remain readable until they migrate. Their
-legacy values (`--color-surface-*`, `--color-brand-primary`, `--color-ai-*`,
-`--color-needs-you-*` in `styles.css`, and the few `--bb-*` variables left in
-`styles/tokens.css` for `crtCanvas.css`) are deleted together with their last
-user. Avoid chips on selected rows: in dark, quiet and selected are the same
+Every screen uses roles, so every screen follows the OS in dark mode; the legacy
+palette (`--color-surface-*`, `--color-brand-primary`, `--color-ai-*`,
+`--color-needs-you-*`, the old shadows and `styles/tokens.css`) is gone. Overlays
+are `co-glass-dense` panels on a `bg-ink/30` scrim, with no shadow utilities.
+Avoid chips on selected rows: in dark, quiet and selected are the same
 stone.
