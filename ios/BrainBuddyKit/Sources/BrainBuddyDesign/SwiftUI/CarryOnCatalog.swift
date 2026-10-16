@@ -37,8 +37,8 @@
                 CatalogCell { Button("Due Friday 16") {}.buttonStyle(.carryOnStrong) }
                 CatalogCell { CarryOnButtonStyle.Preview(kind: .strong, title: "Due Friday 16", pressed: true) }
                 CatalogCell { Button("Due Friday 16") {}.buttonStyle(.carryOnStrong).disabled(true) }
-                CatalogCell { Button("Done") {}.buttonStyle(.carryOnGlassPrimary) }
-                CatalogCell { Button("Done") {}.buttonStyle(.carryOnGlassPrimary).disabled(true) }
+                // .carryOnGlassPrimary is left out: ImageRenderer draws Liquid Glass as
+                // nothing, so a snapshot of it would approve an empty cell.
             }
         }
 
