@@ -345,8 +345,8 @@ describe("AppShell canonical sidebar", () => {
 
     const sidebar = screen.getByRole("navigation", { name: "Task navigation" });
     expect(within(within(sidebar).getByRole("link", { name: /Inbox/ })).getByText("17")).toBeInTheDocument();
-    expect(within(sidebar).getByRole("link", { name: "Launch v2" })).toHaveClass("bg-card", "font-semibold");
-    expect(within(sidebar).getByRole("link", { name: "Onboarding drop-off" })).not.toHaveClass("bg-card");
+    expect(within(sidebar).getByRole("link", { name: "Launch v2" })).toHaveClass("bg-selected", "font-semibold");
+    expect(within(sidebar).getByRole("link", { name: "Onboarding drop-off" })).not.toHaveClass("bg-selected");
     expect(within(sidebar).getByRole("link", { name: "@calls" })).toHaveClass("bg-ink");
     expect(within(sidebar).getByRole("link", { name: "#deep-work" })).not.toHaveClass("bg-ink");
   });

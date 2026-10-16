@@ -48,6 +48,8 @@ interface AppShellProps {
   /** Overlay detail surface, outside the inert workspace. */
   panel?: ReactNode;
   panelModal?: boolean;
+  /** Carry On limestone ground. Screens not yet migrated keep the legacy surface, so their palette text stays readable. */
+  ground?: boolean;
   counts: TaskCounts;
   projects: ProjectResponse[];
   tags: TagResponse[];
@@ -85,7 +87,7 @@ const fallbackProjectColor = "var(--role-mark-open)";
 const popoverClass =
   "z-50 w-56 rounded-card bg-card p-2 motion-safe:animate-scale-fade-in";
 const popoverInputClass =
-  "min-w-0 rounded-control bg-quiet px-3 py-1.5 text-base text-ink outline-hidden transition-colors duration-200 ease-smooth placeholder:text-ink-muted focus-visible:shadow-ring-focus lg:text-co-meta";
+  "min-w-0 rounded-control bg-ground px-3 py-1.5 text-base text-ink outline-hidden transition-colors duration-200 ease-smooth placeholder:text-ink-muted focus-visible:shadow-ring-focus lg:text-co-meta";
 const popoverPrimaryClass =
   "rounded-control bg-ink px-3 py-1.5 text-co-meta font-semibold text-ground transition-colors duration-200 ease-smooth hover:bg-ink/85 disabled:opacity-50";
 const popoverDangerClass =
@@ -93,7 +95,7 @@ const popoverDangerClass =
 
 const navRowClass = (active: boolean, tall = false): string =>
   `flex ${tall ? "min-h-[34px] py-1" : "h-[34px]"} w-full items-center gap-2.5 rounded-card px-2.5 text-left text-co-meta transition-colors duration-200 ease-smooth ${
-    active ? "bg-card font-semibold text-ink" : "font-normal text-ink hover:bg-quiet-pressed/40"
+    active ? "bg-selected font-semibold text-ink [&_span]:text-ink [&_svg]:text-ink" : "font-normal text-ink hover:bg-quiet-pressed/40"
   }`;
 
 function SectionLabel({ children }: { children: ReactNode }): React.JSX.Element {
@@ -102,7 +104,7 @@ function SectionLabel({ children }: { children: ReactNode }): React.JSX.Element 
 
 export function SoonChip(): React.JSX.Element {
   return (
-    <span aria-hidden className="rounded-control bg-quiet px-2 py-0.5 text-co-meta font-medium text-ink-muted">
+    <span aria-hidden className="rounded-control bg-quiet px-2 py-0.5 text-co-meta font-medium text-ink">
       Soon
     </span>
   );
@@ -144,7 +146,7 @@ function WeeklyReviewLink(): React.JSX.Element {
 }
 
 export function AppShell(props: AppShellProps): React.JSX.Element {
-  const { children, panel, panelModal } = props;
+  const { children, panel, panelModal, ground } = props;
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const navigationTriggerRef = useRef<HTMLButtonElement>(null);
   const location = useLocation();
@@ -166,13 +168,13 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
 
   return (
     <ShellToastProvider>
-      <div className="min-h-screen bg-ground text-ink">
+      <div className={`min-h-screen text-ink ${ground ? "bg-ground" : "bg-surface-base"}`}>
         <div inert={panelModal}>
           <TopBar onOpenDrawer={() => setIsDrawerOpen(true)} navigationTriggerRef={navigationTriggerRef} />
           <DeletionCancelledBanner />
           <div className="flex h-[calc(100vh-56px)] min-h-0 overflow-hidden">
             <aside className="hidden w-[248px] shrink-0 pb-3 pl-3 lg:block">
-              <div className="h-full overflow-y-auto rounded-card bg-sunken px-3 pb-6 pt-4">
+              <div className="h-full overflow-y-auto rounded-card bg-card px-3 pb-6 pt-4">
                 <Sidebar {...props} />
               </div>
             </aside>
@@ -412,7 +414,7 @@ function AccountMenu(): React.JSX.Element {
         // The signed-in email stays in the accessible name: e2e helpers (and
         // screen-reader users) identify the session by it.
         aria-label={user?.email ? `Account menu for ${user.email}` : "Account menu"}
-        className="account-menu-trigger flex h-8 w-8 items-center justify-center rounded-full bg-quiet text-co-meta font-semibold text-ink transition-colors duration-200 ease-smooth hover:bg-quiet-pressed"
+        className="account-menu-trigger flex h-8 w-8 items-center justify-center rounded-full bg-quiet text-co-meta font-semibold text-ink transition-[background-color] duration-200 ease-smooth hover:bg-quiet-pressed"
         onClick={() => setOpen((value) => !value)}
       >
         {initial}
@@ -441,7 +443,7 @@ function AccountMenu(): React.JSX.Element {
               navigate("/settings/account");
             }}
           >
-            <Settings className="h-4 w-4 text-mark-open" aria-hidden /> Account settings
+            <Settings className="h-4 w-4 text-ink-muted" aria-hidden /> Account settings
           </button>
           <button
             type="button"
@@ -452,7 +454,7 @@ function AccountMenu(): React.JSX.Element {
               navigate("/settings/agents");
             }}
           >
-            <Bot className="h-4 w-4 text-mark-open" aria-hidden /> Connected agents
+            <Bot className="h-4 w-4 text-ink-muted" aria-hidden /> Connected agents
           </button>
           <button
             type="button"
@@ -463,7 +465,7 @@ function AccountMenu(): React.JSX.Element {
               navigate("/privacy");
             }}
           >
-            <FileText className="h-4 w-4 text-mark-open" aria-hidden /> Privacy policy
+            <FileText className="h-4 w-4 text-ink-muted" aria-hidden /> Privacy policy
           </button>
           {/* No admin entry here, deliberately (spec 009 PD-1, 009-FR-010/011):
               `/admin` is reached by typing the URL. A menu item would mean every
@@ -477,7 +479,7 @@ function AccountMenu(): React.JSX.Element {
             className={itemClass}
             onClick={() => void requestSignOut()}
           >
-            <LogOut className="h-4 w-4 text-mark-open" aria-hidden /> Sign out
+            <LogOut className="h-4 w-4 text-ink-muted" aria-hidden /> Sign out
           </button>
         </div>
       ) : null}
@@ -564,7 +566,7 @@ function TopBar({ onOpenDrawer, navigationTriggerRef }: {
 
   return (
     <header
-      className="relative z-30 flex h-14 items-center gap-2 bg-ground px-4 max-[359px]:gap-1 max-[359px]:px-2 sm:gap-4 sm:px-5"
+      className="relative z-30 flex h-14 items-center gap-2 px-4 max-[359px]:gap-1 max-[359px]:px-2 sm:gap-4 sm:px-5"
       style={{ height: "56px" }}
     >
       <button
@@ -639,7 +641,7 @@ function NavigationDrawer({ open, onClose, ...props }: NavigationDrawerProps): R
         </div>
         <TaskSearch className="mb-3 flex gap-2 px-2 md:hidden" onSubmit={onClose} />
         <div
-          className="min-h-0 flex-1 overflow-y-auto rounded-card bg-sunken px-3 pb-6 pt-4"
+          className="min-h-0 flex-1 overflow-y-auto rounded-card bg-card px-3 pb-6 pt-4"
           onClick={(event) => {
             const target = event.target as HTMLElement;
             if (target.closest("a")) {
@@ -770,7 +772,7 @@ function Sidebar({
                     to={`/projects/${project.id}`}
                     className={`flex min-h-[34px] w-full items-start gap-2.5 rounded-card px-2.5 py-[7px] pr-7 text-co-meta transition-colors duration-200 ease-smooth ${
                       activeProjectId === project.id
-                        ? "bg-card font-semibold text-ink"
+                        ? "bg-selected font-semibold text-ink"
                         : "text-ink hover:bg-quiet-pressed/40"
                     }`}
                   >
@@ -915,7 +917,7 @@ function Sidebar({
                       } ${
                         activeTagId === tag.id
                           ? "bg-ink font-medium text-ground"
-                          : "bg-card text-ink hover:bg-quiet-pressed/40"
+                          : "bg-quiet text-ink hover:bg-quiet-pressed"
                       }`}
                     >
                       {tag.name.startsWith("@") ? tag.name : `#${tag.name.replace(/^#/, "")}`}
@@ -928,7 +930,7 @@ function Sidebar({
                         type="button"
                         aria-label={`Tag options ${tag.name}`}
                         aria-expanded={openPopover === popoverId}
-                        className="absolute -right-1.5 -top-1.5 hidden h-4 w-4 items-center justify-center rounded-full bg-quiet text-ink-muted transition-colors duration-200 ease-smooth hover:text-ink group-focus-within:inline-flex group-hover:inline-flex max-lg:right-1 max-lg:top-1/2 max-lg:inline-flex max-lg:h-5 max-lg:w-5 max-lg:-translate-y-1/2 max-lg:bg-transparent"
+                        className="absolute -right-1.5 -top-1.5 hidden h-4 w-4 items-center justify-center rounded-full bg-quiet text-ink transition-colors duration-200 ease-smooth group-focus-within:inline-flex group-hover:inline-flex max-lg:right-1 max-lg:top-1/2 max-lg:inline-flex max-lg:h-5 max-lg:w-5 max-lg:-translate-y-1/2 max-lg:bg-transparent"
                         onClick={() => setOpenPopover(openPopover === popoverId ? null : popoverId)}
                       >
                         <MoreHorizontal className="h-2.5 w-2.5 max-lg:h-3.5 max-lg:w-3.5" aria-hidden />
