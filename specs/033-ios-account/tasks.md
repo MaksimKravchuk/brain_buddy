@@ -82,7 +82,7 @@ lane compiles them and 033-SC-001 is checked against the boards.
         "No change request is built without an unexpired proof for that action",
         "A response for another account is refused"
       ],
-      "budget": {"product_loc": 1000, "files": 17},
+      "budget": {"product_loc": 1050, "files": 17},
       "oversize_reason": "The account model is one contract shared by both screens; splitting it would ship half the actions with no caller",
       "implementer": "feature-implementer"
     },
@@ -101,7 +101,7 @@ lane compiles them and 033-SC-001 is checked against the boards.
       "depends_on": ["PR-01"],
       "tests": ["CI ios-app lane builds the app"],
       "acceptance": ["Board 25 (without Agents) and board 28 match in light and dark"],
-      "budget": {"product_loc": 600, "files": 5},
+      "budget": {"product_loc": 800, "files": 5},
       "oversize_reason": "About 130 lines are the sign-out section moved unchanged out of Settings",
       "implementer": "feature-implementer"
     },
