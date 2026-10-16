@@ -171,8 +171,8 @@ serve the same relay routes).
   a run and `now`.
 - `AgentRunsStore.swift` (new, PR-04, `@MainActor @Observable`): inputs the open steps
   with server ids from the workspace (`TaskRecord.serverID` in the store; the plan's
-  first task in PR-04 confirms the same id is exposed on the Rust-selected workspace and
-  adds a read-only accessor in Mac core if it is not), an `AgentRunsRemote` protocol
+  Rust-selected workspace never sets it, so PR-15 adds the read-only kit accessor
+  `Workspace.openStepServerIDs()` and PR-07 wires the store to it), an `AgentRunsRemote` protocol
   (implemented by `BrainBuddyAPIClient`, built like 028's `AccountSettingsModel` remote),
   `AgentAvailability`, the cache and an injected clock. `refresh()` reads summaries in
   200-id batches, then each listed run; publishes `groups`, `perAgentCounts`,
@@ -197,7 +197,7 @@ serve the same relay routes).
 - `AgentSettingsModel.swift` (new, PR-06, `@MainActor @Observable`): connection list
   (disconnected omitted), selection, detail rows (design G-06.01), Test again, phases
   for loading, offline, failed and password-less.
-- `AgentConnectionEditor.swift` (new, PR-06): Add (create then test, then select), Replace
+- `AgentConnectionEditor.swift` (new, PR-14, split out of PR-06 for budget): Add (create then test, then select), Replace
   credential, Edit (password shown only when address or scheme differs), Delete; one
   Idempotency-Key per action; `expectedRevision`; error mapping (030-FR-034); secrets held
   only for the request and zeroed after it.
@@ -284,7 +284,7 @@ macos/Sources/BrainBuddyMacCore/
 ├── HandoffFlow.swift             # PR-05 (new)
 ├── AgentRunActions.swift         # PR-05 (new)
 ├── AgentSettingsModel.swift      # PR-06 (new)
-├── AgentConnectionEditor.swift   # PR-06 (new)
+├── AgentConnectionEditor.swift   # PR-14 (new)
 ├── SidebarEntries.swift          # PR-07
 └── BrainBuddyModel.swift         # PR-07
 macos/Sources/BrainBuddyMac/
