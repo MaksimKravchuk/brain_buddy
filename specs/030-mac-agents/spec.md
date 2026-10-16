@@ -101,7 +101,7 @@ against; a different answer changes only the named requirement and slice.
 - **(b) Remove with the flag off.** D6 keeps disconnect available while the Settings tab
   falls back to the web link. **Recommended**: with the flag off the Mac shows no
   agent list and no − button; disconnect stays reachable through the fallback's web
-  page, which the server still allows. Affects 030-FR-037, PR-09.
+  page, which the server still allows. Affects 030-FR-037, PR-10.
 - **(c) Which steps feed All runs.** **Recommended**: open steps only (not completed or
   cancelled). Marking a step done removes its run from All runs and Waiting for; the run
   stays readable in that step's inspector. Affects 030-FR-005, PR-04.

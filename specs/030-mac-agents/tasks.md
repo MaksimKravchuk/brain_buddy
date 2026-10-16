@@ -95,7 +95,8 @@ iOS thread; no slice edits it.
   `AgentRunSummaryDTO` and `AgentPrimaryState` (15 labels plus `.unknown(String)`) and the
   run calls (`previewAgentHandoff`, `sendAgentHandoff`, `agentRuns(taskID:)`,
   `agentRunSummaries(taskIDs:)`, `agentRun(id:)`, `replyToAgentRun`,
-  `checkAgentRunDelivery`, `cancelAgentRun`) to
+  `checkAgentRunDelivery`, `cancelAgentRun`) and `APIError.needsManifestReview` (400 with
+  `detail.reason` `manifest_not_reserved` or `manifest_token_mismatch`) to
   `ios/BrainBuddyKit/Sources/BrainBuddyAPI/AgentRunsAPI.swift`, with decoding and request
   tests in `ios/BrainBuddyKit/Tests/BrainBuddyAPITests/AgentRunsAPITests.swift` against
   fixtures copied from the backend schemas (one run per label, a result link, a too-large
@@ -158,7 +159,8 @@ iOS thread; no slice edits it.
   `macos/Sources/BrainBuddyMacCore/HandoffFlow.swift` (ready agents only; first selected;
   preview with details and "Project: <name>"; `needsPassword` only on
   `reauthenticationRequired`; acknowledgement only when required; one Idempotency-Key per
-  Send reused on Try again; re-preview on a stale or expired manifest; error mapping;
+  Send reused on Try again; re-preview when `needsManifestReview` (400 with reason
+  `manifest_not_reserved` / `manifest_token_mismatch`, never 409/410); error mapping;
   `relayUnavailable` → availability; on success insert the run into the store), with
   tests in `macos/Tests/BrainBuddyMacTests/HandoffFlowTests.swift`. 030-FR-013 –
   030-FR-018, 030-SC-001. PR-05.
