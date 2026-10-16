@@ -117,8 +117,8 @@ struct MacOutlineChip: View {
     }
 }
 
-/// One answer of a choice row ("Put it in", the language): a 13 chip, 26 high; the chosen one is
-/// text-primary with `bg-ground` text, as on board 10.
+/// One answer of a choice row ("Put it in", the language): a 13 chip, 26 high; the chosen one takes
+/// the shared `chip-selected` colours, as on board 10 (regular weight there, unlike iOS's semibold).
 struct MacChoiceChip: View {
     let title: String
     let selected: Bool
@@ -130,10 +130,10 @@ struct MacChoiceChip: View {
             Text(title)
                 .font(MacCaptureFont.chip)
                 .lineLimit(1)
-                .foregroundStyle(selected ? CarryOnColorStyle.coBgGround : CarryOnColorStyle.coChipFg)
+                .foregroundStyle(selected ? CarryOnColorStyle.coChipSelectedFg : CarryOnColorStyle.coChipFg)
                 .padding(.horizontal, 12)
                 .frame(height: 26)
-                .background(selected ? CarryOnColorStyle.coTextPrimary : CarryOnColorStyle.coChipBg, in: Capsule())
+                .background(selected ? CarryOnColorStyle.coChipSelectedBg : CarryOnColorStyle.coChipBg, in: Capsule())
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -318,7 +318,7 @@ struct MacNewTaskClassification: View {
     }
 }
 
-/// The card's last line: the ink "Add" pill, any extra control, then the 12 secondary hint on the
+/// The card's last line: the strong "Add" pill, any extra control, then the 12 secondary hint on the
 /// right ("⌘N · Return adds").
 struct MacNewTaskFooter<Extra: View>: View {
     let addEnabled: Bool
@@ -336,7 +336,7 @@ struct MacNewTaskFooter<Extra: View>: View {
     var body: some View {
         HStack(spacing: 8) {
             Button(action: onAdd) { Text("Add") }
-                .buttonStyle(.macInkPill)
+                .buttonStyle(.macStrongPill)
                 .disabled(!addEnabled)
                 .accessibilityLabel("Add task")
             extra
@@ -381,7 +381,7 @@ struct MacPutItInContent: View {
             .accessibilityLabel("GTD list")
             HStack(spacing: 8) {
                 Button("Continue", action: onContinue)
-                    .buttonStyle(.macInkPill)
+                    .buttonStyle(.macStrongPill)
                     .keyboardShortcut(.defaultAction)
                 Button("Cancel", action: onCancel)
                     .buttonStyle(.macQuietPill)
@@ -466,7 +466,7 @@ struct MacVoiceCaptureCard<Transcript: View, More: View>: View {
             if phase == .recording {
                 HStack(spacing: 8) {
                     Button("Stop & transcribe", action: onStop)
-                        .buttonStyle(.macInkPill)
+                        .buttonStyle(.macStrongPill)
                     Button("Discard", action: onDiscardRecording)
                         .buttonStyle(.macQuietPill)
                 }
@@ -500,7 +500,7 @@ struct MacVoiceCaptureCard<Transcript: View, More: View>: View {
             HStack(spacing: 8) {
                 if let onUseAsTask {
                     Button("Use as task draft", action: onUseAsTask)
-                        .buttonStyle(.macInkPill)
+                        .buttonStyle(.macStrongPill)
                         .disabled(!canUseTranscript)
                 }
                 Spacer(minLength: 0)
