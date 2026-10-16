@@ -88,6 +88,15 @@ package final class AgentRunsStore {
         (self.cache, self.now, self.log) = (cache, now, log)
     }
 
+    /// The last-read run of an open step, for an inspector opened while the run read fails (030-FR-025).
+    /// Nil when nothing was read or its content has expired (030-FR-027).
+    package func cachedRun(taskServerID: String) -> AgentRunDTO? {
+        guard let runID = latest[taskServerID],
+            case .hit(let cached) = cache.get(CachedRun.self, id: runID, bucket: .run, now: now())
+        else { return nil }
+        return cached.run
+    }
+
     /// Sign-out, session end or account change: everything listed is dropped.
     package func reset() {
         (latest, nextRunAt, nextSummaryAt, lastUpdated) = ([:], [:], nil as Date?, nil as Date?)

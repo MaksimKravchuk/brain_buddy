@@ -34,7 +34,7 @@ final class ModernAuthCoordinator: NSObject, ASWebAuthenticationPresentationCont
         let challenge: String
     }
 
-    static func newProof() throws -> Proof {
+    nonisolated static func newProof() throws -> Proof {
         var bytes = [UInt8](repeating: 0, count: 32)
         guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
             throw Failure(message: "Couldn't start a secure sign-in. Try again.")
@@ -43,7 +43,7 @@ final class ModernAuthCoordinator: NSObject, ASWebAuthenticationPresentationCont
         let challenge = base64URL(Data(SHA256.hash(data: Data(verifier.utf8))))
         return Proof(verifier: verifier, challenge: challenge)
     }
-    private static func base64URL(_ data: Data) -> String {
+    nonisolated private static func base64URL(_ data: Data) -> String {
         data.base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
     }
 

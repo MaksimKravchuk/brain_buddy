@@ -27,6 +27,8 @@ package final class AgentAvailability {
     package private(set) var isOnline = true
     /// The one-shot "show Add new agent" request: set by the sidebar, consumed by the Settings tab.
     package private(set) var addAgentRequested = false
+    /// The one-shot "show the Agents tab" request (no Add sheet): set by the hand-off sheet.
+    package private(set) var agentsTabRequested = false
     @ObservationIgnored private var account: LinkedAccount?
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var lastRefresh: Date?
@@ -56,6 +58,7 @@ package final class AgentAvailability {
         passwordState = .unknown
         lastRefresh = nil
         addAgentRequested = false
+        agentsTabRequested = false
     }
 
     /// At sign-in, and whenever a caller needs the answer now.
@@ -94,6 +97,13 @@ package final class AgentAvailability {
         await refresh()
     }
 
+    /// A person's action (Try again, Retry, opening the hand-off sheet) needs the answer now: a cached offline
+    /// state never blocks it. Online callers pay nothing; offline ones bypass the throttle and read again.
+    package func confirmOnline() async -> Bool {
+        if !isOnline { await refresh() }
+        return isOnline
+    }
+
     /// A flagged route answered "External agent relay is not available.": hide, then read again.
     package func relayUnavailable() async {
         relayEnabled = false
@@ -101,6 +111,15 @@ package final class AgentAvailability {
     }
 
     package func requestAddAgent() { addAgentRequested = true }
+
+    /// "Open Settings" on the hand-off sheet: bring Settings › Agents forward, without opening Add.
+    package func requestAgentsTab() { agentsTabRequested = true }
+
+    /// True once per request.
+    package func consumeAgentsTabRequest() -> Bool {
+        defer { agentsTabRequested = false }
+        return agentsTabRequested
+    }
 
     /// True once per request.
     package func consumeAddAgentRequest() -> Bool {

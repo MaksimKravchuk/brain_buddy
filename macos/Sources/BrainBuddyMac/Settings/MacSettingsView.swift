@@ -8,6 +8,8 @@ enum MacSettingsTab: Int, CaseIterable, Identifiable {
 
     var id: Int { rawValue }
     var title: String { AccountSettingsCopy.tabNames[rawValue] }
+    /// Each tab's own accessible name (028-FR-002); never shared between tabs.
+    var accessibilityName: String { title }
     var icon: MacBoardIcon {
         switch self {
         case .account: .account
@@ -24,7 +26,7 @@ struct MacSettingsView: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        Group {
+        ScrollView {
             if let sync = launch.sync {
                 switch selection {
                 case .account: AccountSettingsTab(sync: sync, openMainWindow: openMainWindow)
@@ -33,26 +35,49 @@ struct MacSettingsView: View {
                 }
             }
         }
-        .frame(minWidth: 820, maxWidth: 820, minHeight: 240)
+        .frame(
+            minWidth: Self.width, maxWidth: Self.width,
+            minHeight: Self.minHeight, idealHeight: Self.idealHeight, maxHeight: .infinity)
         .background(CarryOnColorStyle.coBgGround)
         .navigationTitle(selection.title)
         .onChange(of: launch.model?.agentAvailability.addAgentRequested ?? false) { _, requested in
             selection = Self.selection(current: selection, addAgentRequested: requested)
         }
+        .onChange(of: launch.model?.agentAvailability.agentsTabRequested ?? false) { _, requested in
+            if requested { showRequestedAgentsTab() }
+        }
         .onAppear {
             selection = Self.selection(
                 current: selection, addAgentRequested: launch.model?.agentAvailability.addAgentRequested ?? false)
+            showRequestedAgentsTab()
         }
         .toolbar {
             ToolbarItem(placement: .principal) {
                 HStack(spacing: 4) { ForEach(MacSettingsTab.allCases) { tabButton($0) } }
+                    .accessibilityElement(children: .contain)
             }
         }
     }
 
+    /// Design S-01: 820 pt wide; M25 draws Account 620 pt tall. The window opens at the ideal height, can
+    /// be resized taller or shorter down to the minimum, and each tab scrolls instead of clipping.
+    static let width: CGFloat = 820
+    static let idealHeight: CGFloat = 620
+    static let minHeight: CGFloat = 420
+
     /// The canvas's "Add new agent" request brings the Agents tab forward; the tab opens the sheet once.
     static func selection(current: MacSettingsTab, addAgentRequested: Bool) -> MacSettingsTab {
         addAgentRequested ? .agents : current
+    }
+
+    /// The hand-off sheet's "Open Settings" brings Agents forward, whether Settings was closed or open elsewhere.
+    private func showRequestedAgentsTab() {
+        guard let availability = launch.model?.agentAvailability else { return }
+        selection = Self.selection(current: selection, agentsTabRequested: availability.consumeAgentsTabRequest())
+    }
+
+    static func selection(current: MacSettingsTab, agentsTabRequested: Bool) -> MacSettingsTab {
+        agentsTabRequested ? .agents : current
     }
 
     private func tabButton(_ tab: MacSettingsTab) -> some View {
@@ -70,9 +95,12 @@ struct MacSettingsView: View {
                 if chosen { RoundedRectangle(cornerRadius: 8, style: .continuous).fill(CarryOnColorStyle.coControlQuiet) }
             }
             .contentShape(Rectangle())
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(tab.accessibilityName)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(tab.title)
+        .accessibilityLabel(tab.accessibilityName)
+        .accessibilityIdentifier("settings-tab-\(tab.accessibilityName.lowercased())")
         .accessibilityAddTraits(chosen ? .isSelected : [])
     }
 
