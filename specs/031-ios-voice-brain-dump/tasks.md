@@ -10,7 +10,7 @@ Swift function name) so `scripts/check_requirement_coverage.py` can trace them.
 ## Phase 1 — Spec and kit API (PR-01)
 
 - [ ] T001 [US1] Write intake, spec, design, plan, tasks and the requirements checklist in `specs/031-ios-voice-brain-dump/`
-- [ ] T002 [US1] Add `BrainDumpAPI.swift` (DTOs, status labels, consent, manifest hash, SHA-256, one method per route) and give `Endpoint` a content type and extra headers in `ios/BrainBuddyKit/Sources/BrainBuddyAPI/`
+- [ ] T002 [US1] Add `BrainDumpAPI.swift` (DTOs, status labels, consent, manifest hash, one method per route) and `SHA256Digest.swift` and give `Endpoint` a content type and extra headers in `ios/BrainBuddyKit/Sources/BrainBuddyAPI/`
 - [ ] T003 [P] [US1] Test requests, decoding, labels, the manifest hash and SHA-256 vectors in `ios/BrainBuddyKit/Tests/BrainBuddyAPITests/BrainDumpAPITests.swift`
 
 ## Phase 2 — Kit model (PR-02)
@@ -44,6 +44,7 @@ Swift function name) so `scripts/check_requirement_coverage.py` can trace them.
       "paths": [
         "specs/031-ios-voice-brain-dump",
         "ios/BrainBuddyKit/Sources/BrainBuddyAPI/BrainDumpAPI.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyAPI/SHA256Digest.swift",
         "ios/BrainBuddyKit/Sources/BrainBuddyAPI/BrainBuddyAPIClient.swift",
         "ios/BrainBuddyKit/Tests/BrainBuddyAPITests/BrainDumpAPITests.swift"
       ],
@@ -53,7 +54,8 @@ Swift function name) so `scripts/check_requirement_coverage.py` can trace them.
         "Every route sends the documented method, path, body and headers; the upload carries its media type and SHA-256 and no Idempotency-Key",
         "The manifest hash equals the web's for the same chunk list and SHA-256 matches the FIPS vectors"
       ],
-      "budget": {"product_loc": 400, "files": 4},
+      "budget": {"product_loc": 540, "files": 3},
+      "oversize_reason": "The DTOs mirror the server's brain dump schema field for field and the kit has no SHA-256 on Linux without a dependency; half a client could not be used or tested on its own",
       "implementer": "feature-implementer"
     },
     {
