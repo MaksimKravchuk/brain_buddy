@@ -231,7 +231,7 @@ iOS thread; no slice edits it.
 
 ## Phase 9 — Mac: hand-off sheet (PR-09)
 
-- [ ] T027 [US1] Build G-04 in `macos/Sources/BrainBuddyMac/Agents/HandoffSheet.swift`
+- [x] T027 [US1] Build G-04 in `macos/Sources/BrainBuddyMac/Agents/HandoffSheet.swift`
   (agent rows, What it will get, disclosures, conditional password and acknowledgement,
   Send to <agent> / Cancel, sending, wrong password, failed, no ready agent, offline) and
   enable Hand off… and Hand off again in `macos/Sources/BrainBuddyMac/TaskInspector.swift`
@@ -239,7 +239,7 @@ iOS thread; no slice edits it.
   with the flag off), presenting the sheet from
   `macos/Sources/BrainBuddyMac/ContentView.swift`. 030-FR-013 – 030-FR-018, 030-FR-040,
   030-FR-041. PR-09.
-- [ ] T028 [US1] Tests in `macos/Tests/BrainBuddyMacTests/HandoffSheetTests.swift`: three
+- [x] T028 [US1] Tests in `macos/Tests/BrainBuddyMacTests/HandoffSheetTests.swift`: three
   interactions from a selected step to Send without a password; the password field and
   acknowledgement appear only when required; Return sends and Esc cancels; the flag
   turning off closes the sheet. 030-FR-013, 030-FR-016, 030-FR-040, 030-SC-001. PR-09.

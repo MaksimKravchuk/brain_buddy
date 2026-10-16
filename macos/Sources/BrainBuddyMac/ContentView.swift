@@ -259,6 +259,7 @@ struct WorkspaceView: View {
     @State private var quickRenameTitle = ""
     @State private var quickRenameError: String?
     @State private var capturingFirstItem = false
+    @State private var handingOff: TaskRecord?
     @FocusState private var addFocused: Bool
     @FocusState private var quickRenameFocused: Bool
     @FocusState private var collectionNameFocused: Bool
@@ -1322,7 +1323,9 @@ struct WorkspaceView: View {
                 onCommand: { inspectorCommand($0, task: task) },
                 onFocusChange: { inspectorFocus = $0 },
                 onExtrasDirtyChange: { extrasDirty = $0 },
-                runSection: agentRunSection(for: task)
+                runSection: agentRunSection(for: task),
+                handOff: handOffControl(for: task),
+                onHandOff: { handingOff = task }
             )
             .id(task.id)
         } else {
@@ -1335,7 +1338,17 @@ struct WorkspaceView: View {
     /// G-05 under the fields of a step that has a listed run (030-FR-019); nil otherwise.
     private func agentRunSection(for task: TaskRecord) -> AnyView? {
         guard let server = task.serverID, model.listedRuns.contains(where: { $0.taskServerID == server }) else { return nil }
-        return AgentRunSectionView(model: model, task: task).map { AnyView($0.id(task.id)) }
+        return AgentRunSectionView(model: model, task: task, onHandOff: { handingOff = task }).map { AnyView($0.id(task.id)) }
+    }
+
+    private func handOffControl(for task: TaskRecord) -> HandOffControl {
+        HandOffControl(relayEnabled: model.agentAvailability.relayEnabled && model.workspace.account != nil, serverID: task.serverID)
+    }
+
+    /// G-04, attached beside the other task sheets (030-FR-013).
+    @ViewBuilder
+    private func handOffSheet(_ task: TaskRecord) -> some View {
+        if let sheet = HandoffSheet(model: model, task: task, onClose: { handingOff = nil }) { sheet }
     }
 
     /// The Inbox items on screen, in order.
@@ -2065,6 +2078,7 @@ extension WorkspaceView {
                     .disabled(sheetIsBusy)
                     .interactiveDismissDisabled(sheetIsBusy)
             }
+            .sheet(item: $handingOff) { task in handOffSheet(task) }
             .sheet(item: $movingTask) { task in
                 moveToWaitingSheet(task)
                     .disabled(sheetIsBusy)
