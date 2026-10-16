@@ -888,7 +888,6 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
 
   return (
     <AppShell
-      ground
       counts={shellCounts}
       projects={projects}
       tags={tags}

@@ -75,9 +75,9 @@
   font-size: 0.9375rem;
   font-weight: 500;
   transition:
-    background-color var(--bb-dur-base) var(--bb-ease-smooth),
-    border-color var(--bb-dur-base) var(--bb-ease-smooth),
-    color var(--bb-dur-base) var(--bb-ease-smooth);
+    background-color 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    color 200ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .crt-canvas-toolbar-actions button:hover,
@@ -194,6 +194,17 @@
 
 .crt-flow-region .react-flow {
   background: var(--role-ground);
+}
+
+/* React Flow's attribution badge ships a translucent white fill; take it from
+   the roles so it follows dark mode. */
+.crt-flow-region .react-flow__attribution {
+  background: var(--role-sunken);
+  color: var(--role-ink-muted);
+}
+
+.crt-flow-region .react-flow__attribution a {
+  color: inherit;
 }
 
 /* Arrowheads take their colour from the marker context (see CRT_EDGE_MARKER). */
