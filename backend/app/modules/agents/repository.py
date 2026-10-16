@@ -727,16 +727,6 @@ class AgentRepository(BaseRepository):
             ),
         )
 
-    def migration_rewrite_count(self, name: str) -> int | None:
-        """How many rows a ledgered migration rewrote, or ``None`` if unrun."""
-
-        with self._connection() as conn:
-            row = conn.execute(
-                "SELECT rewritten_rows FROM agent_schema_migrations WHERE name = ?",
-                (name,),
-            ).fetchone()
-        return None if row is None else row["rewritten_rows"]
-
     def _migration_boundary(self, stage: str) -> None:
         """Deterministic interleaving/failure-injection seam for atomicity tests."""
 

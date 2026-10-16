@@ -238,6 +238,16 @@ def ledger_names(db_path: Path) -> set[str]:
     return {str(row[0]) for row in rows}
 
 
+def rewrite_count(repo: AgentRepository, name: str) -> int | None:
+    """Rows a ledgered migration rewrote, or ``None`` if it never ran."""
+    with closing(sqlite3.connect(repo.db_path)) as conn:
+        row = conn.execute(
+            "SELECT rewritten_rows FROM agent_schema_migrations WHERE name = ?",
+            (name,),
+        ).fetchone()
+    return None if row is None else row[0]
+
+
 def run_columns(db_path: Path) -> set[str]:
     with closing(sqlite3.connect(db_path)) as conn:
         return {row[1] for row in conn.execute("PRAGMA table_info(agent_runs)")}
@@ -428,7 +438,7 @@ class TestBespokeConnectionsAreSuperseded:
 
         repo = AgentRepository(tmp_path)
 
-        assert repo.migration_rewrite_count(A2A_WIRE_MIGRATION) == 2
+        assert rewrite_count(repo, A2A_WIRE_MIGRATION) == 2
 
     def test_014_SC_010_a_database_with_no_bespoke_rows_records_a_zero(
         self, tmp_path: Path
@@ -442,8 +452,8 @@ class TestBespokeConnectionsAreSuperseded:
 
         repo = AgentRepository(tmp_path)
 
-        assert repo.migration_rewrite_count(A2A_WIRE_MIGRATION) == 0
-        assert repo.migration_rewrite_count("never_ran") is None
+        assert rewrite_count(repo, A2A_WIRE_MIGRATION) == 0
+        assert rewrite_count(repo, "never_ran") is None
 
     def test_014_SC_010_each_rewritten_connection_gets_one_wire_superseded_row(
         self, tmp_path: Path
@@ -501,7 +511,7 @@ class TestBespokeConnectionsAreSuperseded:
 
         assert stored_connection(db_path) == after_first
         assert audit_actions(db_path).count("wire_superseded") == 1
-        assert repo.migration_rewrite_count(A2A_WIRE_MIGRATION) == 1
+        assert rewrite_count(repo, A2A_WIRE_MIGRATION) == 1
 
     def test_014_FR_012_wire_less_rows_are_rewritten_on_every_startup(
         self, tmp_path: Path
@@ -527,7 +537,7 @@ class TestBespokeConnectionsAreSuperseded:
         # Outside the ledger means outside the count: the ledger row records
         # what the *first* pass found, and rewriting it later would destroy the
         # pre-deploy evidence it exists to hold.
-        assert repo.migration_rewrite_count(A2A_WIRE_MIGRATION) == 0
+        assert rewrite_count(repo, A2A_WIRE_MIGRATION) == 0
         # It is still readable through the model, which is the whole point.
         assert repo.get_connection("agentconn_late", owner_id=OWNER).wire == "a2a"
 
@@ -724,7 +734,7 @@ class TestTheMigrationIsAtomicAndRepeatable:
 
         # The next healthy startup finishes the job it left.
         repo = AgentRepository(tmp_path)
-        assert repo.migration_rewrite_count(A2A_WIRE_MIGRATION) == 2
+        assert rewrite_count(repo, A2A_WIRE_MIGRATION) == 2
 
     def test_014_SC_010_an_interrupted_later_pass_changes_nothing(
         self, tmp_path: Path
@@ -763,7 +773,7 @@ class TestTheMigrationIsAtomicAndRepeatable:
 
         repo = AgentRepository(tmp_path)
 
-        assert repo.migration_rewrite_count(A2A_WIRE_MIGRATION) == 1
+        assert rewrite_count(repo, A2A_WIRE_MIGRATION) == 1
         assert stored_connection(db_path)["status"] == "disconnected"
         assert run_columns(db_path) >= set(A2A_RUN_COLUMNS)
 
@@ -780,7 +790,7 @@ class TestTheMigrationIsAtomicAndRepeatable:
 
         repo = AgentRepository(tmp_path)
 
-        assert repo.migration_rewrite_count(A2A_WIRE_MIGRATION) == 1
+        assert rewrite_count(repo, A2A_WIRE_MIGRATION) == 1
         assert stored_connection(db_path)["status"] == "disconnected"
         with closing(sqlite3.connect(db_path)) as conn:
             raw = conn.execute(
