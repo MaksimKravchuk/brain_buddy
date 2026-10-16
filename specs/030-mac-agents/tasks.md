@@ -303,7 +303,7 @@ iOS thread; no slice edits it.
 - PR-08 depends on PR-05 and PR-07. PR-09 depends on PR-08.
 - PR-14 depends on PR-06. PR-10 depends on PR-06, PR-14 and PR-07 and, outside this map, on 028 PR-03; it runs in
   parallel with PR-08 and PR-09. PR-11 depends on PR-10.
-- PR-16 depends on PR-06 and PR-07.
+- PR-16 depends on PR-06, PR-07 and PR-09 (PR-08 and PR-09 also change ContentView.swift).
 - PR-12 depends on PR-07, PR-09, PR-11 and PR-16.
 - Manual acceptance after PR-12: SC-001, SC-004 – SC-006, SC-008 against a test agent.
 
@@ -609,26 +609,6 @@ iOS thread; no slice edits it.
       "implementer": "feature-implementer"
     },
     {
-      "id": "PR-16",
-      "outcome": "Mac sidebar agent rows match DSAgents: accent dot for a Needs-you run and the status word for an agent with no listed runs",
-      "tasks": ["T036"],
-      "requirements": ["030-FR-004"],
-      "paths": [
-        "macos/Sources/BrainBuddyMac/CarryOnMacChrome.swift",
-        "macos/Sources/BrainBuddyMac/ContentView.swift",
-        "macos/Tests/BrainBuddyMacTests/AgentsSidebarRowsTests.swift"
-      ],
-      "depends_on": ["PR-06", "PR-07"],
-      "tests": [
-        "cd macos && swift test --filter AgentsSidebarRowsTests"
-      ],
-      "acceptance": [
-        "An agent with a Needs-you run shows the accent dot and count; an agent with no listed runs shows its status word"
-      ],
-      "budget": {"product_loc": 120, "files": 2},
-      "implementer": "feature-implementer"
-    },
-    {
       "id": "PR-11",
       "outcome": "Add new agent, Replace credential, Edit and Delete sheets work from Settings › Agents with secure fields and the password where required",
       "tasks": ["T031", "T032"],
@@ -677,6 +657,26 @@ iOS thread; no slice edits it.
         "Unsynced steps show Hand off… disabled with its reason; with the flag off no hand-off control exists"
       ],
       "budget": {"product_loc": 260, "files": 3},
+      "implementer": "feature-implementer"
+    },
+    {
+      "id": "PR-16",
+      "outcome": "Mac sidebar agent rows match DSAgents: accent dot for a Needs-you run and the status word for an agent with no listed runs",
+      "tasks": ["T036"],
+      "requirements": ["030-FR-004"],
+      "paths": [
+        "macos/Sources/BrainBuddyMac/CarryOnMacChrome.swift",
+        "macos/Sources/BrainBuddyMac/ContentView.swift",
+        "macos/Tests/BrainBuddyMacTests/AgentsSidebarRowsTests.swift"
+      ],
+      "depends_on": ["PR-06", "PR-07", "PR-09"],
+      "tests": [
+        "cd macos && swift test --filter AgentsSidebarRowsTests"
+      ],
+      "acceptance": [
+        "An agent with a Needs-you run shows the accent dot and count; an agent with no listed runs shows its status word"
+      ],
+      "budget": {"product_loc": 120, "files": 2},
       "implementer": "feature-implementer"
     },
     {
