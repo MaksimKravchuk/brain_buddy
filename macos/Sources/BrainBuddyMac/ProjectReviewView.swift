@@ -69,7 +69,7 @@ struct ProjectReviewView: View {
                         index -= 1
                         decision = nil
                     }
-                    .buttonStyle(.macQuietPill)
+                    .buttonStyle(.carryOnQuiet)
                     .disabled(index == 0)
                     Text("\(index + 1) of \(items.count)")
                         .font(MacSheetFont.meta)
@@ -85,11 +85,11 @@ struct ProjectReviewView: View {
                             }
                         }
                     }
-                    .buttonStyle(.macQuietPill)
+                    .buttonStyle(.carryOnQuiet)
                     .disabled(index >= items.count - 1 && !model.projectsPageState.hasNext)
                     Spacer()
                     Button("Open project to edit actions") { openProject(item.id) }
-                        .buttonStyle(.macSecondaryPill)
+                        .buttonStyle(.carryOnSecondary)
                 }
                 ScrollView {
                     if taskPageState.readiness == .ready {
@@ -172,7 +172,7 @@ struct ProjectReviewView: View {
                 text: "No open actions. If the outcome is complete, archive this project; otherwise add a Next action.",
                 tone: .primary)
             Button("Archive completed project…") { confirmingArchive = true }
-                .buttonStyle(.macSecondaryPill)
+                .buttonStyle(.carryOnSecondary)
                 .disabled(!model.canArchiveProject)
                 .help("Add or clear the current task draft before archiving")
         } else if item.openTasks.isEmpty {
@@ -196,7 +196,7 @@ struct ProjectReviewView: View {
                     removeCurrent()
                 }
             }
-            .buttonStyle(.macStrongPill)
+            .buttonStyle(.carryOnStrong)
             .disabled(!canMark(item) || model.projectReviewTaskPageState(item).readiness != .ready)
         }
     }

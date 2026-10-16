@@ -140,7 +140,7 @@ struct SyncStatusPopover: View {
                     case .copyReference(let reference): copyButton(reference, control: .recovery(action))
                     default:
                         Button(Self.title(of: action)) { perform(action, recovery: recovery) }
-                            .buttonStyle(.macSecondaryPill)
+                            .buttonStyle(.carryOnSecondary)
                             .focused($focus, equals: .recovery(action))
                     }
                 }
@@ -183,7 +183,7 @@ struct SyncStatusPopover: View {
         SyncPopoverIssueCard(attempted: issue.attempted, why: issue.why, laterActions: issue.laterActions) {
             if let reference = issue.referenceID { copyButton(reference, control: .runtimeCopy(issue.id)) }
             Button("Review") { openConflict(issue.id) }
-                .buttonStyle(.macSecondaryPill)
+                .buttonStyle(.carryOnSecondary)
                 .disabled(openingConflict)
                 .accessibilityLabel(issue.actionAccessibilityLabel)
                 .focused($focus, equals: .openConflict(issue.id))
@@ -209,7 +209,7 @@ struct SyncStatusPopover: View {
                 Button("Sync now") {
                     Task { await controller.syncNow() }
                 }
-                .buttonStyle(.macSecondaryPill)
+                .buttonStyle(.carryOnSecondary)
                 .disabled(!content.syncNowEnabled)
                 .focused($focus, equals: .syncNow)
             }
@@ -236,7 +236,7 @@ struct SyncStatusPopover: View {
         case .accountLess(let text):
             SyncPopoverNotice(title: text.title, detail: text.detail) {
                 Button(AccountMenuItems.signInTitle) { controller.beginSignIn(from: .popover) }
-                    .buttonStyle(.macStrongPill)
+                    .buttonStyle(.carryOnStrong)
                     .focused($focus, equals: .signIn)
                     .padding(.top, 2)
             }
@@ -246,7 +246,7 @@ struct SyncStatusPopover: View {
                 detail: text.detail
             ) {
                 Button("Sign in again") { controller.beginSignIn(from: .popover) }
-                    .buttonStyle(.macStrongPill)
+                    .buttonStyle(.carryOnStrong)
                     .focused($focus, equals: .signInAgain)
                     .padding(.top, 2)
             }
