@@ -64,7 +64,7 @@ iOS thread; no slice edits it.
   `AgentConnectionsAPITests.swift`; `APIError.from` unchanged. 030-FR-002, 030-FR-018,
   030-FR-034, 030-FR-042. PR-01.
 
-## Phase 2 — Mac core: availability, memory cache, copy (PR-03)
+## Phase 2 — Mac core: availability and memory cache (PR-03), copy (PR-13)
 
 - [ ] T006 [P] [US2] Implement `AgentAvailability` in
   `macos/Sources/BrainBuddyMacCore/AgentAvailability.swift` (owner id, `relayEnabled` from
@@ -82,7 +82,8 @@ iOS thread; no slice edits it.
 - [ ] T008 [P] [US2] Add every string of design.md § Copy and the web's connection status
   words and sentences (ported from `frontend/src/features/agents/agentCopy.ts`) to
   `macos/Sources/BrainBuddyMacCore/AgentsCopy.swift`, with a parity test for the status
-  words in `AgentAvailabilityTests.swift`. 030-FR-030, 030-FR-041. PR-03.
+  words in `macos/Tests/BrainBuddyMacTests/AgentsCopyTests.swift`. 030-FR-030, 030-FR-041.
+  PR-13 (split out of PR-03 to keep both within budget).
 - [ ] T009 [US2] Add the log-content test in `AgentMemoryCacheTests.swift`: drive
   availability and cache with a known title, agent name, address, question, secret and
   password and assert none appears in the captured `MacLogSink` lines. 030-FR-039,
@@ -94,7 +95,8 @@ iOS thread; no slice edits it.
   `AgentRunSummaryDTO` and `AgentPrimaryState` (15 labels plus `.unknown(String)`) and the
   run calls (`previewAgentHandoff`, `sendAgentHandoff`, `agentRuns(taskID:)`,
   `agentRunSummaries(taskIDs:)`, `agentRun(id:)`, `replyToAgentRun`,
-  `checkAgentRunDelivery`, `cancelAgentRun`) to
+  `checkAgentRunDelivery`, `cancelAgentRun`) and `APIError.needsManifestReview` (400 with
+  `detail.reason` `manifest_not_reserved` or `manifest_token_mismatch`) to
   `ios/BrainBuddyKit/Sources/BrainBuddyAPI/AgentRunsAPI.swift`, with decoding and request
   tests in `ios/BrainBuddyKit/Tests/BrainBuddyAPITests/AgentRunsAPITests.swift` against
   fixtures copied from the backend schemas (one run per label, a result link, a too-large
@@ -157,7 +159,8 @@ iOS thread; no slice edits it.
   `macos/Sources/BrainBuddyMacCore/HandoffFlow.swift` (ready agents only; first selected;
   preview with details and "Project: <name>"; `needsPassword` only on
   `reauthenticationRequired`; acknowledgement only when required; one Idempotency-Key per
-  Send reused on Try again; re-preview on a stale or expired manifest; error mapping;
+  Send reused on Try again; re-preview when `needsManifestReview` (400 with reason
+  `manifest_not_reserved` / `manifest_token_mismatch`, never 409/410); error mapping;
   `relayUnavailable` → availability; on success insert the run into the store), with
   tests in `macos/Tests/BrainBuddyMacTests/HandoffFlowTests.swift`. 030-FR-013 –
   030-FR-018, 030-SC-001. PR-05.
@@ -268,10 +271,10 @@ iOS thread; no slice edits it.
 
 ## Dependencies & Execution Order
 
-- PR-01 and PR-03 have no dependencies and disjoint paths: run in parallel.
-- PR-02 depends on PR-01. PR-06 depends on PR-01 and PR-03; it runs in parallel with
+- PR-01, PR-03 and PR-13 have no dependencies and disjoint paths: run in parallel.
+- PR-02 depends on PR-01. PR-06 depends on PR-01, PR-03 and PR-13; it runs in parallel with
   PR-02, PR-04 and PR-05.
-- PR-04 depends on PR-02 and PR-03. PR-05 depends on PR-04.
+- PR-04 depends on PR-02, PR-03 and PR-13. PR-05 depends on PR-04.
 - PR-07 depends on PR-04 and, outside this map, on 028 PR-03.
 - PR-08 depends on PR-05 and PR-07. PR-09 depends on PR-08.
 - PR-10 depends on PR-06 and PR-07 and, outside this map, on 028 PR-03; it runs in
@@ -313,16 +316,15 @@ iOS thread; no slice edits it.
     },
     {
       "id": "PR-03",
-      "outcome": "Mac core knows the owner, the relay flag and the password state, keeps agent data only in an owner-keyed memory cache that clears on sign-out and hides expired content, and holds every agent string",
-      "tasks": ["T006", "T007", "T008", "T009"],
+      "outcome": "Mac core knows the owner, the relay flag and the password state, and keeps agent data only in an owner-keyed memory cache that clears on sign-out and hides expired content",
+      "tasks": ["T006", "T007", "T009"],
       "requirements": [
-        "030-FR-001", "030-FR-002", "030-FR-026", "030-FR-027", "030-FR-030",
-        "030-FR-036", "030-FR-039", "030-FR-041", "030-SC-005"
+        "030-FR-001", "030-FR-002", "030-FR-026", "030-FR-027",
+        "030-FR-036", "030-FR-039", "030-SC-005"
       ],
       "paths": [
         "macos/Sources/BrainBuddyMacCore/AgentAvailability.swift",
         "macos/Sources/BrainBuddyMacCore/AgentMemoryCache.swift",
-        "macos/Sources/BrainBuddyMacCore/AgentsCopy.swift",
         "macos/Tests/BrainBuddyMacTests/AgentAvailabilityTests.swift",
         "macos/Tests/BrainBuddyMacTests/AgentMemoryCacheTests.swift"
       ],
@@ -335,8 +337,27 @@ iOS thread; no slice edits it.
         "The flag and password state refresh on sign-in, activation and a relay-unavailable answer; unknown password state keeps controls",
         "The cache refuses other owners, clears on sign-out and account change, never returns expired content and writes nothing to disk or logs"
       ],
-      "budget": {"product_loc": 260, "files": 3},
+      "budget": {"product_loc": 260, "files": 2},
       "implementer": "feature-implementer"
+    },
+    {
+      "id": "PR-13",
+      "outcome": "Mac core holds every agent string from design.md and the web's connection status words and sentences, word for word",
+      "tasks": ["T008"],
+      "requirements": ["030-FR-030", "030-FR-041"],
+      "paths": [
+        "macos/Sources/BrainBuddyMacCore/AgentsCopy.swift",
+        "macos/Tests/BrainBuddyMacTests/AgentsCopyTests.swift"
+      ],
+      "depends_on": [],
+      "tests": [
+        "cd macos && swift test --filter AgentsCopyTests"
+      ],
+      "acceptance": [
+        "Every design.md copy string exists once, and the connection status words and sentences match frontend agentCopy.ts"
+      ],
+      "budget": {"product_loc": 160, "files": 1},
+      "implementer": "mechanical-implementer"
     },
     {
       "id": "PR-02",
@@ -376,7 +397,7 @@ iOS thread; no slice edits it.
         "macos/Tests/BrainBuddyMacTests/AgentSettingsModelTests.swift",
         "macos/Tests/BrainBuddyMacTests/AgentConnectionEditorTests.swift"
       ],
-      "depends_on": ["PR-01", "PR-03"],
+      "depends_on": ["PR-01", "PR-03", "PR-13"],
       "tests": [
         "cd macos && swift test --filter AgentSettingsModelTests",
         "cd macos && swift test --filter AgentConnectionEditorTests"
@@ -403,7 +424,7 @@ iOS thread; no slice edits it.
         "macos/Tests/BrainBuddyMacTests/AgentRunGroupTests.swift",
         "macos/Tests/BrainBuddyMacTests/AgentRunsStoreTests.swift"
       ],
-      "depends_on": ["PR-02", "PR-03"],
+      "depends_on": ["PR-02", "PR-03", "PR-13"],
       "tests": [
         "cd macos && swift test --filter AgentRunGroupTests",
         "cd macos && swift test --filter AgentRunsStoreTests"

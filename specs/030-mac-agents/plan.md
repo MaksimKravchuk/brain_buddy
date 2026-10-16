@@ -127,7 +127,7 @@ serve the same relay routes).
   AgentFailure }` — `.relayUnavailable` (404 whose detail is "External agent relay is not
   available."), `.wrongPassword` (403 on a password-bearing call), `.staleRevision`,
   `.rateLimited`, `.offline`, `.other`. `APIError.from` is unchanged.
-- `AgentRunsAPI.swift` (new, PR-02): `AgentManifestDTO` (token, runID, taskID,
+- `AgentRunsAPI.swift` (new, PR-02): `extension APIError { public var needsManifestReview: Bool }` (400 with `detail.reason` `manifest_not_reserved` or `manifest_token_mismatch`, as the web's `needsReReview`), `AgentManifestDTO` (token, runID, taskID,
   connectionID, agentName, title, details, supportingItems, guaranteeTier,
   tierDisclosure, cancellationDisclosure, externalCopyNotice, acknowledgementRequired,
   reauthenticationRequired), `AgentRunDTO` (the fields listed in spec Key Entities plus
@@ -161,7 +161,7 @@ serve the same relay routes).
   summaries, connections and reply drafts; `clear()` on sign-out, session end and account
   change; `run(_:now:)` returns content only when `now < contentExpiresAt`, otherwise an
   expired marker, and drops the content (030-FR-026, 030-FR-027). Nothing is `Codable`.
-- `AgentsCopy.swift` (new, PR-03): every string in design.md § Copy, plus the web's
+- `AgentsCopy.swift` (new, PR-13, split out of PR-03 for budget): every string in design.md § Copy, plus the web's
   connection status words and sentences ported from `frontend/src/features/agents/
   agentCopy.ts` (`connectionStatusLabel`, `connectionStatusDetail`, tier wording, the
   queued line).
@@ -234,7 +234,7 @@ Twelve slices; the slice map with paths, budgets and checks is in
 [tasks.md](tasks.md#pr-срезы).
 
 1. **PR-01 — Kit: agent connections API** (contract first). No dependencies.
-2. **PR-03 — Mac core: availability, memory cache, copy**. No dependencies; parallel with
+2. **PR-03 — Mac core: availability and memory cache** (copy moved to PR-13, parallel). No dependencies; parallel with
    PR-01.
 3. **PR-02 — Kit: agent runs API**. Depends on PR-01.
 4. **PR-06 — Mac core: Settings agents model and editors**. Depends on PR-01 and PR-03;
@@ -338,7 +338,7 @@ macos/Tests/BrainBuddyMacTests/
 | Many open steps make the summaries scan slow | 200-id batches, sequential, at most every 60 s while visible; only listed runs get a run read; follow-up Rust list endpoint (D3) |
 | A step's server id is not exposed on the Rust-selected workspace | PR-04's first task checks it and adds a read-only accessor in Mac core; no kit write path changes |
 | Polling load | Server-chosen interval per run; paused when hidden or offline; ended runs not polled |
-| A stale preview is sent | The manifest token is single-use on the server; the flow re-previews on 409/410 and never resends a stale token |
+| A stale preview is sent | The manifest token is single-use on the server; the server answers a stale or used manifest with HTTP 400 and `detail.reason` `manifest_not_reserved` or `manifest_token_mismatch` (`modules/agents/service.py` ~2028-2045); PR-02's `APIError.needsManifestReview` detects that, and the flow re-previews and never resends a stale token (409 stays `staleRevision`) |
 | Password fields not drawn on the board | Accepted deviation (D2); shown only where the server requires them |
 | 028 PR-03 not landed when PR-07/PR-10 start | Both list it as an outside dependency; they start after it lands |
 | Labels change on the server | Lenient decoding; unknown labels show verbatim and fall into To review only if ended flags say so, otherwise Running |

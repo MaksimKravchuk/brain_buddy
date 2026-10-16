@@ -160,4 +160,17 @@ struct MacLocalStateTests {
         #expect(folder.names.contains { $0.hasPrefix("mac-local.unreadable-") })
         #expect(MacLocalStateStore(directory: folder.url).load()?.legacyCleanupDoneAt == now)
     }
+
+    @Test("029-FR-001 029-FR-015 a file from before the first run reads with no record, and a record round-trips with dates and an outcome only")
+    func firstRunRecordRoundTrip() throws {
+        let folder = TemporaryFolder()
+        try Data(#"{"version":1,"installSalt":"AAAA"}"#.utf8).write(to: folder.sidecar)
+        let store = MacLocalStateStore(directory: folder.url)
+        #expect(store.load()?.firstRun == nil)
+        let record = FirstRunRecord(decidedAt: now, outcome: .firstStep, tipDismissedAt: now.addingTimeInterval(60))
+        try store.update { $0.firstRun = record }
+        #expect(store.load()?.firstRun == record)
+        let text = String(decoding: try #require(folder.bytes(MacLocalStateStore.fileName)), as: UTF8.self)
+        #expect(text.contains("\"outcome\":\"firstStep\""))
+    }
 }
