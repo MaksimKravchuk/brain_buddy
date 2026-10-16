@@ -1,4 +1,5 @@
 import BrainBuddyCore
+import BrainBuddyDesign
 import BrainBuddyWorkspace
 import SwiftUI
 
@@ -113,19 +114,31 @@ struct TaskListScreen: View {
     }
 
     private func taskList(_ result: TaskListResult, options: ListOptions) -> some View {
-        List {
+        let nextStep = nextStepTask(in: result)
+        let currentID = currentTaskID(in: result)
+        return List {
             if case .list(.next) = destination, !result.isEmpty {
                 reviewNotes
             }
             if case .project(let projectID) = destination {
                 ProjectStatusRow(projectID: projectID)
             }
+            if let nextStep {
+                NextStepRows(task: nextStep.task)
+            }
             ForEach(result.sections) { section in
-                taskSection(section, options: options)
+                taskSection(
+                    section, options: options, cardTaskID: nextStep?.task.id, currentTaskID: currentID,
+                    showsAlsoReady: nextStep?.sectionID == section.id && !options.groupByProject
+                )
+            }
+            if case .list(.inbox) = destination, !result.isEmpty {
+                processInboxButton(result)
             }
         }
         .listStyle(.plain)
         .bbDenseList()
+        .bbListBackground()
         .animation(
             BBMotion.animation(.settle, reduceMotion: reduceMotion),
             value: result.sections.flatMap(\.tasks).map(\.id)
@@ -155,32 +168,81 @@ struct TaskListScreen: View {
         DecisionIssuesNote()
     }
 
-    private func taskSection(_ section: TaskSection, options: ListOptions) -> some View {
-        Section {
-            ForEach(section.tasks) { task in
-                NavigationLink(value: AppRoute.task(task.id)) {
-                    TaskRow(task: task, showsProject: showsProject, showsList: showsList,
-                        preparedFormulation: workspace.listFormulation(task.id, destination: destination, options: options))
+    /// The Next actions card: the first task of the first section on screen,
+    /// with that section's id. Only on Next actions, and only for an open task.
+    private func nextStepTask(in result: TaskListResult) -> (task: TaskRecord, sectionID: String)? {
+        guard case .list(.next) = destination, !result.isEmpty,
+            let section = result.sections.first(where: { !$0.tasks.isEmpty }),
+            let task = section.tasks.first, task.state == .next
+        else { return nil }
+        return (task, section.id)
+    }
+
+    /// In a project, the first task in Next actions in the displayed order is
+    /// the project's current step.
+    private func currentTaskID(in result: TaskListResult) -> TaskID? {
+        guard case .project = destination else { return nil }
+        return result.sections.flatMap(\.tasks).first { $0.state == .next }?.id
+    }
+
+    @ViewBuilder
+    private func taskSection(
+        _ section: TaskSection, options: ListOptions, cardTaskID: TaskID?, currentTaskID: TaskID?,
+        showsAlsoReady: Bool
+    ) -> some View {
+        let tasks = section.tasks.filter { $0.id != cardTaskID }
+        // A section whose only task became the card has nothing left to show.
+        if !(tasks.isEmpty && !section.tasks.isEmpty) {
+            Section {
+                ForEach(tasks) { task in
+                    NavigationLink(value: AppRoute.task(task.id)) {
+                        TaskRow(task: task, showsProject: showsProject, showsList: showsList,
+                            preparedFormulation: workspace.listFormulation(task.id, destination: destination, options: options),
+                            showsMark: showsMark, isCurrent: task.id == currentTaskID)
+                    }
+                    // The row carries its own affordance; the chevron would only
+                    // take width from the title and its metadata.
+                    .navigationLinkIndicatorVisibility(.hidden)
+                    .bbCardRow()
+                    .taskActions(task)
                 }
-                // The row carries its own affordance; the chevron would only
-                // take width from the title and its metadata.
-                .navigationLinkIndicatorVisibility(.hidden)
-                // The completion circle's 44 pt target starts near the edge.
-                .listRowInsets(Self.rowInsets)
-                .taskActions(task)
-            }
-        } header: {
-            if let title = section.title {
-                BBSectionHeader(
-                    title, count: section.totalCount, dotColor: projectDotColor(for: section), countsTasks: true
-                )
-                .listRowInsets(Self.headerInsets)
+            } header: {
+                if let title = section.title {
+                    BBSectionHeader(
+                        title, count: section.totalCount, dotColor: projectDotColor(for: section), countsTasks: true
+                    )
+                    .listRowInsets(BBCardRow.headerInsets)
+                } else if showsAlsoReady {
+                    Text("Also ready")
+                        .font(BBFont.label.weight(.semibold))
+                        .foregroundStyle(BBColor.textSecondary)
+                        .accessibilityAddTraits(.isHeader)
+                        .listRowInsets(BBCardRow.headerInsets)
+                }
             }
         }
     }
 
-    private static let rowInsets = EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 20)
-    private static let headerInsets = EdgeInsets(top: 12, leading: 16, bottom: 4, trailing: 20)
+    /// The Inbox's way into processing: the same action as the toolbar's
+    /// Process button, as a full-width secondary pill under the rows.
+    private func processInboxButton(_ result: TaskListResult) -> some View {
+        Button {
+            router.isProcessingInbox = true
+        } label: {
+            Text("Process")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.carryOnSecondary)
+        .disabled(result.openCount == 0)
+        .accessibilityHint("Clarify your inbox one item at a time.")
+        .bbBareRow()
+    }
+
+    /// Inbox rows are the raw text alone, with no mark.
+    private var showsMark: Bool {
+        if case .list(.inbox) = destination { return false }
+        return true
+    }
 
     /// The project's colour for a project group, or nil for any other section
     /// (and for "No project").
@@ -320,6 +382,56 @@ struct TaskListScreen: View {
                 .foregroundStyle(.secondary)
         }
         .padding()
+    }
+}
+
+/// The Next actions hero: the first step as a `CarryOnNextStepCard` that opens
+/// the task like a row does, and under it Done, which completes the task with
+/// the same command the row's completion mark runs. Two list rows, so the
+/// card's swipe actions and context menu are the row's too. "Not now" is a
+/// later wave.
+private struct NextStepRows: View {
+    let task: TaskRecord
+
+    @Environment(Workspace.self) private var workspace
+    @Environment(ToastCenter.self) private var toasts
+    @State private var isCompleting = false
+    @State private var completionEditorID = UUID().uuidString
+
+    var body: some View {
+        NavigationLink(value: AppRoute.task(task.id)) {
+            CarryOnNextStepCard(project: projectName, step: task.title)
+        }
+        .navigationLinkIndicatorVisibility(.hidden)
+        .bbBareRow()
+        .taskActions(task)
+        Button(action: complete) {
+            Text("Done")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.carryOnPrimary)
+        .disabled(isCompleting)
+        .accessibilityLabel("Done, \(task.title)")
+        .bbBareRow()
+    }
+
+    /// The project's name above the step; a task without a project says where it is.
+    private var projectName: String {
+        task.projectID.flatMap { workspace.project($0)?.name } ?? OpenList.next.title
+    }
+
+    private func complete() {
+        guard !isCompleting else { return }
+        isCompleting = true
+        let task = task
+        let workspace = workspace
+        let toasts = toasts
+        let editorID = completionEditorID
+        Task {
+            let completed = await TaskCommandRunner.complete(task, workspace: workspace, toasts: toasts, editorID: editorID)
+            isCompleting = false
+            if completed { completionEditorID = UUID().uuidString }
+        }
     }
 }
 

@@ -25,6 +25,7 @@ struct BrainBuddyApp: App {
     init() {
         // Registers the bundled Instrument faces before the first view asks for one.
         CarryOnFonts.register()
+        BBNavigationBarAppearance.apply()
         let usesPreviewData = ProcessInfo.processInfo.arguments.contains(AppConstants.previewDataLaunchArgument)
         let location = RustRuntimeLocation.appGroup(AppConstants.appGroupID)
         // An unreadable selection counts: the install must not fall back to the retired file.

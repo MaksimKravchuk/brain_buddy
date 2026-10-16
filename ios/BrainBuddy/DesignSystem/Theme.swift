@@ -104,6 +104,10 @@ enum BBColor {
     static let dueBackground = color(Tone(CarryOnComponentColor.chipBg))
     static let dueBorder = color(Tone(CarryOnComponentColor.chipBg))
     static let dueText = color(Tone(CarryOnComponentColor.chipDueFg))
+    /// chip-overdue-fg. The due date of an open task that is past due.
+    static let overdueText = color(Tone(CarryOnComponentColor.chipOverdueFg))
+    /// step-text-done. The struck-through title of a finished task.
+    static let stepTextDone = color(Tone(CarryOnComponentColor.stepTextDone))
 
     /// Tag pill inside task rows.
     static let tagBackground = color(Tone(CarryOnComponentColor.chipBg))
