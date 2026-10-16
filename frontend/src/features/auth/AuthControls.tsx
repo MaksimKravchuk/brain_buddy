@@ -6,6 +6,7 @@ import { modernAuthApi, type Challenge, type Completion } from "../../api/modern
 
 export const authInputClass = "min-h-11 w-full rounded-card bg-card px-3 py-2 text-base text-ink placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-focus";
 export const authButtonClass = "min-h-11 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
+export const authDangerClass = `${authButtonClass} text-danger hover:text-danger`;
 export function AuthField({ label, value, onChange, type = "text", autoComplete, minLength }: { label: string; value: string; onChange: (value: string) => void; type?: string; autoComplete?: string; minLength?: number }): React.JSX.Element {
   return <label className="flex flex-col gap-1 text-co-meta font-medium text-ink">{label}<input className={authInputClass} required type={type} value={value} onChange={event => onChange(event.target.value)} autoComplete={autoComplete} minLength={minLength} maxLength={type === "password" ? 128 : 320} /></label>;
 }
@@ -35,7 +36,7 @@ export function CodeStep({ challenge, verifier, email, onComplete, onCancel, rec
     }, "That code isn't valid or has expired. Check it or request another.");
   };
   return <div className="flex flex-col gap-4">
-    <p>If this address can be used, you will receive a six-digit code at <strong>{email || "your provider email"}</strong>.</p>
+    <p className="text-co-meta text-ink">If this address can be used, you will receive a six-digit code at <strong>{email || "your provider email"}</strong>.</p>
     <form className="flex flex-col gap-4" onSubmit={submit} aria-busy={op.busy}>
       <label className="flex flex-col gap-1 font-medium text-ink">Email code<input ref={input} className={`${authInputClass} tracking-[.28em]`} value={code} onChange={event => setCode(event.target.value.replace(/[^0-9]/g, "").slice(0, 6))} autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} required aria-describedby="code-expiry" /></label>
       <p id="code-expiry" className="text-co-meta text-ink-muted">Code expires in {Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, "0")}. Use the most recent code.</p>
