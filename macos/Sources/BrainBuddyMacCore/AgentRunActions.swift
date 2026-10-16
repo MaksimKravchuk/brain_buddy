@@ -43,7 +43,7 @@ package enum AgentActionFailure: Equatable, Sendable {
         case .offline: offline
         case .staleRevision: AgentsCopy.staleRevision
         case .controlWithdrawn: "The agent no longer offers this."
-        case .tooLong: "A reply can have at most \(AgentRunActions.replyLimit) characters."
+        case .tooLong: "A reply can have at most 4,000 characters."
         case .unavailable, .other: AgentsCopy.handOffUnavailable
         }
     }
@@ -62,7 +62,7 @@ package enum AgentActionPhase: Equatable, Sendable { case idle, working, done, f
 @MainActor
 @Observable
 package final class AgentRunActions {
-    package static let replyLimit = 4_000
+    package nonisolated static let replyLimit = 4_000
 
     package private(set) var phase = AgentActionPhase.idle
     /// The run the server returned for the last action, e.g. with `replyPending` set.
