@@ -161,7 +161,7 @@ serve the same relay routes).
   summaries, connections and reply drafts; `clear()` on sign-out, session end and account
   change; `run(_:now:)` returns content only when `now < contentExpiresAt`, otherwise an
   expired marker, and drops the content (030-FR-026, 030-FR-027). Nothing is `Codable`.
-- `AgentsCopy.swift` (new, PR-03): every string in design.md § Copy, plus the web's
+- `AgentsCopy.swift` (new, PR-13, split out of PR-03 for budget): every string in design.md § Copy, plus the web's
   connection status words and sentences ported from `frontend/src/features/agents/
   agentCopy.ts` (`connectionStatusLabel`, `connectionStatusDetail`, tier wording, the
   queued line).
@@ -234,7 +234,7 @@ Twelve slices; the slice map with paths, budgets and checks is in
 [tasks.md](tasks.md#pr-срезы).
 
 1. **PR-01 — Kit: agent connections API** (contract first). No dependencies.
-2. **PR-03 — Mac core: availability, memory cache, copy**. No dependencies; parallel with
+2. **PR-03 — Mac core: availability and memory cache** (copy moved to PR-13, parallel). No dependencies; parallel with
    PR-01.
 3. **PR-02 — Kit: agent runs API**. Depends on PR-01.
 4. **PR-06 — Mac core: Settings agents model and editors**. Depends on PR-01 and PR-03;
