@@ -42,7 +42,6 @@ vocab! {
         ReopenRequiresDestination => "reopen_requires_destination",
         SubtaskAlreadyInState => "subtask_already_in_state",
         NothingToChange => "nothing_to_change",
-        PriorityRequired => "priority_required",
         SmartAddRefInvalid => "smart_add_ref_invalid",
         DecisionNotAllowed => "decision_not_allowed",
         DecisionFieldsMissing => "decision_fields_missing",

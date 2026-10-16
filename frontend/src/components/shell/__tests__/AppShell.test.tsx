@@ -1092,7 +1092,6 @@ describe("020-FR-051 AppShell review dialogs at web open", () => {
     project_id: null,
     tag_ids: [],
     due_date: null,
-    priority: "none" as const,
     waiting_for: null,
     waiting_since: null,
     order_key: 1,

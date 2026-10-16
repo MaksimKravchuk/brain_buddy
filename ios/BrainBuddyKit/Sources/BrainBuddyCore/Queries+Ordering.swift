@@ -45,11 +45,6 @@ enum TaskOrdering {
                 default: manualPrecedes(lhs, rhs)
                 }
             }
-        case .priority:
-            return tasks.sorted { lhs, rhs in
-                lhs.priority == rhs.priority
-                    ? manualPrecedes(lhs, rhs) : lhs.priority.sortRank < rhs.priority.sortRank
-            }
         case .title:
             // Fold each title once, not once per comparison.
             let keyed: [(key: String, task: TaskRecord)] = tasks.map { (QueryText.fold($0.title), $0) }

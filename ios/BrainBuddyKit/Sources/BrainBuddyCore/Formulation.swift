@@ -455,7 +455,7 @@ public enum FormulationRule {
         return bump(changed)
     }
 
-    /// Notes, tags, project, priority, subtasks, comments, waiting-for (FR-003).
+    /// Notes, tags, project, subtasks, comments, waiting-for (FR-003).
     public static func editWithoutClock(_ task: ClockedTask) -> ClockedTask { bump(task) }
 
     public static func raiseTaskFloor(_ task: ClockedTask, to floor: Date) -> ClockedTask {

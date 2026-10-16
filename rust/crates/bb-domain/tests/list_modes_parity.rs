@@ -54,7 +54,6 @@ struct T {
     project: Option<String>,
     tags: Vec<String>,
     due: Option<String>,
-    priority: &'static str,
     order_key: Option<i64>,
     ended_hours: Option<i64>,
 }
@@ -68,7 +67,6 @@ fn t(title: &str) -> T {
         project: None,
         tags: Vec::new(),
         due: None,
-        priority: "none",
         order_key: None,
         ended_hours: None,
     }
@@ -107,9 +105,6 @@ impl T {
             due: Some(due.to_owned()),
             ..self
         }
-    }
-    fn priority(self, priority: &'static str) -> Self {
-        Self { priority, ..self }
     }
     fn order_key(self, order_key: i64) -> Self {
         Self {
@@ -166,7 +161,6 @@ impl Fixture {
         self.tasks.push(json!({
             "id": id, "title": task.title, "details": task.details, "state": task.state,
             "project_id": task.project, "tag_ids": task.tags, "due_date": task.due,
-            "priority": task.priority,
             "waiting_for": waiting.then_some("Sam"),
             "waiting_since": waiting.then(|| created.clone()),
             "order_key": task.order_key.unwrap_or(self.serial * 10).to_string(),
@@ -385,14 +379,12 @@ fn queries_026_fr_009_history_groups_by_project_and_applies_filters() {
         t("Loose call old")
             .state("completed")
             .tags(&[&phone])
-            .priority("high")
             .ended(1),
     );
     f.add(
         t("Loose call new")
             .state("completed")
             .tags(&[&phone])
-            .priority("high")
             .ended(4),
     );
 
@@ -406,9 +398,6 @@ fn queries_026_fr_009_history_groups_by_project_and_applies_filters() {
         [vec!["Home call"], vec!["Loose call new", "Loose call old"]]
     );
     assert_eq!(grouped.open_count(), 0);
-
-    let high_only = f.list(history("completed"), json!({ "priorities": ["high"] }));
-    assert_eq!(high_only.all_titles(), ["Loose call new", "Loose call old"]);
 }
 
 #[test]
@@ -513,32 +502,12 @@ fn queries_026_fr_017_agenda_omits_empty_sections() {
 #[test]
 fn queries_026_fr_009_agenda_honours_an_explicit_sort_inside_each_section() {
     let mut f = Fixture::default();
-    f.add(
-        t("Low today")
-            .due("2026-09-29")
-            .priority("low")
-            .order_key(1),
-    );
-    f.add(
-        t("High today")
-            .due("2026-09-29")
-            .priority("high")
-            .order_key(2),
-    );
-    f.add(
-        t("Later upcoming")
-            .due("2026-10-05")
-            .priority("medium")
-            .order_key(3),
-    );
-    f.add(
-        t("Sooner upcoming")
-            .due("2026-10-01")
-            .priority("none")
-            .order_key(4),
-    );
+    f.add(t("Low today").due("2026-09-29").order_key(1));
+    f.add(t("High today").due("2026-09-29").order_key(2));
+    f.add(t("Later upcoming").due("2026-10-05").order_key(3));
+    f.add(t("Sooner upcoming").due("2026-10-01").order_key(4));
 
-    let result = f.list(agenda(), json!({ "sort": "priority" }));
+    let result = f.list(agenda(), json!({ "sort": "title" }));
 
     assert_eq!(
         result.titles(),
@@ -811,22 +780,12 @@ fn queries_026_fr_009_search_honours_the_sort_filters_and_group_by_project() {
     let mut f = Fixture::default();
     let home = f.project("Home", "p-home", false);
     let phone = f.tag("phone", "tag-phone");
-    f.add(
-        t("Call plumber")
-            .project(&home)
-            .tags(&[&phone])
-            .priority("low"),
-    );
-    f.add(t("Call bank").tags(&[&phone]).priority("high"));
-    f.add(t("Call mum").priority("high"));
-    f.add(
-        t("Called gran")
-            .state("completed")
-            .tags(&[&phone])
-            .priority("high"),
-    );
+    f.add(t("Call plumber").project(&home).tags(&[&phone]));
+    f.add(t("Call bank").tags(&[&phone]));
+    f.add(t("Call mum"));
+    f.add(t("Called gran").state("completed").tags(&[&phone]));
 
-    let sorted = f.list(search("call"), json!({ "sort": "priority" }));
+    let sorted = f.list(search("call"), json!({ "sort": "title" }));
     assert_eq!(
         sorted.titles(),
         [
@@ -835,11 +794,11 @@ fn queries_026_fr_009_search_honours_the_sort_filters_and_group_by_project() {
         ]
     );
 
-    let filtered = f.list(
-        search("call"),
-        json!({ "priorities": ["high"], "tag_filter": phone }),
+    let filtered = f.list(search("call"), json!({ "tag_filter": phone }));
+    assert_eq!(
+        filtered.titles(),
+        [vec!["Call plumber", "Call bank"], vec!["Called gran"]]
     );
-    assert_eq!(filtered.titles(), [vec!["Call bank"], vec!["Called gran"]]);
 
     let grouped = f.list(search("call"), json!({ "group_by_project": true }));
     assert_eq!(
@@ -992,32 +951,22 @@ fn queries_026_fr_009_completed_and_cancelled_sections_stay_flat_when_grouping()
 }
 
 #[test]
-fn queries_026_fr_009_filters_apply_to_every_section_and_an_empty_priority_filter_means_all() {
+fn queries_026_fr_009_filters_apply_to_every_section() {
     let mut f = Fixture::default();
     let phone = f.tag("phone", "tag-phone");
-    f.add(t("Call high").priority("high").tags(&[&phone]));
-    f.add(t("Call low").priority("low").tags(&[&phone]));
-    f.add(t("Call none").tags(&[&phone]));
-    f.add(t("Call done high").state("completed").priority("high"));
-    f.add(t("Call done low").state("completed").priority("low"));
-
-    let both = f.list(
-        search("call"),
-        json!({ "priorities": ["high", "none", "high"] }),
-    );
-    assert_eq!(
-        both.titles(),
-        [vec!["Call high", "Call none"], vec!["Call done high"]]
-    );
-    assert_eq!(both.open_count(), 2);
-    assert_eq!(
-        f.list(search("call"), json!({ "priorities": [] }))
-            .open_count(),
-        3
-    );
+    f.add(t("Call one").tags(&[&phone]));
+    f.add(t("Call two").tags(&[&phone]));
+    f.add(t("Call three"));
+    f.add(t("Call done one").state("completed").tags(&[&phone]));
+    f.add(t("Call done two").state("completed"));
 
     let tagged = f.list(search("call"), json!({ "tag_filter": phone }));
-    assert_eq!(tagged.all_titles(), ["Call high", "Call low", "Call none"]);
+    assert_eq!(
+        tagged.titles(),
+        [vec!["Call one", "Call two"], vec!["Call done one"]]
+    );
+    assert_eq!(tagged.open_count(), 2);
+    assert_eq!(f.list(search("call"), json!({})).open_count(), 3);
     let unknown = f.list(search("call"), json!({ "tag_filter": "tag-gone" }));
     assert!(
         unknown.0.sections.is_empty(),
@@ -1036,7 +985,6 @@ struct Gen {
     project: Option<String>,
     tag: Option<String>,
     due: Option<String>,
-    priority: &'static str,
     order_key: i64,
     created: i64,
     ended: Option<i64>,
@@ -1061,7 +1009,6 @@ const STATES: [&str; 6] = [
     "completed",
     "cancelled",
 ];
-const PRIORITIES: [&str; 4] = ["none", "low", "medium", "high"];
 const WORDS: [&str; 8] = [
     "call", "email", "buy", "Café", "report", "plan", "fix", "read",
 ];
@@ -1088,15 +1035,10 @@ fn generated(count: usize) -> (ReadSet, Vec<Gen>) {
         let project = (rng.next(2) == 0).then(|| projects[rng.next(12) as usize].clone());
         let tag = (rng.next(3) == 0).then(|| tags[rng.next(6) as usize].clone());
         let due = (rng.next(2) == 0).then(|| day_offset(TODAY, rng.next(41) as i64 - 20));
-        let priority = PRIORITIES[rng.next(4) as usize];
         let order_key = rng.next(51) as i64;
         let ended = rng.next(500) as i64;
         let title = format!("{} {index}", WORDS[index % WORDS.len()]);
-        let mut task = t(&title)
-            .state(state)
-            .priority(priority)
-            .order_key(order_key)
-            .ended(ended);
+        let mut task = t(&title).state(state).order_key(order_key).ended(ended);
         if let Some(project) = &project {
             task = task.project(project);
         }
@@ -1115,22 +1057,12 @@ fn generated(count: usize) -> (ReadSet, Vec<Gen>) {
             project,
             tag,
             due,
-            priority,
             order_key,
             created: f.serial,
             ended: terminal.then_some(ended * 3600),
         });
     }
     (f.read_set(), rows)
-}
-
-fn priority_rank(priority: &str) -> u64 {
-    match priority {
-        "high" => 0,
-        "medium" => 1,
-        "low" => 2,
-        _ => 3,
-    }
 }
 
 /// An ASCII stand-in for the kit's fold, enough for the generated titles.
@@ -1150,7 +1082,6 @@ fn sort_rows(rows: &mut [&Gen], sort: &str) {
                 manual(g),
             )
         }),
-        "priority" => rows.sort_by_key(|g| (priority_rank(g.priority), manual(g))),
         "title" => rows.sort_by_key(|g| (fold(&g.title), g.id.clone())),
         "recency" => rows.sort_by_key(|g| {
             (
@@ -1341,7 +1272,7 @@ fn queries_026_fr_026_pages_of_a_large_store_concatenate_to_the_unpaged_order_fo
     ];
     let mut ran = 0;
     for (mode, detail, wire) in cases {
-        for sort in ["manual", "due", "priority", "title"] {
+        for sort in ["manual", "due", "title"] {
             for grouped in [false, true] {
                 for tag_filter in [None, Some("tag-2")] {
                     let options = json!({
@@ -1384,7 +1315,7 @@ fn queries_026_fr_026_pages_of_a_large_store_concatenate_to_the_unpaged_order_fo
             }
         }
     }
-    assert_eq!(ran, 8 * 4 * 2 * 2, "every case ran");
+    assert_eq!(ran, 8 * 3 * 2 * 2, "every case ran");
 }
 
 #[test]
@@ -1395,7 +1326,7 @@ fn queries_026_fr_026_a_page_is_bounded_by_its_limit_however_large_the_store_is(
     let (_, rows) = generated(10_000);
     for (mode, detail, wire, sort) in [
         ("history", "completed", history("completed"), "manual"),
-        ("agenda", "", agenda(), "priority"),
+        ("agenda", "", agenda(), "due"),
         ("search", "caf", search("caf"), "title"),
     ] {
         let options = json!({ "sort": sort, "show_completed": true, "show_cancelled": true });
@@ -1452,7 +1383,7 @@ fn queries_026_fr_002_the_agenda_is_exactly_the_three_date_views_and_history_hol
     assert_eq!(completed.len() + cancelled.len(), terminal);
 
     // Grouping changes sections, never membership.
-    for sort in ["manual", "due", "priority", "title"] {
+    for sort in ["manual", "due", "title"] {
         let flat = page_through(&rs, &search("a"), &json!({ "sort": sort }), 200).0;
         let grouped = page_through(
             &rs,
@@ -1531,14 +1462,9 @@ fn refused(rs: &ReadSet, mode: Value, options: Value, day: &str, cursor: &str) -
 fn small_store() -> (ReadSet, Vec<(&'static str, Value, Value)>) {
     let mut f = Fixture::default();
     let home = f.project("Home", "p-home", false);
-    f.add(
-        t("Alpha a")
-            .due("2026-09-28")
-            .project(&home)
-            .priority("high"),
-    );
+    f.add(t("Alpha a").due("2026-09-28").project(&home));
     f.add(t("Alpha b").due("2026-09-29"));
-    f.add(t("Alpha c").due("2026-09-30").priority("low"));
+    f.add(t("Alpha c").due("2026-09-30"));
     f.add(t("Alpha d").state("completed").due("2026-09-29").ended(3));
     f.add(t("Alpha e").state("cancelled").due("2026-09-29").ended(4));
     f.add(t("Alpha f").state("completed").due("2026-09-29").ended(5));
@@ -1602,7 +1528,6 @@ fn queries_026_fr_009_a_cursor_continues_only_the_query_it_was_issued_for() {
         let mut attempts = vec![
             (mode.clone(), with("sort", json!("title")), TODAY),
             (mode.clone(), with("tag_filter", json!("tag-x")), TODAY),
-            (mode.clone(), with("priorities", json!(["high"])), TODAY),
             (search("zzz"), options.clone(), TODAY),
             (history("cancelled"), json!({}), TODAY),
         ];
@@ -1953,7 +1878,7 @@ fn queries_026_fr_002_list_modes_have_a_json_wire_shape_and_one_owner() {
         json!({ "type": "history", "kind": "completed" })
     );
     assert_eq!(written["options"]["sort"], "manual");
-    assert_eq!(written["options"]["priorities"], json!([]));
+    assert!(written["options"].get("priorities").is_none());
     assert_eq!(written["options"]["tag_filter"], Value::Null);
 
     // Unknown members and modes are refused, not ignored.
@@ -1962,6 +1887,9 @@ fn queries_026_fr_002_list_modes_have_a_json_wire_shape_and_one_owner() {
         json!({ "kind": "list_mode", "mode": { "type": "project", "id": "p" }, "page": {"limit": 1, "after": null} }),
         json!({ "kind": "list_mode", "mode": { "type": "agenda" }, "options": { "sort": "newest" }, "page": {"limit": 1, "after": null} }),
         json!({ "kind": "list_mode", "mode": { "type": "agenda" }, "options": { "extra": 1 }, "page": {"limit": 1, "after": null} }),
+        // Tasks have no priority (ADR-0033): neither the sort nor the filter exists.
+        json!({ "kind": "list_mode", "mode": { "type": "agenda" }, "options": { "sort": "priority" }, "page": {"limit": 1, "after": null} }),
+        json!({ "kind": "list_mode", "mode": { "type": "agenda" }, "options": { "priorities": [] }, "page": {"limit": 1, "after": null} }),
         json!({ "kind": "list_mode", "mode": { "type": "date_view", "view": "later" }, "page": {"limit": 1, "after": null} }),
     ] {
         assert!(
@@ -2054,26 +1982,11 @@ fn list_modes_026_fr_002_native_scoped_search_counts_split_sections_before_selec
     let other = fixture.project("Other", "project-native-other", false);
     let tag = fixture.tag("Context", "tag-native-context");
     for _ in 0..210 {
-        fixture.add(
-            t("irrelevant")
-                .project(&project)
-                .tags(&[&tag])
-                .priority("high"),
-        );
-        fixture.add(
-            t("café wrong scope")
-                .project(&other)
-                .tags(&[&tag])
-                .priority("high"),
-        );
+        fixture.add(t("irrelevant").project(&project).tags(&[&tag]));
+        fixture.add(t("café wrong scope").project(&other).tags(&[&tag]));
     }
     for _ in 0..205 {
-        fixture.add(
-            t("Café matched")
-                .project(&project)
-                .tags(&[&tag])
-                .priority("high"),
-        );
+        fixture.add(t("Café matched").project(&project).tags(&[&tag]));
     }
     for (state, count) in [("completed", 3), ("cancelled", 2)] {
         for _ in 0..count {
@@ -2082,18 +1995,19 @@ fn list_modes_026_fr_002_native_scoped_search_counts_split_sections_before_selec
                     .state(state)
                     .project(&project)
                     .tags(&[&tag])
-                    .priority("high")
                     .ended(1),
             );
         }
     }
-    fixture.add(t("Café wrong priority").project(&project).tags(&[&tag]));
-    fixture.add(t("Café wrong tag").project(&project).priority("high"));
+    fixture.add(t("Café wrong tag").project(&project));
     let state = fixture.read_set();
     let mode = ListMode::Project {
         project_id: bb_domain::types::ProjectId::parse(project).unwrap(),
     };
-    let options: ListOptions = serde_json::from_value(json!({"search":"  CAFE  ","show_completed":true,"show_cancelled":true,"priorities":["high"],"tag_filter":tag})).unwrap();
+    let options: ListOptions = serde_json::from_value(
+        json!({"search":"  CAFE  ","show_completed":true,"show_cancelled":true,"tag_filter":tag}),
+    )
+    .unwrap();
     let first = bb_domain::list_modes::native_list_mode_with_origin_lookup(
         &state,
         &mode,

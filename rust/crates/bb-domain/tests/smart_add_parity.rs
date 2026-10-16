@@ -119,7 +119,7 @@ fn tag_json(id: &str, name: &str, state: &str) -> Value {
 fn task_json(id: &str, state: &str, order_key: &str) -> Value {
     json!({
         "id": id, "title": format!("Task {id}"), "details": null, "state": state,
-        "project_id": null, "tag_ids": [], "due_date": null, "priority": "none",
+        "project_id": null, "tag_ids": [], "due_date": null,
         "waiting_for": null, "waiting_since": null, "order_key": order_key,
         "source_capture_ids": [], "created_at": "2026-09-01T09:00:00Z",
         "updated_at": "2026-09-02T09:00:00Z", "completed_at": null, "cancelled_at": null,
@@ -1568,19 +1568,15 @@ fn smart_add_026_fr_002_a_later_smart_add_reuses_what_an_earlier_one_created() {
 }
 
 #[test]
-fn smart_add_026_fr_017_dates_stay_calendar_days_and_priority_is_carried() {
+fn smart_add_026_fr_017_dates_stay_calendar_days() {
     let set = ok(
         &ReadSet::default(),
-        json!({ "title": "Pay", "due_date": "2026-10-31", "priority": "high", "details": "x" }),
+        json!({ "title": "Pay", "due_date": "2026-10-31", "details": "x" }),
     );
     let task = landed(&set).task;
     assert_eq!(
         task.due_date.as_ref().map(|d| d.as_str()),
         Some("2026-10-31")
-    );
-    assert_eq!(
-        serde_json::to_value(task.priority).expect("priority"),
-        json!("high")
     );
     assert_eq!(task.details.as_ref().map(|d| d.as_str()), Some("x"));
     // The date is a day: it is not an instant and not derived from the text.

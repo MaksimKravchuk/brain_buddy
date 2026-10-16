@@ -85,7 +85,6 @@ struct ResponseDecodingTests {
         #expect(task.projectID == "project_0a1b2c3d4e5f")
         #expect(task.tagIDs == ["tag_0a1b2c3d4e5f"])
         #expect(task.dueDate == CalendarDay(year: 2026, month: 10, day: 15))
-        #expect(task.priority == .high)
         #expect(task.waitingFor == "Photo studio")
         #expect(task.waitingSince == Fixture.utc(2026, 9, 20, 9, 30))
         #expect(task.orderKey == 4)

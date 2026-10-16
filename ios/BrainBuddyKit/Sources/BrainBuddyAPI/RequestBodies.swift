@@ -6,13 +6,13 @@ import Foundation
 //
 // The server fingerprints a mutation for idempotency from the parsed body
 // *and the set of keys that were present* (`app/utils/idempotency.py`), so an
-// explicit `"priority": "none"` and an omitted `priority` are different
+// explicit `"tag_ids": []` and an omitted `tag_ids` are different
 // requests under one key. Each body therefore has a single canonical
 // encoding: optional create fields are omitted when nil, `FieldChange`
 // `.unchanged` is omitted, `.clear` is `null`, and `.set` is the value.
 
-/// `POST /tasks` (`TaskCreateRequest`). `title`, `state`, `tag_ids` and
-/// `priority` are always sent; `details`, `project_id`, `due_date` and
+/// `POST /tasks` (`TaskCreateRequest`). `title`, `state` and `tag_ids`
+/// are always sent; `details`, `project_id`, `due_date` and
 /// `waiting_for` only when non-nil. `source_capture_ids` / `context_ids` are
 /// never sent.
 public struct TaskCreateBody: Encodable, Hashable, Sendable {
@@ -24,7 +24,6 @@ public struct TaskCreateBody: Encodable, Hashable, Sendable {
     /// Server ids of active tags, without duplicates.
     public var tagIDs: [String]
     public var dueDate: CalendarDay?
-    public var priority: TaskPriority
     /// Required (non-blank) when `state` is `.waiting`; the server ignores it otherwise.
     public var waitingFor: String?
     /// Spec 020: the formulation a creation in Next starts (`form_<uuid>`).
@@ -32,7 +31,7 @@ public struct TaskCreateBody: Encodable, Hashable, Sendable {
 
     public init(
         title: String, details: String? = nil, state: OpenList, projectID: String? = nil, tagIDs: [String] = [],
-        dueDate: CalendarDay? = nil, priority: TaskPriority = .none, waitingFor: String? = nil,
+        dueDate: CalendarDay? = nil, waitingFor: String? = nil,
         newFormulationID: String? = nil
     ) {
         self.title = title
@@ -41,7 +40,6 @@ public struct TaskCreateBody: Encodable, Hashable, Sendable {
         self.projectID = projectID
         self.tagIDs = tagIDs
         self.dueDate = dueDate
-        self.priority = priority
         self.waitingFor = waitingFor
         self.newFormulationID = newFormulationID
     }
@@ -56,14 +54,14 @@ public struct TaskCreateBody: Encodable, Hashable, Sendable {
         self.init(
             title: command.title, details: command.details, state: command.list,
             projectID: try command.projectID.map(projectServerID), tagIDs: try command.tagIDs.map(tagServerID),
-            dueDate: command.dueDate, priority: command.priority,
+            dueDate: command.dueDate,
             waitingFor: command.list == .waiting ? command.waitingFor : nil,
             newFormulationID: command.list == .next ? command.newFormulationID?.rawValue : nil
         )
     }
 
     enum CodingKeys: String, CodingKey {
-        case title, details, state, priority
+        case title, details, state
         case projectID = "project_id"
         case tagIDs = "tag_ids"
         case dueDate = "due_date"
@@ -79,7 +77,6 @@ public struct TaskCreateBody: Encodable, Hashable, Sendable {
         try values.encodeIfPresent(projectID, forKey: .projectID)
         try values.encode(tagIDs, forKey: .tagIDs)
         try values.encodeIfPresent(dueDate, forKey: .dueDate)
-        try values.encode(priority, forKey: .priority)
         try values.encodeIfPresent(waitingFor, forKey: .waitingFor)
         try values.encodeIfPresent(newFormulationID, forKey: .newFormulationID)
     }
@@ -92,7 +89,6 @@ public struct TaskCreateBody: Encodable, Hashable, Sendable {
 /// | `title` | kept | 400 "Task title cannot be null." | renamed |
 /// | `details`, `project_id`, `due_date` | kept | cleared | set |
 /// | `tag_ids` | kept | same as `[]` (a different fingerprint) | replaced |
-/// | `priority` | kept | 400 "Task priority cannot be null." | set |
 /// | `waiting_for` | kept | 400 (Waiting needs a value) | set; 400 unless the task is Waiting |
 public struct TaskUpdateBody: Encodable, Hashable, Sendable {
     public var expectedRevision: Int
@@ -103,7 +99,6 @@ public struct TaskUpdateBody: Encodable, Hashable, Sendable {
     /// Server tag ids.
     public var tagIDs: FieldChange<[String]>
     public var dueDate: FieldChange<CalendarDay>
-    public var priority: FieldChange<TaskPriority>
     public var waitingFor: FieldChange<String>
     /// Spec 020: the formulation a substantive title change starts (ignored otherwise).
     public var newFormulationID: String?
@@ -111,7 +106,7 @@ public struct TaskUpdateBody: Encodable, Hashable, Sendable {
     public init(
         expectedRevision: Int, title: FieldChange<String> = .unchanged, details: FieldChange<String> = .unchanged,
         projectID: FieldChange<String> = .unchanged, tagIDs: FieldChange<[String]> = .unchanged,
-        dueDate: FieldChange<CalendarDay> = .unchanged, priority: FieldChange<TaskPriority> = .unchanged,
+        dueDate: FieldChange<CalendarDay> = .unchanged,
         waitingFor: FieldChange<String> = .unchanged, newFormulationID: String? = nil
     ) {
         self.expectedRevision = expectedRevision
@@ -120,7 +115,6 @@ public struct TaskUpdateBody: Encodable, Hashable, Sendable {
         self.projectID = projectID
         self.tagIDs = tagIDs
         self.dueDate = dueDate
-        self.priority = priority
         self.waitingFor = waitingFor
         self.newFormulationID = newFormulationID
     }
@@ -137,18 +131,18 @@ public struct TaskUpdateBody: Encodable, Hashable, Sendable {
             expectedRevision: expectedRevision, title: changes.title, details: changes.details,
             projectID: try changes.projectID.mapValue(projectServerID),
             tagIDs: try changes.tagIDs.mapValue { try $0.map(tagServerID) },
-            dueDate: changes.dueDate, priority: changes.priority, waitingFor: changes.waitingFor
+            dueDate: changes.dueDate, waitingFor: changes.waitingFor
         )
     }
 
     /// False when only `expected_revision` would be sent.
     public var hasChanges: Bool {
         title.isChanged || details.isChanged || projectID.isChanged || tagIDs.isChanged || dueDate.isChanged
-            || priority.isChanged || waitingFor.isChanged
+            || waitingFor.isChanged
     }
 
     enum CodingKeys: String, CodingKey {
-        case title, details, priority
+        case title, details
         case expectedRevision = "expected_revision"
         case projectID = "project_id"
         case tagIDs = "tag_ids"
@@ -166,7 +160,6 @@ public struct TaskUpdateBody: Encodable, Hashable, Sendable {
         try values.encodeChange(projectID, forKey: .projectID)
         try values.encodeChange(tagIDs, forKey: .tagIDs)
         try values.encodeChange(dueDate, forKey: .dueDate)
-        try values.encodeChange(priority, forKey: .priority)
         try values.encodeChange(waitingFor, forKey: .waitingFor)
     }
 }

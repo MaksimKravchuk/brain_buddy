@@ -27,31 +27,6 @@ public enum TaskState: String, CaseIterable, Codable, Sendable, Hashable {
     public var isTerminal: Bool { !isOpen }
 }
 
-public enum TaskPriority: String, CaseIterable, Codable, Sendable, Hashable, Comparable {
-    case none, low, medium, high
-
-    /// high → medium → low → none, as the server sorts.
-    public var sortRank: Int {
-        switch self {
-        case .high: 0
-        case .medium: 1
-        case .low: 2
-        case .none: 3
-        }
-    }
-
-    public static func < (lhs: TaskPriority, rhs: TaskPriority) -> Bool { lhs.sortRank > rhs.sortRank }
-
-    public var title: String {
-        switch self {
-        case .none: "No priority"
-        case .low: "Low"
-        case .medium: "Medium"
-        case .high: "High"
-        }
-    }
-}
-
 public enum TaskTransitionAction: String, Codable, Sendable, Hashable {
     case move, complete, reopen, cancel
 }

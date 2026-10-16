@@ -563,7 +563,6 @@ async fn cap_http_132_smart_add_creates_task_with_inline_refs() {
                         "title": "Call mum",
                         "project": { "name": "Family" },
                         "tags": [{ "name": "Phone" }],
-                        "priority": "low",
                     }),
                 )
                 .await,
@@ -841,13 +840,12 @@ async fn cap_http_139_patch_task_edits_fields_and_rejects_stale_revision() {
                 &patch(
                     &o.client,
                     &path,
-                    json!({ "title": "After", "priority": "high", "expected_revision": 1 }),
+                    json!({ "title": "After", "expected_revision": 1 }),
                 )
                 .await,
                 200,
             );
             assert_eq!(v["title"], "After");
-            assert_eq!(v["priority"], "high");
             assert_eq!(v["revision"], 2);
 
             let stale = patch(
@@ -953,7 +951,6 @@ async fn cap_http_141_create_task_returns_201_and_hides_foreign_projects() {
                         "project_id": pid,
                         "tag_ids": [tid],
                         "due_date": "2026-11-01",
-                        "priority": "medium",
                     }),
                 )
                 .await,
@@ -970,7 +967,10 @@ async fn cap_http_141_create_task_returns_201_and_hides_foreign_projects() {
                 201,
             );
             assert_eq!(defaults["state"], "inbox");
-            assert_eq!(defaults["priority"], "none");
+            assert!(
+                defaults.get("priority").is_none(),
+                "no priority field: {defaults}"
+            );
 
             let foreign = post(
                 &other.client,
@@ -996,7 +996,11 @@ async fn cap_http_142_list_tasks_filters_pages_and_scopes_to_owner() {
             let pid = id_of(&new_project(&o.client, "Listed").await);
             let tag = id_of(&new_tag(&o.client, "Listed tag").await);
             for title in ["Alpha", "Beta", "Gamma"] {
-                new_task(&o.client, json!({ "title": title, "project_id": pid, "tag_ids": [tag], "priority": "high" })).await;
+                new_task(
+                    &o.client,
+                    json!({ "title": title, "project_id": pid, "tag_ids": [tag] }),
+                )
+                .await;
             }
             let done = new_task(&o.client, json!({ "title": "Finished", "project_id": pid })).await;
             expect_status(
@@ -1010,27 +1014,48 @@ async fn cap_http_142_list_tasks_filters_pages_and_scopes_to_owner() {
             );
 
             let page1 = expect_status(
-                &read(&o.client, &format!("/api/tasks?project_id={pid}&sort=title&limit=2")).await,
+                &read(
+                    &o.client,
+                    &format!("/api/tasks?project_id={pid}&sort=title&limit=2"),
+                )
+                .await,
                 200,
             );
             assert_eq!(page1["items"].as_array().map(Vec::len), Some(2));
             assert_eq!(page1["has_more"], true);
-            let cursor = page1["next_cursor"].as_str().expect("next_cursor").to_string();
+            let cursor = page1["next_cursor"]
+                .as_str()
+                .expect("next_cursor")
+                .to_string();
             let page2 = expect_status(
-                &read(&o.client, &format!("/api/tasks?project_id={pid}&sort=title&limit=2&cursor={cursor}")).await,
+                &read(
+                    &o.client,
+                    &format!("/api/tasks?project_id={pid}&sort=title&limit=2&cursor={cursor}"),
+                )
+                .await,
                 200,
             );
             assert_eq!(page2["items"].as_array().map(Vec::len), Some(1));
             assert_eq!(page2["has_more"], false);
-            assert!(page1["counts_by_state"]["inbox"].is_number(), "counts present: {page1}");
+            assert!(
+                page1["counts_by_state"]["inbox"].is_number(),
+                "counts present: {page1}"
+            );
 
             let with_done = expect_status(
-                &read(&o.client, &format!("/api/tasks?project_id={pid}&include_completed=true&limit=200")).await,
+                &read(
+                    &o.client,
+                    &format!("/api/tasks?project_id={pid}&include_completed=true&limit=200"),
+                )
+                .await,
                 200,
             );
             assert_eq!(with_done["items"].as_array().map(Vec::len), Some(4));
 
-            let by_tag = expect_status(&read(&o.client, &format!("/api/tasks?tag_id={tag}&priority[]=high")).await, 200);
+            let by_tag = expect_status(
+                &read(&o.client, &format!("/api/tasks?tag_id={tag}")).await,
+                200,
+            );
             assert_eq!(by_tag["items"].as_array().map(Vec::len), Some(3));
 
             let by_query = expect_status(&read(&o.client, "/api/tasks?q=Gamma").await, 200);

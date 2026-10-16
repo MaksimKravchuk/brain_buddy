@@ -128,7 +128,7 @@ extension RustDomainFacade {
         var ids = RustIDTable(bindings: bindings, preservesReferences: true)
         return try RustJSON.data(["text": draft.text, "list": draft.list.rawValue,
             "waiting_for": draft.waitingFor, "details": draft.details,
-            "due_date": wireNull(draft.dueDate?.isoString), "priority": draft.priority.rawValue,
+            "due_date": wireNull(draft.dueDate?.isoString),
             "context_project": ids.optional(draft.contextProjectID?.rawValue, prefix: "project"),
             "context_tag": ids.optional(draft.contextTagID?.rawValue, prefix: "tag")])
     }
@@ -195,7 +195,6 @@ extension RustDomainFacade {
         return try RustJSON.data(["kind": "list_mode", "mode": mode,
             "options": ["sort": options.sort.rawValue, "group_by_project": options.groupByProject,
                 "show_completed": options.showCompleted, "show_cancelled": options.showCancelled,
-                "priorities": options.priorities.map(\.rawValue).sorted(),
                 "tag_filter": ids.optional(options.tagFilter?.rawValue, prefix: "tag"),
                 "search": wireNull(options.search)],
             "page": ["limit": 200, "after": wireNull(cursor)]])

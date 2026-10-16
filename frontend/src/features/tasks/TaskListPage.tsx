@@ -966,7 +966,6 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
               >
                 <option value="manual">Manual</option>
                 <option value="due">Due date</option>
-                <option value="priority">Priority</option>
                 <option value="title">Title</option>
               </select>
               <ChevronDown className="pointer-events-none absolute right-0 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" aria-hidden />
@@ -1842,7 +1841,7 @@ function formatDueDate(value: string): string {
 }
 
 function parseTaskSort(value: string | null): TaskSort {
-  if (value === "due" || value === "priority" || value === "title") {
+  if (value === "due" || value === "title") {
     return value;
   }
   return "manual";

@@ -47,13 +47,13 @@ struct RequestBodyTests {
     @Test("Clearing the project and tags never asks the resolver")
     func clearsSkipResolver() throws {
         let body = try TaskUpdateBody(
-            changes: TaskChanges(projectID: .clear, tagIDs: .clear, priority: .set(.none), waitingFor: .set("Sam")),
+            changes: TaskChanges(projectID: .clear, tagIDs: .clear, waitingFor: .set("Sam")),
             expectedRevision: 9,
             projectServerID: { _ in throw Unresolved(id: "project") },
             tagServerID: { _ in throw Unresolved(id: "tag") }
         )
         #expect(
-            try json(body) == #"{"expected_revision":9,"priority":"none","project_id":null,"tag_ids":null,"waiting_for":"Sam"}"#
+            try json(body) == #"{"expected_revision":9,"project_id":null,"tag_ids":null,"waiting_for":"Sam"}"#
         )
     }
 
@@ -79,17 +79,17 @@ struct RequestBodyTests {
     func createFromCommand() throws {
         let waiting = GTDCommand.CreateTask(
             taskID: "task-client-1", title: "Hear back", details: "About the lease", list: .waiting, waitingFor: "Landlord",
-            dueDate: CalendarDay(year: 2026, month: 11, day: 3), priority: .medium, projectID: inbox, tagIDs: [errands]
+            dueDate: CalendarDay(year: 2026, month: 11, day: 3), projectID: inbox, tagIDs: [errands]
         )
         #expect(
             try json(try TaskCreateBody(waiting, projectServerID: projectServerID, tagServerID: tagServerID))
-                == #"{"details":"About the lease","due_date":"2026-11-03","priority":"medium","project_id":"project_0a1b2c3d4e5f","state":"waiting","tag_ids":["tag_000000000001"],"title":"Hear back","waiting_for":"Landlord"}"#
+                == #"{"details":"About the lease","due_date":"2026-11-03","project_id":"project_0a1b2c3d4e5f","state":"waiting","tag_ids":["tag_000000000001"],"title":"Hear back","waiting_for":"Landlord"}"#
         )
 
         let next = GTDCommand.CreateTask(taskID: "task-client-2", title: "Call", list: .next, waitingFor: "stale note")
         #expect(
             try json(try TaskCreateBody(next, projectServerID: projectServerID, tagServerID: tagServerID))
-                == #"{"priority":"none","state":"next","tag_ids":[],"title":"Call"}"#
+                == #"{"state":"next","tag_ids":[],"title":"Call"}"#
         )
     }
 

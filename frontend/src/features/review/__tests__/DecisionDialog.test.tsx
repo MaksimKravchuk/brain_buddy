@@ -42,7 +42,6 @@ function asksTask(overrides: Partial<TaskResponse> = {}, formulation: Partial<No
     project_id: "project-home",
     tag_ids: [],
     due_date: null,
-    priority: "none",
     waiting_for: null,
     waiting_since: null,
     order_key: 1,

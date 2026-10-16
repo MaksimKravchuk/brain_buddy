@@ -103,7 +103,9 @@ These criteria apply only when rendered UI, copy, navigation, interaction, respo
   date semantics, and implementation-ready UI/API gaps are fixed in
   `docs/decisions/0006-native-gtd-lifecycle-and-capability-baseline.md`; its public
   Priority vocabulary and Project archive membership rule are narrowly superseded by
-  `docs/decisions/0020-rtm-parity-priority-and-archive-semantics.md`.
+  `docs/decisions/0020-rtm-parity-priority-and-archive-semantics.md`. ADR-0033
+  (`docs/decisions/0033-remove-task-priority.md`) then removed task priority entirely:
+  tasks have no priority field, sort or filter; tags cover that need.
 - Autonomous delivery, visual preview eligibility, and production release/rollback authority are governed by `docs/decisions/0003-autonomous-delivery-guardrails.md` and `docs/autonomous-delivery-runbook.md`.
 - Verified trunk serial landing (PR-less SHIP/SHOW delivery, Ship/Show/Ask classification, feature-flag rollout, deploy rollback) is governed by `docs/decisions/0008-verified-trunk-serial-landing.md`, which partially supersedes ADR-0003. ADR-0023 makes planning and independent evidence proportionate for eligible test-stage SHIP/SHOW slices without changing exact-SHA delivery controls.
 - The spec review gate is ADR-0011 (portable stage), amended by ADR-0012 (risk classes, escalation, gate integrity) and ADR-0014 (hybrid reviewer fallback with recorded degradation).

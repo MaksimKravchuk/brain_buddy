@@ -366,7 +366,7 @@ enum RustReadSet {
             "id": ids.task(task.id), "title": task.title, "details": wireNull(task.details),
             "state": task.state.rawValue, "project_id": ids.optional(task.projectID?.rawValue, prefix: "project"),
             "tag_ids": task.tagIDs.map { ids.tag($0) }, "due_date": wireNull(task.dueDate?.isoString),
-            "priority": task.priority.rawValue, "waiting_for": wireNull(task.waitingFor),
+            "waiting_for": wireNull(task.waitingFor),
             "waiting_since": wireInstant(task.waitingSince), "order_key": String(max(task.orderKey, 0)),
             "source_capture_ids": [String](), "created_at": RustInstant.format(task.createdAt),
             "updated_at": RustInstant.format(task.updatedAt), "completed_at": wireInstant(task.completedAt),

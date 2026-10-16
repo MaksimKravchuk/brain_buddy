@@ -38,12 +38,12 @@ struct ReducerReviewTests {
         #expect(task.consecutiveStalledFormulations == 1, "the closed formulation had asked (T-001)")
     }
 
-    @Test("020-FR-003 notes, tags, project and priority edits leave the clock alone; a due date raises the floor")
+    @Test("020-FR-003 notes, tags and project edits leave the clock alone; a due date raises the floor")
     func editsWithoutClockChange() throws {
         var state = Review.state([Review.nextTask("t1", started: t0)])
         state.projects["p1"] = ProjectRecord(id: "p1", name: "Flat", createdAt: t0)
         try Review.apply(
-            .updateTask(.init(taskID: "t1", changes: TaskChanges(details: .set("notes"), projectID: .set("p1"), priority: .set(.high)))),
+            .updateTask(.init(taskID: "t1", changes: TaskChanges(details: .set("notes"), projectID: .set("p1")))),
             to: &state
         )
         #expect(state.tasks["t1"]?.formulation == FormulationClock(id: Review.form(1), startedAt: t0))
@@ -199,7 +199,6 @@ struct ReducerReviewTests {
         let asking = Review.nextTask("t1", started: t0, serverRevision: 4)
         let edits: [(String, TaskChanges)] = [
             ("notes", TaskChanges(details: .set("Tiles first"))),
-            ("priority", TaskChanges(priority: .set(.high))),
             ("due date", TaskChanges(dueDate: .set(CalendarDay(year: 2026, month: 10, day: 20)!))),
             ("cosmetic title", TaskChanges(title: .set("call bob."))),
         ]

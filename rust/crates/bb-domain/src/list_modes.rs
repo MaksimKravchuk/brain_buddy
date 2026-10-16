@@ -39,7 +39,7 @@
 //! `inputs.device_zone`, the same day `list_counts` uses.
 
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, BinaryHeap};
+use std::collections::BinaryHeap;
 
 use serde_json::{Value, json};
 use unicode_normalization::UnicodeNormalization;
@@ -49,7 +49,7 @@ use crate::normalization;
 use crate::queries::{self, KeyPart, MAX_LIMIT, SortKey, invalid};
 use crate::types::{
     DateView, DomainError, HistoryKind, ListMode, ListModePage, ListOptions, Page, PageSection,
-    Priority, Project, ProjectId, ProjectState, Query, QueryInputs, QueryResult, ReadSet, Reason,
+    Project, ProjectId, ProjectState, Query, QueryInputs, QueryResult, ReadSet, Reason,
     SectionKind, Task, TaskSort, TaskState,
 };
 
@@ -333,7 +333,6 @@ impl Order {
         match self {
             Self::Sorted(TaskSort::Manual) | Self::Recency => &[true, true, false],
             Self::Sorted(TaskSort::Due) => &[true, false, true, true, false],
-            Self::Sorted(TaskSort::Priority) => &[true, true, true, false],
             Self::Sorted(TaskSort::Title) => &[false, false],
         }
     }
@@ -419,7 +418,6 @@ struct Plan<'a> {
     grouped: bool,
     show_completed: bool,
     show_cancelled: bool,
-    priorities: BTreeSet<Priority>,
     origin: &'a dyn Fn(&Task) -> Option<crate::types::OpenList>,
 }
 
@@ -485,7 +483,6 @@ impl<'a> Plan<'a> {
             grouped,
             show_completed,
             show_cancelled,
-            priorities: options.priorities.iter().copied().collect(),
         })
     }
 
@@ -510,7 +507,6 @@ impl<'a> Plan<'a> {
             "grouped": self.grouped,
             "show_completed": self.show_completed,
             "show_cancelled": self.show_cancelled,
-            "priorities": self.priorities.iter().map(|p| p.as_str()).collect::<Vec<_>>(),
             "tag_filter": self.options.tag_filter.as_ref().map(|tag| tag.as_str()),
         });
         if let Some(search) = &self.search {
@@ -527,9 +523,6 @@ impl<'a> Plan<'a> {
         if let Some(needle) = &self.search
             && !search_haystack(task).contains(needle)
         {
-            return Ok(None);
-        }
-        if !self.priorities.is_empty() && !self.priorities.contains(&task.priority) {
             return Ok(None);
         }
         if let Some(tag) = &self.options.tag_filter
@@ -724,11 +717,6 @@ impl<'a> Plan<'a> {
                             .map_or_else(String::new, |day| day.as_str().to_owned()),
                     ),
                 ];
-                key.extend(manual()?);
-                key
-            }
-            Order::Sorted(TaskSort::Priority) => {
-                let mut key = vec![Int(queries::priority_rank(task.priority))];
                 key.extend(manual()?);
                 key
             }

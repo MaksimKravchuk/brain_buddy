@@ -94,7 +94,6 @@ function taskFixture(overrides: Partial<TaskResponse> = {}): TaskResponse {
     project_id: "project-launch",
     tag_ids: ["tag-deep-work"],
     due_date: null,
-    priority: "none",
     waiting_for: null,
     waiting_since: null,
     order_key: 1,
@@ -2205,7 +2204,7 @@ describe("TaskListPage detail wiring", () => {
     mocked.updateTask.mockRejectedValueOnce(new Error("Someone else edited this task."));
     renderPage("/tasks/next/task-1");
 
-    await user.selectOptions(await screen.findByLabelText("Priority"), "high");
+    await user.selectOptions(await screen.findByLabelText("Project"), "project-onboarding");
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Someone else edited this task.");
   });
@@ -2244,7 +2243,7 @@ describe("TaskListPage detail wiring", () => {
     ];
     mocked.listTasks.mockImplementation(async () => listResponse(items));
     mocked.getTask.mockImplementation(async (id) => items.find((task) => task.id === id) as TaskResponse);
-    renderPage("/tasks/next?sort=priority&q=launch");
+    renderPage("/tasks/next?sort=title&q=launch");
     const origin = await screen.findByRole("link", { name: items[0].title });
     await user.click(origin);
     const firstDetail = screen.getByRole("complementary", { name: "Task detail" });
@@ -2255,7 +2254,7 @@ describe("TaskListPage detail wiring", () => {
     let next = screen.getByRole("button", { name: "Next task" });
     await user.click(next);
     await waitFor(() => expect(screen.getByLabelText("Title")).toHaveValue(items[2].title));
-    expect(currentLocation()).toBe("/tasks/next/task-2?sort=priority&q=launch");
+    expect(currentLocation()).toBe("/tasks/next/task-2?sort=title&q=launch");
     expect(screen.getByRole("link", { name: items[2].title }).closest("article")).toContainElement(
       screen.getByRole("complementary", { name: "Task detail" })
     );
@@ -2280,7 +2279,7 @@ describe("TaskListPage detail wiring", () => {
     await waitFor(() => expect(screen.getByLabelText("Title")).toHaveValue(items[1].title));
     expect(screen.getByRole("heading", { name: "Task detail" })).toHaveFocus();
     await user.click(screen.getByRole("button", { name: "Close task" }));
-    expect(currentLocation()).toBe("/tasks/next?sort=priority&q=launch");
+    expect(currentLocation()).toBe("/tasks/next?sort=title&q=launch");
     await waitFor(() => expect(origin).toHaveFocus());
   });
 
@@ -2582,7 +2581,7 @@ describe("TaskListPage canonical Discard paths", () => {
       version: 1,
       identity: { accountId: "user-1", apiOrigin, taskId: "task-1" },
       baseline,
-      draft: { title: "Recovered title", details: "Recovered details", state: "waiting", project_id: baseline.project_id, priority: baseline.priority, tag_ids: baseline.tag_ids, waiting_for: "Recovered owner", due_date: baseline.due_date },
+      draft: { title: "Recovered title", details: "Recovered details", state: "waiting", project_id: baseline.project_id, tag_ids: baseline.tag_ids, waiting_for: "Recovered owner", due_date: baseline.due_date },
       dirty: {
         title: { baseValue: baseline.title, generation: 1, value: "Recovered title" },
         details: { baseValue: baseline.details, generation: 1, value: "Recovered details" },
@@ -2634,7 +2633,6 @@ describe("TaskListPage canonical Discard paths", () => {
         details: baseline.details,
         state: baseline.state,
         project_id: baseline.project_id,
-        priority: baseline.priority,
         tag_ids: baseline.tag_ids,
         waiting_for: baseline.waiting_for,
         due_date: baseline.due_date

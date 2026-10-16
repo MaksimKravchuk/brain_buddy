@@ -146,7 +146,7 @@ impl Local {
             CommandType::TaskCreate,
             None,
             json!({ "title": "Call the plumber", "details": "Before Friday", "state": "next",
-                    "project_id": project, "tag_ids": [tag], "priority": "high", "due_date": "2026-10-20" }),
+                    "project_id": project, "tag_ids": [tag], "due_date": "2026-10-20" }),
             vec![],
             "2026-10-02T09:00:00Z",
         );
@@ -287,7 +287,6 @@ fn facts(store: &mut Store) -> BTreeMap<(String, String), Value> {
                     "project_id",
                     "tag_ids",
                     "due_date",
-                    "priority",
                     "waiting_for",
                 ]),
                 "project" => pick(&["name", "color", "state"]),

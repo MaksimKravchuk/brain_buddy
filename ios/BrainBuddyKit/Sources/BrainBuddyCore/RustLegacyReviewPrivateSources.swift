@@ -43,7 +43,6 @@ struct RustLegacyTaskBeforeScalar: Decodable {
     let state: TaskState
     let projectID: ProjectID?
     let dueDate: CalendarDay?
-    let priority: TaskPriority
     let waitingFor: String?
     let waitingSince: Date?
     let completedAt: Date?
@@ -62,7 +61,7 @@ struct RustLegacyTaskBeforeScalar: Decodable {
     func wire(revision: String, ids: inout RustIDTable) -> WireObject {
         ["id": ids.task(id), "title": title, "details": wireNull(details), "state": state.rawValue,
          "project_id": ids.optional(projectID?.rawValue, prefix: "project"),
-         "due_date": wireNull(dueDate?.isoString), "priority": priority.rawValue,
+         "due_date": wireNull(dueDate?.isoString),
          "waiting_for": wireNull(waitingFor), "waiting_since": wireInstant(waitingSince),
          "order_key": String(max(orderKey, 0)), "source_capture_ids": [String](),
          "created_at": RustInstant.format(createdAt), "updated_at": RustInstant.format(updatedAt),

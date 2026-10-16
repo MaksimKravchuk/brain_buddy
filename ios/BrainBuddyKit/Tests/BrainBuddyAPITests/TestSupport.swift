@@ -132,12 +132,12 @@ enum Fixture {
 
     /// A `TaskResponse` as `GET /tasks/{id}` returns it.
     static let taskDetail = #"""
-        {"id":"task_1a2b3c4d5e6f","title":"Renew passport","details":"Photos first","state":"waiting","project_id":"project_0a1b2c3d4e5f","tag_ids":["tag_0a1b2c3d4e5f"],"due_date":"2026-10-15","priority":"high","waiting_for":"Photo studio","waiting_since":"2026-09-20T09:30:00Z","order_key":4,"source_capture_ids":[],"created_at":"2026-09-01T08:00:00.120000Z","updated_at":"2026-09-20T09:30:00.000001Z","completed_at":null,"cancelled_at":null,"revision":7,"subtasks":[\#(subtask)],"comments":[\#(comment)]}
+        {"id":"task_1a2b3c4d5e6f","title":"Renew passport","details":"Photos first","state":"waiting","project_id":"project_0a1b2c3d4e5f","tag_ids":["tag_0a1b2c3d4e5f"],"due_date":"2026-10-15","waiting_for":"Photo studio","waiting_since":"2026-09-20T09:30:00Z","order_key":4,"source_capture_ids":[],"created_at":"2026-09-01T08:00:00.120000Z","updated_at":"2026-09-20T09:30:00.000001Z","completed_at":null,"cancelled_at":null,"revision":7,"subtasks":[\#(subtask)],"comments":[\#(comment)]}
         """#
 
     /// A `TaskResponse` as list pages and mutations return it.
     static func task(id: String = "task_1a2b3c4d5e6f", state: String = "inbox", revision: Int = 1) -> String {
-        #"{"id":"\#(id)","title":"Buy milk","details":null,"state":"\#(state)","project_id":null,"tag_ids":[],"due_date":null,"priority":"none","waiting_for":null,"waiting_since":null,"order_key":0,"source_capture_ids":[],"created_at":"2026-09-29T08:15:30Z","updated_at":"2026-09-29T08:15:30Z","completed_at":null,"cancelled_at":null,"revision":\#(revision),"subtasks":[],"comments":[]}"#
+        #"{"id":"\#(id)","title":"Buy milk","details":null,"state":"\#(state)","project_id":null,"tag_ids":[],"due_date":null,"waiting_for":null,"waiting_since":null,"order_key":0,"source_capture_ids":[],"created_at":"2026-09-29T08:15:30Z","updated_at":"2026-09-29T08:15:30Z","completed_at":null,"cancelled_at":null,"revision":\#(revision),"subtasks":[],"comments":[]}"#
     }
 
     static func page(_ items: [String], nextCursor: String? = nil) -> String {

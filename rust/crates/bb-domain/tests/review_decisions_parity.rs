@@ -226,7 +226,7 @@ fn with(mut row: Value, patch: Value) -> Value {
 fn task_json(id: &str, state: &str, revision: u64) -> Value {
     json!({
         "id": id, "title": "Call Bob", "details": null, "state": state,
-        "project_id": null, "tag_ids": [], "due_date": null, "priority": "none",
+        "project_id": null, "tag_ids": [], "due_date": null,
         "waiting_for": if state == "waiting" { json!("Bob") } else { Value::Null },
         "waiting_since": if state == "waiting" { json!("2026-09-02T09:00:00Z") } else { Value::Null },
         "order_key": "3",

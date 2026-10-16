@@ -72,7 +72,6 @@ function taskFixture(overrides: Partial<TaskResponse> = {}): TaskResponse {
     project_id: "project-launch",
     tag_ids: ["tag-deep-work"],
     due_date: null,
-    priority: "none",
     waiting_for: null,
     waiting_since: null,
     order_key: 1,
@@ -548,7 +547,6 @@ describe("TaskDetailPanel editing", () => {
 
     await user.selectOptions(screen.getByLabelText("List"), "someday");
     await user.selectOptions(screen.getByLabelText("Project"), "project-onboarding");
-    await user.selectOptions(screen.getByLabelText("Priority"), "high");
     await user.click(screen.getByRole("checkbox", { name: "#calls" }));
     fireEvent.change(screen.getByLabelText("Due date"), { target: { value: "2026-09-03" } });
 
@@ -560,7 +558,6 @@ describe("TaskDetailPanel editing", () => {
 
     expect(screen.getByLabelText("List")).toHaveValue("someday");
     expect(screen.getByLabelText("Project")).toHaveValue("project-onboarding");
-    expect(screen.getByLabelText("Priority")).toHaveValue("high");
     expect(screen.getByRole("checkbox", { name: "#calls" })).toBeChecked();
     expect(screen.getByLabelText("Due date")).toHaveValue("2026-09-03");
   });
@@ -607,7 +604,7 @@ describe("TaskDetailPanel editing", () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 
-  it("saves the due date, the project, the priority and tag toggles with the current revision", async () => {
+  it("saves the due date, the project and tag toggles with the current revision", async () => {
     const user = userEvent.setup();
     const task = taskFixture({ due_date: "2026-07-20" });
     const { onSave } = renderPanel({ task });
@@ -625,9 +622,6 @@ describe("TaskDetailPanel editing", () => {
 
     await user.selectOptions(screen.getByLabelText("Project"), "");
     expect(onSave).toHaveBeenLastCalledWith(task, { project_id: null, expected_revision: 4 });
-
-    await user.selectOptions(screen.getByLabelText("Priority"), "high");
-    expect(onSave).toHaveBeenLastCalledWith(task, { priority: "high", expected_revision: 4 });
 
     await user.click(screen.getByRole("checkbox", { name: "#calls" }));
     expect(onSave).toHaveBeenLastCalledWith(task, {

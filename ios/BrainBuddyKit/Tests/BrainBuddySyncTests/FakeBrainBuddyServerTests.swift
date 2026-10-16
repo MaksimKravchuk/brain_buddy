@@ -62,7 +62,7 @@ struct FakeBrainBuddyServerTests {
         #expect(moved.revision == 2)
         #expect(moved.orderKey == task.orderKey, "transitions keep the order key")
         let stale = await apiError {
-            let body = TaskUpdateBody(expectedRevision: 1, priority: .set(.high))
+            let body = TaskUpdateBody(expectedRevision: 1, title: .set("Stale edit"))
             _ = try await client.updateTask(id: task.id, body, idempotencyKey: UUID())
         }
         #expect(stale?.kind == .staleRevision(resource: "Task", id: task.id))

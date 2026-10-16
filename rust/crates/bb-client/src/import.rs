@@ -1350,7 +1350,6 @@ impl Builder {
             );
         }
         let due = f.opt_text("dueDate")?;
-        let priority = f.text("priority")?;
         let waiting_for = f.opt_text("waitingFor")?;
         let waiting_since = f.opt_text("waitingSince")?;
         let completed = f.opt_text("completedAt")?;
@@ -1370,7 +1369,7 @@ impl Builder {
         let park = parked.map(park_wire).transpose()?;
         let body = json!({
             "id": key, "title": title, "details": details, "state": state, "project_id": project,
-            "tag_ids": tag_keys, "due_date": due, "priority": priority, "waiting_for": waiting_for,
+            "tag_ids": tag_keys, "due_date": due, "waiting_for": waiting_for,
             "waiting_since": waiting_since, "order_key": order_key.to_string(),
             "source_capture_ids": [], "created_at": created, "updated_at": updated,
             "completed_at": completed, "cancelled_at": cancelled, "revision": revision.to_string(),

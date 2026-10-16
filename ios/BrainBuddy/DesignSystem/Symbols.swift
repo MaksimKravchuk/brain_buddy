@@ -35,19 +35,6 @@ extension HistoryKind {
     }
 }
 
-extension TaskPriority {
-    /// The number of exclamation marks carries the level, so priority never
-    /// relies on colour alone.
-    var symbolName: String {
-        switch self {
-        case .none: "minus"
-        case .low: "exclamationmark"
-        case .medium: "exclamationmark.2"
-        case .high: "exclamationmark.3"
-        }
-    }
-}
-
 extension AppTab {
     var symbolName: String {
         switch self {

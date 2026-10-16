@@ -48,12 +48,12 @@ struct QueriesDateViewTests {
     @Test("Agenda honours an explicit sort inside each section")
     func agendaExplicitSort() {
         var fixture = QueryFixture()
-        fixture.task("Low today", due: "2026-09-29", priority: .low, orderKey: 1)
-        fixture.task("High today", due: "2026-09-29", priority: .high, orderKey: 2)
-        fixture.task("Later upcoming", due: "2026-10-05", priority: .medium, orderKey: 3)
-        fixture.task("Sooner upcoming", due: "2026-10-01", priority: .none, orderKey: 4)
+        fixture.task("Low today", due: "2026-09-29", orderKey: 1)
+        fixture.task("High today", due: "2026-09-29", orderKey: 2)
+        fixture.task("Later upcoming", due: "2026-10-05", orderKey: 3)
+        fixture.task("Sooner upcoming", due: "2026-10-01", orderKey: 4)
 
-        let result = fixture.list(.agenda, ListOptions(sort: .priority))
+        let result = fixture.list(.agenda, ListOptions(sort: .title))
 
         #expect(result.titles == [["High today", "Low today"], ["Later upcoming", "Sooner upcoming"]])
     }

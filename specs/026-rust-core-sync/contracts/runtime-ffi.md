@@ -1,5 +1,8 @@
 # Runtime, binding and server-core contract
 
+> **Superseded in part (2026-10-15)**: [ADR-0033](../../../docs/decisions/0033-remove-task-priority.md) removes task priority. Every
+> task-priority field, value, filter, sort and control in this document is withdrawn.
+
 Status: **frozen-v1** (2026-10-09, PR-01; ADR-0031) first-launch Apple/Python contract; semantics are frozen, while exact toolchain and binding versions are pinned only after the bridge build proof below. Implementation homes (still to be created) are `rust/crates/{bb-domain,bb-protocol,bb-client}`, `rust/bindings/{swift,python}` and `backend/app/modules/tasks/rust_adapter.py`. Android/Kotlin, Windows/C and Linux bindings are separate future stages. Current facade seams are `ios/BrainBuddyKit/Sources/BrainBuddy{Core,Persistence,Sync,Workspace}` and `macos/Package.swift`.
 
 ## Pure core

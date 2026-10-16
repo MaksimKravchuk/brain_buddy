@@ -7,7 +7,7 @@ import Foundation
 /// trace. What it changes is listed as adjustments, for the import report.
 ///
 /// It reads and returns only the fields it transforms; the importer takes every other field
-/// (priority, dates, order, comment times) from the legacy record with the same id.
+/// (dates, order, comment times) from the legacy record with the same id.
 public enum ImportCanonicalizer {
     public struct Project: Hashable, Sendable {
         public var id: String

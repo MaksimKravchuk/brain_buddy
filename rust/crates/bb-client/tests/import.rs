@@ -247,7 +247,7 @@ fn rich() -> Value {
                 "task-1": {"id": "task-1", "serverID": "task_1a2b3c4d5e6f", "serverRevision": 3,
                     "title": "Call the plumber", "details": "Before Friday", "state": "waiting",
                     "projectID": "project-1", "tagIDs": ["tag-1", "tag-3"], "dueDate": "2026-10-02",
-                    "priority": "high", "waitingFor": "Plumber", "waitingSince": T1, "orderKey": 7,
+                    "waitingFor": "Plumber", "waitingSince": T1, "orderKey": 7,
                     "createdAt": T0, "updatedAt": T1, "childrenSyncedAt": T1,
                     "subtasks": [
                         {"id": "subtask-1", "title": "Find the number", "state": "open", "orderKey": 0},
@@ -260,20 +260,20 @@ fn rich() -> Value {
                             "body": "Called back", "createdAt": T0, "editedAt": T1}
                     ]},
                 "task-2": {"id": "task-2", "title": "Renovate the bathroom", "state": "next",
-                    "tagIDs": [], "priority": "none", "orderKey": 0, "createdAt": T0, "updatedAt": T0,
+                    "tagIDs": [], "orderKey": 0, "createdAt": T0, "updatedAt": T0,
                     "subtasks": [], "comments": []},
                 "task-3": {"id": "task-3", "serverID": "task_bbbbbbbbbbbb", "serverRevision": 9,
                     "title": "Sell the old sofa", "state": "completed", "lastOpenList": "next",
-                    "projectID": OLD_FLAT, "tagIDs": [], "priority": "low", "orderKey": 2,
+                    "projectID": OLD_FLAT, "tagIDs": [], "orderKey": 2,
                     "completedAt": T1, "createdAt": T0, "updatedAt": T1, "subtasks": [], "comments": []},
                 "task-4": {"id": "task-4", "serverID": "task_cccccccccccc", "serverRevision": 1,
-                    "title": "Write the report", "state": "next", "tagIDs": [], "priority": "medium",
+                    "title": "Write the report", "state": "next", "tagIDs": [],
                     "orderKey": 3, "createdAt": T0, "updatedAt": T0, "subtasks": [], "comments": [],
                     "consecutiveStalledFormulations": 2,
                     "formulation": {"id": FORM, "startedAt": T0, "extendedAt": T1,
                         "extensionReason": "Waiting for numbers", "parkFloorAt": T1}},
                 "task-5": {"id": "task-5", "serverID": "task_dddddddddddd", "serverRevision": 6,
-                    "title": "Plan the trip", "state": "someday", "tagIDs": [], "priority": "none",
+                    "title": "Plan the trip", "state": "someday", "tagIDs": [],
                     "orderKey": 4, "createdAt": T0, "updatedAt": T1, "subtasks": [], "comments": [],
                     "parked": {"at": T1, "formulationID": FORM_TWO, "fromRevision": 5,
                         "stalledBefore": 1,
@@ -296,7 +296,7 @@ fn rich() -> Value {
             {"id": "0e7b8e3c-2c4a-4d6b-9f1e-3a5b7c9d1e2f", "attempts": 0, "issuedAt": T1,
                 "idempotencyKey": "00000000-0000-4000-8000-000000000091",
                 "command": {"createTask": {"_0": {"taskID": "task-9", "title": SENTINEL, "list": "next",
-                    "priority": "none", "tagIDs": []}}}},
+                    "tagIDs": []}}}},
             {"id": "7c8d9e0f-1a2b-4c3d-8e4f-5a6b7c8d9e0f", "attempts": 2, "everSent": true,
                 "firstAttemptAt": T0, "lastAttemptAt": T1, "lastError": "timeout", "issuedAt": T1,
                 "idempotencyKey": "00000000-0000-4000-8000-000000000092",
@@ -710,7 +710,6 @@ fn import_026_fr_013_every_field_id_relation_and_flag_of_a_populated_base_is_imp
     );
     assert_eq!(plumber.revision.as_str(), "3");
     assert_eq!(plumber.order_key.as_str(), "7");
-    assert_eq!(plumber.priority.as_str(), "high");
     assert_eq!(plumber.waiting_for.unwrap().as_str(), "Plumber");
     assert_eq!(plumber.waiting_since.unwrap().as_str(), T1);
     assert_eq!(plumber.due_date.unwrap().as_str(), "2026-10-02");
@@ -901,7 +900,7 @@ fn import_026_fr_013_nothing_is_merged_and_awkward_text_is_carried_exactly() {
         tasks.insert(
             format!("t{id}"),
             json!({"id": format!("t{id}"), "title": text, "details": text, "state": "inbox",
-                "projectID": format!("p{id}"), "tagIDs": [format!("g{id}")], "priority": "none",
+                "projectID": format!("p{id}"), "tagIDs": [format!("g{id}")],
                 "orderKey": index, "createdAt": T0, "updatedAt": T0, "subtasks": [], "comments": []}),
         );
     }
@@ -966,7 +965,7 @@ fn import_026_fr_013_unproven_ids_get_a_deterministic_key_and_proven_ids_stay_ve
 fn import_026_fr_013_unsynced_normalization_persists_exact_reverse_alias_proof() {
     let lane = lane("normalized-reverse-proof");
     let uuid = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
-    let source = json!({"version":2,"generation":1,"base":{"tasks":{uuid:{"id":uuid,"title":"Unsynced task","state":"next","tagIDs":[],"priority":"none","orderKey":0,"createdAt":NOW,"updatedAt":NOW,"subtasks":[],"comments":[]}},"projects":{},"tags":{}},"outbox":[],"issues":[],"local":{"formDrafts":{format!("form:reformulate:{uuid}:-"):{"text":"Exact source-key draft","savedAt":NOW}}}});
+    let source = json!({"version":2,"generation":1,"base":{"tasks":{uuid:{"id":uuid,"title":"Unsynced task","state":"next","tagIDs":[],"orderKey":0,"createdAt":NOW,"updatedAt":NOW,"subtasks":[],"comments":[]}},"projects":{},"tags":{}},"outbox":[],"issues":[],"local":{"formDrafts":{format!("form:reformulate:{uuid}:-"):{"text":"Exact source-key draft","savedAt":NOW}}}});
     lane.write_source(&source);
     let report = import_legacy_store(&lane.request()).unwrap();
     assert_eq!(report.marker.aliases, 1);
@@ -1666,7 +1665,7 @@ fn import_026_fr_025_a_large_base_stages_in_several_pages_and_imports_whole() {
             id.clone(),
             json!({"id": id, "serverID": format!("task_{index:012x}"), "serverRevision": 1,
                 "title": format!("Task number {index} {}", "words ".repeat(40)),
-                "details": "d".repeat(400), "state": "next", "tagIDs": [], "priority": "none",
+                "details": "d".repeat(400), "state": "next", "tagIDs": [],
                 "orderKey": index, "createdAt": T0, "updatedAt": T0, "subtasks": [], "comments": []}),
         );
     }

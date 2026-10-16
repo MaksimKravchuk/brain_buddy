@@ -108,7 +108,7 @@ struct MacRehearsalTests {
     private static func line(_ task: TaskRecord, projects: [ProjectID: ProjectRecord], tags: [TagID: TagRecord]) -> String {
         func instant(_ date: Date?) -> String { date.map { String(Int($0.timeIntervalSince1970)) } ?? "-" }
         let fields: [String] = [
-            task.title, task.details ?? "-", task.state.rawValue, task.lastOpenList?.rawValue ?? "-", task.priority.rawValue,
+            task.title, task.details ?? "-", task.state.rawValue, task.lastOpenList?.rawValue ?? "-",
             task.waitingFor ?? "-", task.dueDate?.isoString ?? "-", task.projectID.flatMap { projects[$0]?.name } ?? "-",
             task.tagIDs.compactMap { tags[$0]?.name }.sorted().joined(separator: ","),
             task.subtasks.sorted { $0.orderKey < $1.orderKey }.map { "\($0.title):\($0.state.rawValue)" }.joined(separator: ";"),
@@ -206,7 +206,7 @@ struct MacRehearsalTests {
             if !extra.isEmpty { recorder.observe("\(fixture).extra", brief(extra)) }
             if let first = missing.first, let other = extra.first {
                 let a = first.components(separatedBy: " | "), b = other.components(separatedBy: " | ")
-                let names = ["title", "details", "state", "lastOpenList", "priority", "waitingFor", "due", "project", "tags", "subtasks", "comments", "created", "waitingSince", "completed", "cancelled"]
+                let names = ["title", "details", "state", "lastOpenList", "waitingFor", "due", "project", "tags", "subtasks", "comments", "created", "waitingSince", "completed", "cancelled"]
                 let differing = zip(zip(a, b), names).filter { $0.0.0 != $0.0.1 }.map(\.1)
                 recorder.observe("\(fixture).firstMismatchFields", differing.joined(separator: ","))
             }

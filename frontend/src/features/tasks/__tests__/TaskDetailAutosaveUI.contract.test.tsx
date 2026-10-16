@@ -12,7 +12,7 @@ import { createTaskDetailAutosaveController } from "../taskDetailAutosave";
 
 const task = (overrides: Partial<TaskResponse> = {}): TaskResponse => ({
   id: "task-ux", title: "Canonical", details: null, state: "next", project_id: null,
-  tag_ids: [], due_date: null, priority: "none", waiting_for: null, waiting_since: null,
+  tag_ids: [], due_date: null, waiting_for: null, waiting_since: null,
   order_key: 1, source_capture_ids: [], created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z", completed_at: null, cancelled_at: null, revision: 1,
   subtasks: [], comments: [], ...overrides
@@ -48,7 +48,7 @@ afterEach(() => { vi.restoreAllMocks(); sessionStorage.clear(); });
 describe("task detail autosave contract UI", () => {
   it("shows Saving then queued count with dirty accessible labels and no premature Saved announcement", async () => {
     const first = deferred<TaskResponse>();
-    vi.spyOn(apiClient, "updateTask").mockReturnValueOnce(first.promise).mockResolvedValueOnce(task({ revision: 3, title: "Local", priority: "high" }));
+    vi.spyOn(apiClient, "updateTask").mockReturnValueOnce(first.promise).mockResolvedValueOnce(task({ revision: 3, title: "Local", project_id: "project-1" }));
     renderAutosave();
     const user = userEvent.setup();
     const title = screen.getByLabelText("Title");
@@ -56,9 +56,9 @@ describe("task detail autosave contract UI", () => {
     await user.type(title, "Local");
     await user.tab();
     expect(await screen.findByText("Saving…")).toBeInTheDocument();
-    await user.selectOptions(screen.getByLabelText("Priority"), "high");
+    await user.selectOptions(screen.getByLabelText("Project"), "project-1");
     expect(await screen.findByText("1 change queued")).toBeInTheDocument();
-    expect(screen.getByLabelText("Priority, unsaved")).toBeInTheDocument();
+    expect(screen.getByLabelText("Project, unsaved")).toBeInTheDocument();
     expect(screen.queryByText("Saved")).not.toBeInTheDocument();
     expect(screen.getByTestId("autosave-announcement")).toHaveAttribute("aria-live", "polite");
     expect(screen.getByTestId("autosave-announcement")).toHaveTextContent("Changes queued");
@@ -179,12 +179,12 @@ describe("task detail autosave contract UI", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     renderAutosave();
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    await user.selectOptions(screen.getByLabelText("Priority"), "high");
+    await user.selectOptions(screen.getByLabelText("Project"), "project-1");
     await act(async () => { await vi.runAllTimersAsync(); });
     expect(await screen.findByText("Couldn’t save changes")).toBeInTheDocument();
     expect(screen.getByText("Your edits remain in this tab. Try again when the service is available.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Retry" })).toHaveClass("min-h-11");
-    expect(screen.getByLabelText("Priority")).toBeEnabled();
+    expect(screen.getByLabelText("Project")).toBeEnabled();
     expect(screen.queryByText(/Saved locally/i)).not.toBeInTheDocument();
   });
 
@@ -211,11 +211,11 @@ describe("task detail autosave contract UI", () => {
 
   it("retries an unverified acknowledgement with the original command and key", async () => {
     const update = vi.spyOn(apiClient, "updateTask")
-      .mockResolvedValueOnce(task({ revision: 2, priority: "none" }))
-      .mockResolvedValueOnce(task({ revision: 2, priority: "high" }));
+      .mockResolvedValueOnce(task({ revision: 2, project_id: null }))
+      .mockResolvedValueOnce(task({ revision: 2, project_id: "project-1" }));
     renderAutosave();
     const user = userEvent.setup();
-    await user.selectOptions(screen.getByLabelText("Priority"), "high");
+    await user.selectOptions(screen.getByLabelText("Project"), "project-1");
     expect(await screen.findByText("Save unverified")).toBeInTheDocument();
     expect(screen.getByText("The server response couldn’t be verified. Your edits remain in this tab. Retry to confirm the save.")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Retry verification" }));
@@ -227,7 +227,7 @@ describe("task detail autosave contract UI", () => {
   it.each([401, 404])("disables a save retry the controller cannot perform after HTTP %s", async (status) => {
     vi.spyOn(apiClient, "updateTask").mockRejectedValueOnce(new ApiError("unavailable", status, {}));
     renderAutosave();
-    await userEvent.setup().selectOptions(screen.getByLabelText("Priority"), "high");
+    await userEvent.setup().selectOptions(screen.getByLabelText("Project"), "project-1");
     expect(await screen.findByRole("button", { name: "Retry" })).toBeDisabled();
     expect(screen.queryByText(/check your connection/i)).not.toBeInTheDocument();
   });
@@ -265,10 +265,10 @@ describe("task detail autosave contract UI", () => {
   });
 
   it("retries a failed save through the controller lane", async () => {
-    const update = vi.spyOn(apiClient, "updateTask").mockRejectedValueOnce(new ApiError("invalid", 422, { detail: "Bad" })).mockResolvedValueOnce(task({ revision: 2, priority: "high" }));
+    const update = vi.spyOn(apiClient, "updateTask").mockRejectedValueOnce(new ApiError("invalid", 422, { detail: "Bad" })).mockResolvedValueOnce(task({ revision: 2, project_id: "project-1" }));
     renderAutosave();
     const user = userEvent.setup();
-    await user.selectOptions(screen.getByLabelText("Priority"), "high");
+    await user.selectOptions(screen.getByLabelText("Project"), "project-1");
     expect(await screen.findByRole("button", { name: "Retry" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(update).toHaveBeenCalledTimes(2));
@@ -281,10 +281,10 @@ describe("task detail autosave contract UI", () => {
       .mockRejectedValueOnce(new TypeError("network"))
       .mockRejectedValueOnce(new TypeError("network"))
       .mockRejectedValueOnce(new TypeError("network"))
-      .mockResolvedValueOnce(task({ revision: 2, priority: "high" }));
+      .mockResolvedValueOnce(task({ revision: 2, project_id: "project-1" }));
     renderAutosave();
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    await user.selectOptions(screen.getByLabelText("Priority"), "high");
+    await user.selectOptions(screen.getByLabelText("Project"), "project-1");
     await act(async () => { await vi.runAllTimersAsync(); });
     expect(await screen.findByRole("button", { name: "Retry" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Retry" }));

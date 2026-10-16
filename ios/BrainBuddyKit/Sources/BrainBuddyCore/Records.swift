@@ -21,7 +21,6 @@ public struct TaskRecord: Identifiable, Hashable, Sendable, Codable, ServerBacke
     public var projectID: ProjectID?
     public var tagIDs: [TagID]
     public var dueDate: CalendarDay?
-    public var priority: TaskPriority
     public var waitingFor: String?
     public var waitingSince: Date?
     public var completedAt: Date?
@@ -50,7 +49,7 @@ public struct TaskRecord: Identifiable, Hashable, Sendable, Codable, ServerBacke
         id: TaskID, serverID: String? = nil, serverRevision: Int? = nil, title: String,
         details: String? = nil, state: TaskState, lastOpenList: OpenList? = nil,
         projectID: ProjectID? = nil, tagIDs: [TagID] = [], dueDate: CalendarDay? = nil,
-        priority: TaskPriority = .none, waitingFor: String? = nil, waitingSince: Date? = nil,
+        waitingFor: String? = nil, waitingSince: Date? = nil,
         completedAt: Date? = nil, cancelledAt: Date? = nil, orderKey: Int, createdAt: Date,
         updatedAt: Date, subtasks: [SubtaskRecord] = [], comments: [CommentRecord] = [],
         childrenSyncedAt: Date? = nil, formulation: FormulationClock? = nil,
@@ -66,7 +65,6 @@ public struct TaskRecord: Identifiable, Hashable, Sendable, Codable, ServerBacke
         self.projectID = projectID
         self.tagIDs = tagIDs
         self.dueDate = dueDate
-        self.priority = priority
         self.waitingFor = waitingFor
         self.waitingSince = waitingSince
         self.completedAt = completedAt
@@ -108,7 +106,7 @@ public struct TaskRecord: Identifiable, Hashable, Sendable, Codable, ServerBacke
 
 extension TaskRecord {
     private enum CodingKeys: String, CodingKey {
-        case id, serverID, serverRevision, title, details, state, lastOpenList, projectID, tagIDs, dueDate, priority
+        case id, serverID, serverRevision, title, details, state, lastOpenList, projectID, tagIDs, dueDate
         case waitingFor, waitingSince, completedAt, cancelledAt, orderKey, createdAt, updatedAt, subtasks, comments
         case childrenSyncedAt, formulation, consecutiveStalledFormulations, parked
     }
@@ -127,7 +125,6 @@ extension TaskRecord {
         projectID = try values.decodeIfPresent(ProjectID.self, forKey: .projectID)
         tagIDs = try values.decode([TagID].self, forKey: .tagIDs)
         dueDate = try values.decodeIfPresent(CalendarDay.self, forKey: .dueDate)
-        priority = try values.decode(TaskPriority.self, forKey: .priority)
         waitingFor = try values.decodeIfPresent(String.self, forKey: .waitingFor)
         waitingSince = try values.decodeIfPresent(Date.self, forKey: .waitingSince)
         completedAt = try values.decodeIfPresent(Date.self, forKey: .completedAt)
@@ -158,7 +155,6 @@ extension TaskRecord {
         try values.encodeIfPresent(projectID, forKey: .projectID)
         try values.encode(tagIDs, forKey: .tagIDs)
         try values.encodeIfPresent(dueDate, forKey: .dueDate)
-        try values.encode(priority, forKey: .priority)
         try values.encodeIfPresent(waitingFor, forKey: .waitingFor)
         try values.encodeIfPresent(waitingSince, forKey: .waitingSince)
         try values.encodeIfPresent(completedAt, forKey: .completedAt)

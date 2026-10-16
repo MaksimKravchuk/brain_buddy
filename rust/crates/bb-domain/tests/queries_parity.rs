@@ -76,7 +76,7 @@ const CREATED: &str = "2026-09-02T09:00:00Z";
 fn task(id: &str, title: &str, state: &str, order_key: u64) -> Value {
     json!({
         "id": id, "title": title, "details": null, "state": state,
-        "project_id": null, "tag_ids": [], "due_date": null, "priority": "none",
+        "project_id": null, "tag_ids": [], "due_date": null,
         "waiting_for": null, "waiting_since": null,
         "order_key": order_key.to_string(), "source_capture_ids": [],
         "created_at": CREATED, "updated_at": CREATED,
@@ -323,7 +323,7 @@ fn reference_store(owner: &str) -> Store {
         store.tasks.push(json!({
             "id": row["id"], "title": row["title"], "details": row["details"],
             "state": row["state"], "project_id": row["project_id"], "tag_ids": row["tag_ids"],
-            "due_date": row["due_date"], "priority": row["priority"],
+            "due_date": row["due_date"],
             "waiting_for": row["waiting_for"], "waiting_since": row["waiting_since"],
             "order_key": counter(&row, "order_key"),
             "source_capture_ids": row["source_capture_ids"],
@@ -385,11 +385,6 @@ fn queries_026_fr_009_reference_store_sorts_match_the_server_keys() {
     // Due: dated first by date, then undated by the manual key.
     let due = Listing::of(OpenList::Next).sorted(TaskSort::Due).page(&a);
     assert_eq!(short(&due.items), ["da63", "2b25", "96ef"]);
-    // Priority: high first, then the manual key.
-    let priority = Listing::of(OpenList::Next)
-        .sorted(TaskSort::Priority)
-        .page(&a);
-    assert_eq!(short(&priority.items), ["da63", "96ef", "2b25"]);
     // Title: NFKC + casefold of the title, then id.
     let title = Listing::of(OpenList::Next).sorted(TaskSort::Title).page(&a);
     assert_eq!(short(&title.items), ["2b25", "96ef", "da63"]);
@@ -466,7 +461,7 @@ fn queries_026_fr_009_reference_store_paginates_with_the_server_cursor() {
     assert_eq!(
         first.next_cursor.as_deref(),
         Some(
-            "eyJmaWx0ZXJzIjp7ImR1ZV9hZnRlciI6bnVsbCwiZHVlX2JlZm9yZSI6bnVsbCwiZHVlX29uIjpudWxsLCJpbmNsdWRlX2NhbmNlbGxlZCI6ZmFsc2UsImluY2x1ZGVfY29tcGxldGVkIjpmYWxzZSwicHJpb3JpdHkiOltdLCJwcm9qZWN0X2lkIjpudWxsLCJxIjoiIiwic29ydCI6Im1hbnVhbCIsInN0YXRlIjoibmV4dCIsInRhZ19pZCI6bnVsbCwidW5hc3NpZ25lZF9wcm9qZWN0IjpmYWxzZX0sImxhc3QiOlsxLCIyMDI2LTA5LTAyVDA5OjAwOjAwKzAwOjAwIiwiOTZlZjkyZWItODJhMC01Y2IyLTllZWUtMTY5YWFjOThiZTQzIl19"
+            "eyJmaWx0ZXJzIjp7ImR1ZV9hZnRlciI6bnVsbCwiZHVlX2JlZm9yZSI6bnVsbCwiZHVlX29uIjpudWxsLCJpbmNsdWRlX2NhbmNlbGxlZCI6ZmFsc2UsImluY2x1ZGVfY29tcGxldGVkIjpmYWxzZSwicHJvamVjdF9pZCI6bnVsbCwicSI6IiIsInNvcnQiOiJtYW51YWwiLCJzdGF0ZSI6Im5leHQiLCJ0YWdfaWQiOm51bGwsInVuYXNzaWduZWRfcHJvamVjdCI6ZmFsc2V9LCJsYXN0IjpbMSwiMjAyNi0wOS0wMlQwOTowMDowMCswMDowMCIsIjk2ZWY5MmViLTgyYTAtNWNiMi05ZWVlLTE2OWFhYzk4YmU0MyJdfQ"
         )
     );
     let second = Listing::of(OpenList::Next)
@@ -477,7 +472,7 @@ fn queries_026_fr_009_reference_store_paginates_with_the_server_cursor() {
     assert!(!second.has_more && second.next_cursor.is_none());
     assert_eq!(counts_of(&second), [2, 3, 1, 3], "counts ignore the cursor");
 
-    // Due and priority keys, from the same server function.
+    // The due key, from the same server function.
     let due = Listing::of(OpenList::Next)
         .sorted(TaskSort::Due)
         .limit(1)
@@ -485,17 +480,7 @@ fn queries_026_fr_009_reference_store_paginates_with_the_server_cursor() {
     assert_eq!(
         due.next_cursor.as_deref(),
         Some(
-            "eyJmaWx0ZXJzIjp7ImR1ZV9hZnRlciI6bnVsbCwiZHVlX2JlZm9yZSI6bnVsbCwiZHVlX29uIjpudWxsLCJpbmNsdWRlX2NhbmNlbGxlZCI6ZmFsc2UsImluY2x1ZGVfY29tcGxldGVkIjpmYWxzZSwicHJpb3JpdHkiOltdLCJwcm9qZWN0X2lkIjpudWxsLCJxIjoiIiwic29ydCI6ImR1ZSIsInN0YXRlIjoibmV4dCIsInRhZ19pZCI6bnVsbCwidW5hc3NpZ25lZF9wcm9qZWN0IjpmYWxzZX0sImxhc3QiOlswLCIyMDI2LTEwLTIwIiwwLCIyMDI2LTA5LTAyVDA5OjAwOjAwKzAwOjAwIiwiZGE2Mzk1YzItOGU2Ny01MjdiLWJlNmQtNGI1NjczZDllNzU2Il19"
-        )
-    );
-    let priority = Listing::of(OpenList::Next)
-        .sorted(TaskSort::Priority)
-        .limit(1)
-        .page(&a);
-    assert_eq!(
-        priority.next_cursor.as_deref(),
-        Some(
-            "eyJmaWx0ZXJzIjp7ImR1ZV9hZnRlciI6bnVsbCwiZHVlX2JlZm9yZSI6bnVsbCwiZHVlX29uIjpudWxsLCJpbmNsdWRlX2NhbmNlbGxlZCI6ZmFsc2UsImluY2x1ZGVfY29tcGxldGVkIjpmYWxzZSwicHJpb3JpdHkiOltdLCJwcm9qZWN0X2lkIjpudWxsLCJxIjoiIiwic29ydCI6InByaW9yaXR5Iiwic3RhdGUiOiJuZXh0IiwidGFnX2lkIjpudWxsLCJ1bmFzc2lnbmVkX3Byb2plY3QiOmZhbHNlfSwibGFzdCI6WzAsMCwiMjAyNi0wOS0wMlQwOTowMDowMCswMDowMCIsImRhNjM5NWMyLThlNjctNTI3Yi1iZTZkLTRiNTY3M2Q5ZTc1NiJdfQ"
+            "eyJmaWx0ZXJzIjp7ImR1ZV9hZnRlciI6bnVsbCwiZHVlX2JlZm9yZSI6bnVsbCwiZHVlX29uIjpudWxsLCJpbmNsdWRlX2NhbmNlbGxlZCI6ZmFsc2UsImluY2x1ZGVfY29tcGxldGVkIjpmYWxzZSwicHJvamVjdF9pZCI6bnVsbCwicSI6IiIsInNvcnQiOiJkdWUiLCJzdGF0ZSI6Im5leHQiLCJ0YWdfaWQiOm51bGwsInVuYXNzaWduZWRfcHJvamVjdCI6ZmFsc2V9LCJsYXN0IjpbMCwiMjAyNi0xMC0yMCIsMCwiMjAyNi0wOS0wMlQwOTowMDowMCswMDowMCIsImRhNjM5NWMyLThlNjctNTI3Yi1iZTZkLTRiNTY3M2Q5ZTc1NiJdfQ"
         )
     );
     // The filter fingerprint also carries project and tag.
@@ -525,7 +510,7 @@ fn queries_026_fr_009_reference_store_paginates_with_the_server_cursor() {
     assert_eq!(
         page.next_cursor.as_deref(),
         Some(
-            "eyJmaWx0ZXJzIjp7ImR1ZV9hZnRlciI6bnVsbCwiZHVlX2JlZm9yZSI6bnVsbCwiZHVlX29uIjpudWxsLCJpbmNsdWRlX2NhbmNlbGxlZCI6ZmFsc2UsImluY2x1ZGVfY29tcGxldGVkIjpmYWxzZSwicHJpb3JpdHkiOltdLCJwcm9qZWN0X2lkIjoicC0xIiwicSI6IiIsInNvcnQiOiJtYW51YWwiLCJzdGF0ZSI6IndhaXRpbmciLCJ0YWdfaWQiOiJnLTEiLCJ1bmFzc2lnbmVkX3Byb2plY3QiOmZhbHNlfSwibGFzdCI6WzAsIjIwMjYtMDktMDJUMDk6MDA6MDArMDA6MDAiLCJ0LXciXX0"
+            "eyJmaWx0ZXJzIjp7ImR1ZV9hZnRlciI6bnVsbCwiZHVlX2JlZm9yZSI6bnVsbCwiZHVlX29uIjpudWxsLCJpbmNsdWRlX2NhbmNlbGxlZCI6ZmFsc2UsImluY2x1ZGVfY29tcGxldGVkIjpmYWxzZSwicHJvamVjdF9pZCI6InAtMSIsInEiOiIiLCJzb3J0IjoibWFudWFsIiwic3RhdGUiOiJ3YWl0aW5nIiwidGFnX2lkIjoiZy0xIiwidW5hc3NpZ25lZF9wcm9qZWN0IjpmYWxzZX0sImxhc3QiOlswLCIyMDI2LTA5LTAyVDA5OjAwOjAwKzAwOjAwIiwidC13Il19"
         )
     );
 }
@@ -595,7 +580,7 @@ fn queries_026_fr_009_cursor_text_is_ascii_json_with_sorted_keys_and_python_isof
     assert_eq!(
         page.next_cursor.as_deref(),
         Some(
-            "eyJmaWx0ZXJzIjp7ImR1ZV9hZnRlciI6bnVsbCwiZHVlX2JlZm9yZSI6bnVsbCwiZHVlX29uIjpudWxsLCJpbmNsdWRlX2NhbmNlbGxlZCI6ZmFsc2UsImluY2x1ZGVfY29tcGxldGVkIjpmYWxzZSwicHJpb3JpdHkiOltdLCJwcm9qZWN0X2lkIjpudWxsLCJxIjoiIiwic29ydCI6InRpdGxlIiwic3RhdGUiOiJpbmJveCIsInRhZ19pZCI6bnVsbCwidW5hc3NpZ25lZF9wcm9qZWN0Ijp0cnVlfSwibGFzdCI6WyJhXHUwMGU5Y2xhaXIgXHVkODNkXHVkZTAwXHUwMDdmXCJcXCIsInQtZWNsYWlyIl19"
+            "eyJmaWx0ZXJzIjp7ImR1ZV9hZnRlciI6bnVsbCwiZHVlX2JlZm9yZSI6bnVsbCwiZHVlX29uIjpudWxsLCJpbmNsdWRlX2NhbmNlbGxlZCI6ZmFsc2UsImluY2x1ZGVfY29tcGxldGVkIjpmYWxzZSwicHJvamVjdF9pZCI6bnVsbCwicSI6IiIsInNvcnQiOiJ0aXRsZSIsInN0YXRlIjoiaW5ib3giLCJ0YWdfaWQiOm51bGwsInVuYXNzaWduZWRfcHJvamVjdCI6dHJ1ZX0sImxhc3QiOlsiYVx1MDBlOWNsYWlyIFx1ZDgzZFx1ZGUwMFx1MDA3ZlwiXFwiLCJ0LWVjbGFpciJdfQ"
         )
     );
     let rest = Listing::of(OpenList::Inbox)
@@ -622,7 +607,7 @@ fn queries_026_fr_009_cursor_text_is_ascii_json_with_sorted_keys_and_python_isof
     assert_eq!(
         page.next_cursor.as_deref(),
         Some(
-            "eyJmaWx0ZXJzIjp7ImR1ZV9hZnRlciI6bnVsbCwiZHVlX2JlZm9yZSI6bnVsbCwiZHVlX29uIjpudWxsLCJpbmNsdWRlX2NhbmNlbGxlZCI6ZmFsc2UsImluY2x1ZGVfY29tcGxldGVkIjpmYWxzZSwicHJpb3JpdHkiOltdLCJwcm9qZWN0X2lkIjpudWxsLCJxIjoiIiwic29ydCI6Im1hbnVhbCIsInN0YXRlIjoiaW5ib3giLCJ0YWdfaWQiOm51bGwsInVuYXNzaWduZWRfcHJvamVjdCI6dHJ1ZX0sImxhc3QiOlszLCIyMDI2LTA5LTAyVDA5OjAwOjAwLjUwMDAwMCswMDowMCIsInQtZnJhYyJdfQ"
+            "eyJmaWx0ZXJzIjp7ImR1ZV9hZnRlciI6bnVsbCwiZHVlX2JlZm9yZSI6bnVsbCwiZHVlX29uIjpudWxsLCJpbmNsdWRlX2NhbmNlbGxlZCI6ZmFsc2UsImluY2x1ZGVfY29tcGxldGVkIjpmYWxzZSwicHJvamVjdF9pZCI6bnVsbCwicSI6IiIsInNvcnQiOiJtYW51YWwiLCJzdGF0ZSI6ImluYm94IiwidGFnX2lkIjpudWxsLCJ1bmFzc2lnbmVkX3Byb2plY3QiOnRydWV9LCJsYXN0IjpbMywiMjAyNi0wOS0wMlQwOTowMDowMC41MDAwMDArMDA6MDAiLCJ0LWZyYWMiXX0"
         )
     );
 }
@@ -1252,41 +1237,29 @@ fn queries_026_fr_002_backend_projectless_inbox_projection_tracks_assignment() {
 }
 
 #[test]
-fn queries_026_fr_009_backend_priority_due_and_title_sorts_compose_with_the_cursor() {
-    // test_task_api.py::test_task_priority_search_date_sort_and_cursor_filters_compose
+fn queries_026_fr_009_backend_due_and_title_sorts_compose_with_the_cursor() {
+    // test_task_api.py::test_task_search_date_sort_and_cursor_filters_compose
     let read_set = Store {
         tasks: vec![
             with(
                 with(
                     with(
-                        with(
-                            task("t-urgent", "Ship billing audit", "next", 0),
-                            "project_id",
-                            json!("p-launch"),
-                        ),
-                        "tag_ids",
-                        json!(["g-deep"]),
+                        task("t-urgent", "Ship billing audit", "next", 0),
+                        "project_id",
+                        json!("p-launch"),
                     ),
-                    "due_date",
-                    json!("2026-01-02"),
+                    "tag_ids",
+                    json!(["g-deep"]),
                 ),
-                "priority",
-                json!("high"),
+                "due_date",
+                json!("2026-01-02"),
             ),
             with(
-                with(
-                    task("t-alpha", "Write alpha notes", "next", 1),
-                    "due_date",
-                    json!("2026-01-01"),
-                ),
-                "priority",
-                json!("low"),
+                task("t-alpha", "Write alpha notes", "next", 1),
+                "due_date",
+                json!("2026-01-01"),
             ),
-            with(
-                task("t-medium", "Undated medium", "next", 2),
-                "priority",
-                json!("medium"),
-            ),
+            task("t-medium", "Undated medium", "next", 2),
         ],
         projects: vec![project("p-launch", "Launch", "active")],
         tags: vec![tag("g-deep", "Deep Work", "active")],
@@ -1296,59 +1269,30 @@ fn queries_026_fr_009_backend_priority_due_and_title_sorts_compose_with_the_curs
     let scoped = Listing::of(OpenList::Next)
         .project("p-launch")
         .tag("g-deep")
-        .sorted(TaskSort::Priority)
+        .sorted(TaskSort::Due)
         .page(&read_set);
     assert_eq!(ids(&scoped.items), ["t-urgent"]);
     assert_eq!(counts_of(&scoped), [0, 1, 0, 0]);
     let due = Listing::of(OpenList::Next)
         .sorted(TaskSort::Due)
+        .limit(2)
         .page(&read_set);
     let titles: Vec<&str> = due.items.iter().map(|i| i.title.as_str()).collect();
-    assert_eq!(
-        titles,
-        ["Write alpha notes", "Ship billing audit", "Undated medium"]
-    );
-    let priority = Listing::of(OpenList::Next)
-        .sorted(TaskSort::Priority)
-        .limit(2)
-        .page(&read_set);
-    assert_eq!(ids(&priority.items), ["t-urgent", "t-medium"]);
+    assert_eq!(titles, ["Write alpha notes", "Ship billing audit"]);
     let rest = Listing::of(OpenList::Next)
-        .sorted(TaskSort::Priority)
+        .sorted(TaskSort::Due)
         .limit(2)
-        .after(priority.next_cursor.as_deref())
+        .after(due.next_cursor.as_deref())
         .page(&read_set);
-    assert_eq!(ids(&rest.items), ["t-alpha"]);
+    assert_eq!(ids(&rest.items), ["t-medium"]);
     // The cursor carries its sort: a title read cannot continue it.
     let error = Listing::of(OpenList::Next)
         .sorted(TaskSort::Title)
         .limit(2)
-        .after(priority.next_cursor.as_deref())
+        .after(due.next_cursor.as_deref())
         .run(&read_set)
         .expect_err("another sort");
     assert_eq!(error.reason, Reason::InvalidValue);
-    // test_task_lifecycle_detail_api.py: medium sorts before low.
-    let low_and_medium = Store {
-        tasks: vec![
-            with(
-                task("t-call", "Call Ada about launch", "inbox", 0),
-                "priority",
-                json!("low"),
-            ),
-            with(
-                task("t-medium", "Medium task", "inbox", 1),
-                "priority",
-                json!("medium"),
-            ),
-        ],
-        ..Store::default()
-    }
-    .read_set();
-    let sorted = Listing::of(OpenList::Inbox)
-        .sorted(TaskSort::Priority)
-        .page(&low_and_medium);
-    let titles: Vec<&str> = sorted.items.iter().map(|i| i.title.as_str()).collect();
-    assert_eq!(titles, ["Medium task", "Call Ada about launch"]);
 }
 
 #[test]
@@ -1513,22 +1457,16 @@ fn queries_026_fr_002_every_task_query_kind_is_answered_through_query() {
 
 // ------------------------------------------------- bounded pagination, cursor shape
 
-const ALL_SORTS: [TaskSort; 4] = [
-    TaskSort::Manual,
-    TaskSort::Due,
-    TaskSort::Priority,
-    TaskSort::Title,
-];
+const ALL_SORTS: [TaskSort; 3] = [TaskSort::Manual, TaskSort::Due, TaskSort::Title];
 
 /// A 10,000-task store with ties on every key part: a few order keys, minutes,
-/// due days and priorities shared by many tasks, a quarter of the tasks without
-/// a due date, mixed-case repeated titles, and every fifth task in another list.
+/// and due days shared by many tasks, a quarter of the tasks without a due
+/// date, mixed-case repeated titles, and every fifth task in another list.
 /// Returns the read set and the Inbox tasks as `(id, title, order_key, minute,
-/// due, priority rank)`.
-type Generated = (String, String, u64, u64, Option<String>, usize);
+/// due)`.
+type Generated = (String, String, u64, u64, Option<String>);
 
 fn large_store() -> (ReadSet, Vec<Generated>) {
-    const PRIORITIES: [&str; 4] = ["high", "medium", "low", "none"];
     let mut tasks = Vec::new();
     let mut expected = Vec::new();
     let mut seed: u64 = 0x2545_f491_4f6c_dd1d;
@@ -1548,22 +1486,16 @@ fn large_store() -> (ReadSet, Vec<Generated>) {
         let order_key = roll(60);
         let minute = roll(7);
         let due = (roll(4) != 0).then(|| format!("2026-10-{:02}", 1 + roll(9)));
-        let priority = roll(4) as usize;
         let state = if index % 5 == 0 { "next" } else { "inbox" };
         let mut row = with(
             task(&id, &title, state, order_key),
-            "priority",
-            json!(PRIORITIES[priority]),
-        );
-        row = with(
-            row,
             "created_at",
             json!(format!("2026-09-02T09:0{minute}:00Z")),
         );
         row = with(row, "due_date", json!(due));
         tasks.push(row);
         if state == "inbox" {
-            expected.push((id, title, order_key, minute, due, priority));
+            expected.push((id, title, order_key, minute, due));
         }
     }
     let read_set = Store {
@@ -1585,7 +1517,6 @@ fn expected_order(mut rows: Vec<Generated>, sort: TaskSort) -> Vec<String> {
             0,
             manual(row),
         ),
-        TaskSort::Priority => (row.5 as u64, String::new(), 0, manual(row)),
         TaskSort::Title => (0, row.1.to_lowercase(), 0, (0, 0, row.0.clone())),
     });
     rows.into_iter().map(|row| row.0).collect()

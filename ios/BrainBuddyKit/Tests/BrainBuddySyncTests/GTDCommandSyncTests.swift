@@ -43,13 +43,13 @@ struct GTDCommandSyncTests {
 
     @Test("What remains of an edit is the fields that differ from what was sent")
     func editRemainder() {
-        let sent = GTDCommand.updateTask(.init(taskID: "t", changes: TaskChanges(title: .set("A"), priority: .set(.low))))
+        let sent = GTDCommand.updateTask(.init(taskID: "t", changes: TaskChanges(title: .set("A"), dueDate: .set(CalendarDay(year: 2026, month: 11, day: 1)!))))
         let queued = GTDCommand.updateTask(
-            .init(taskID: "t", changes: TaskChanges(title: .set("A"), details: .set("Notes"), priority: .set(.high)))
+            .init(taskID: "t", changes: TaskChanges(title: .set("A"), details: .set("Notes"), dueDate: .set(CalendarDay(year: 2026, month: 11, day: 2)!)))
         )
         #expect(
             queued.remainder(afterSending: sent) == [
-                .updateTask(.init(taskID: "t", changes: TaskChanges(details: .set("Notes"), priority: .set(.high))))
+                .updateTask(.init(taskID: "t", changes: TaskChanges(details: .set("Notes"), dueDate: .set(CalendarDay(year: 2026, month: 11, day: 2)!))))
             ]
         )
         let project = GTDCommand.updateProject(.init(projectID: "p", name: "Home", color: .set("#fff")))
@@ -61,9 +61,9 @@ struct GTDCommandSyncTests {
 
     @Test("What remains of a create is the move and edit to what it says now")
     func createRemainder() {
-        let sent = GTDCommand.createTask(.init(taskID: "t", title: "Call Ana", list: .inbox, priority: .low))
+        let sent = GTDCommand.createTask(.init(taskID: "t", title: "Call Ana", list: .inbox))
         let queued = GTDCommand.createTask(
-            .init(taskID: "t", title: "Call Ana today", list: .waiting, waitingFor: "Ana", priority: .low, tagIDs: ["g"])
+            .init(taskID: "t", title: "Call Ana today", list: .waiting, waitingFor: "Ana", tagIDs: ["g"])
         )
         #expect(
             queued.remainder(afterSending: sent) == [

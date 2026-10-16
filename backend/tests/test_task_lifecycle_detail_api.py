@@ -23,7 +23,7 @@ def _transition(api_client, task, *, key: str, action: str, **payload):
     return response.json()
 
 
-def test_priority_waiting_detail_fields_search_dates_and_sort_persist(
+def test_waiting_detail_fields_search_dates_and_sort_persist(
     api_client,
 ) -> None:
     project = api_client.post(
@@ -42,19 +42,16 @@ def test_priority_waiting_detail_fields_search_dates_and_sort_persist(
         "Call Ada about launch",
         key="detail-create",
         details="Original notes",
-        priority="high",
         due_date="2026-08-01",
         project_id=project["id"],
         tag_ids=[tag["id"]],
     )
-    assert task["priority"] == "high"
 
     updated = api_client.patch(
         f"/api/tasks/{task['id']}",
         headers={"Idempotency-Key": "detail-update"},
         json={
             "details": "Updated searchable notes",
-            "priority": "low",
             "due_date": "2026-08-02",
             "expected_revision": task["revision"],
         },
@@ -62,7 +59,6 @@ def test_priority_waiting_detail_fields_search_dates_and_sort_persist(
     assert updated.status_code == 200, updated.text
     task = updated.json()
     assert task["details"] == "Updated searchable notes"
-    assert task["priority"] == "low"
     assert task["due_date"] == "2026-08-02"
 
     waiting = api_client.post(
@@ -103,25 +99,19 @@ def test_priority_waiting_detail_fields_search_dates_and_sort_persist(
         ][0]["id"]
         == task["id"]
     )
-    assert (
-        api_client.get("/api/tasks", params={"priority": "low"}).json()["items"][0][
-            "id"
-        ]
-        == task["id"]
-    )
 
-    _create_task(api_client, "Medium task", key="detail-medium", priority="medium")
+    _create_task(api_client, "Medium task", key="detail-medium")
     sorted_titles = [
         item["title"]
-        for item in api_client.get("/api/tasks", params={"sort": "priority"}).json()[
+        for item in api_client.get("/api/tasks", params={"sort": "title"}).json()[
             "items"
         ]
     ]
-    assert sorted_titles[:2] == ["Medium task", "Call Ada about launch"]
+    assert sorted_titles[:2] == ["Call Ada about launch", "Medium task"]
 
     reloaded = api_client.get(f"/api/tasks/{task['id']}")
     assert reloaded.status_code == 200
-    assert reloaded.json()["priority"] == "low"
+    assert "priority" not in reloaded.json()
     assert reloaded.json()["waiting_for"] == "Ada via email"
 
 
@@ -325,14 +315,12 @@ def test_task_query_and_update_validation_edges(api_client) -> None:
         key="edge-alpha-due",
         state="next",
         due_date="2026-09-02",
-        priority="low",
     )
     undated = _create_task(
         api_client,
         "Beta undated edge",
         key="edge-beta-undated",
         state="next",
-        priority="high",
     )
 
     conflicting_dates = api_client.get(
@@ -340,11 +328,6 @@ def test_task_query_and_update_validation_edges(api_client) -> None:
         params={"due_before": "2026-09-03", "due_after": "2026-09-01"},
     )
     assert conflicting_dates.status_code == 400
-    duplicate_priority = api_client.get(
-        "/api/tasks",
-        params=[("priority", "low"), ("priority", "low")],
-    )
-    assert duplicate_priority.status_code == 400
 
     due_before = api_client.get("/api/tasks", params={"due_before": "2026-09-03"})
     assert due_before.status_code == 200, due_before.text
@@ -356,12 +339,12 @@ def test_task_query_and_update_validation_edges(api_client) -> None:
         "Beta undated edge",
     ]
 
-    rejected_null_priority = api_client.patch(
+    rejected_priority = api_client.patch(
         f"/api/tasks/{undated['id']}",
-        headers={"Idempotency-Key": "edge-null-priority"},
-        json={"priority": None, "expected_revision": undated["revision"]},
+        headers={"Idempotency-Key": "edge-priority-field"},
+        json={"priority": "high", "expected_revision": undated["revision"]},
     )
-    assert rejected_null_priority.status_code == 400
+    assert rejected_priority.status_code == 422
 
 
 def test_project_archive_keeps_assignments_from_all_lifecycle_states(

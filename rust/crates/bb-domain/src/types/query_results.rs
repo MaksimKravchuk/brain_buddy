@@ -16,7 +16,7 @@ use super::primitives::{
 use super::review_state::{ReviewSession, ReviewSettings, SessionCounts};
 use super::tasks::{Comment, FormulationClock, Project, Subtask, Tag, Task};
 use super::vocabulary::{
-    ChildState, ClearStart, CountedStatus, DateView, Priority, ReceiptKind, ReviewOrigin, TaskState,
+    ChildState, ClearStart, CountedStatus, DateView, ReceiptKind, ReviewOrigin, TaskState,
 };
 use bb_protocol::wire::{Counter, Instant};
 use serde::{Deserialize, Serialize};
@@ -56,7 +56,6 @@ pub struct TaskView {
     pub project_id: Option<ProjectId>,
     pub tag_ids: Vec<TagId>,
     pub due_date: Option<DueDay>,
-    pub priority: Priority,
     pub waiting_for: Option<WaitingFor>,
     pub waiting_since: Option<Instant>,
     pub order_key: Counter,
@@ -89,7 +88,6 @@ impl TaskView {
             project_id: task.project_id.clone(),
             tag_ids: task.tag_ids.clone(),
             due_date: task.due_date.clone(),
-            priority: task.priority,
             waiting_for: task.waiting_for.clone(),
             waiting_since: task.waiting_since.clone(),
             order_key: task.order_key.clone(),

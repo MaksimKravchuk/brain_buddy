@@ -133,7 +133,7 @@ struct SyncEngineRaceTests {
 
         // An older app version folded an edit into the operation in flight.
         let folded = GTDCommand.updateTask(
-            .init(taskID: taskOnB, changes: TaskChanges(title: .set("Draft v2"), priority: .set(.high)))
+            .init(taskID: taskOnB, changes: TaskChanges(title: .set("Draft v2"), details: .set("Folded notes")))
         )
         _ = try await b.store.update { doc in doc.outbox[0].command = folded }
 
@@ -142,7 +142,7 @@ struct SyncEngineRaceTests {
         _ = await b.engine.syncNow()
         let server = try #require(harness.snapshot.tasks[serverTaskID])
         #expect(server.title == "Draft v2")
-        #expect(server.priority == .high, "the folded field was sent after the acknowledgement")
+        #expect(server.details == "Folded notes", "the folded field was sent after the acknowledgement")
         let patches = b.mutations.filter { $0.method == .patch }
         #expect(patches.count == 2)
         #expect(!(patches.last?.bodyText.contains("title") ?? true), "only what was not sent goes out again")

@@ -8,7 +8,7 @@ import hashlib
 import json
 import logging
 import unicodedata
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
 from sqlite3 import Connection
@@ -79,7 +79,6 @@ from .sync.unit_of_work import TaskUnitOfWork
 review_logger = logging.getLogger("app.modules.tasks.review")
 
 _OPEN_STATES = ("inbox", "next", "waiting", "someday")
-_PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2, "none": 3}
 _NOT_SYNC_DISPATCHED = object()
 
 
@@ -632,7 +631,6 @@ class TaskService:
             project_id=payload.project_id,
             tag_ids=payload.tag_ids,
             due_date=payload.due_date,
-            priority=payload.priority,
             waiting_for=waiting_for,
             waiting_since=now if waiting_for else None,
             order_key=self.task_repo.next_order_key(
@@ -742,7 +740,6 @@ class TaskService:
             project_id=project.id if project else None,
             tag_ids=[tag.id for tag in tags],
             due_date=payload.due_date,
-            priority=payload.priority,
             waiting_for=waiting_for,
             waiting_since=now if waiting_for else None,
             order_key=self.task_repo.next_order_key(
@@ -1103,8 +1100,6 @@ class TaskService:
         fields = payload.model_fields_set
         if "title" in fields and payload.title is None:
             raise ValidationFailure("Task title cannot be null.")
-        if "priority" in fields and payload.priority is None:
-            raise ValidationFailure("Task priority cannot be null.")
         if "waiting_for" in fields:
             if task.state != "waiting":
                 raise ValidationFailure(
@@ -1130,7 +1125,6 @@ class TaskService:
             project_id=project_id,
             tag_ids=tag_ids or [],
             due_date=payload.due_date if "due_date" in fields else task.due_date,
-            priority=payload.priority if "priority" in fields else task.priority,
             waiting_for=waiting_for,
             updated_at=now,
             revision=task.revision + 1,
@@ -1353,7 +1347,7 @@ class TaskService:
     ) -> TaskDocument:
         """PATCH in Next: a substantive title restarts, a due date floors.
 
-        Notes, tags, project, priority and waiting-for leave the clock alone
+        Notes, tags, project and waiting-for leave the clock alone
         (FR-003). A due date set, moved or removed raises the task floor to
         ``max(existing, now + 7 d)`` (FR-046) and logs a content-free event.
         """
@@ -1442,7 +1436,6 @@ class TaskService:
         include_completed: bool,
         include_cancelled: bool = False,
         q: str | None = None,
-        priority: Sequence[str] = (),
         due_before: date | None = None,
         due_on: date | None = None,
         due_after: date | None = None,
@@ -1460,8 +1453,6 @@ class TaskService:
             self.task_repo.get_tag_for_owner(tag_id, owner_id=owner_id)
         if sum(value is not None for value in (due_before, due_on, due_after)) > 1:
             raise ValidationFailure("Use only one due date filter at a time.")
-        if len(set(priority)) != len(priority):
-            raise ValidationFailure("Priority filters cannot contain duplicates.")
         normalized_query = self._normalize_search_query(q)
 
         filters = {
@@ -1472,7 +1463,6 @@ class TaskService:
             "include_completed": include_completed,
             "include_cancelled": include_cancelled,
             "q": normalized_query,
-            "priority": sorted(priority),
             "due_before": due_before.isoformat() if due_before else None,
             "due_on": due_on.isoformat() if due_on else None,
             "due_after": due_after.isoformat() if due_after else None,
@@ -1488,7 +1478,6 @@ class TaskService:
             include_completed=include_completed,
             include_cancelled=include_cancelled,
             q=normalized_query,
-            priority=set(priority),
             due_before=due_before,
             due_on=due_on,
             due_after=due_after,
@@ -1513,7 +1502,6 @@ class TaskService:
             tag_id=tag_id,
             unassigned_project=unassigned_project,
             q=normalized_query,
-            priority=set(priority),
             due_before=due_before,
             due_on=due_on,
             due_after=due_after,
@@ -2229,7 +2217,6 @@ class TaskService:
         include_completed: bool,
         include_cancelled: bool,
         q: str,
-        priority: set[str],
         due_before: date | None,
         due_on: date | None,
         due_after: date | None,
@@ -2257,7 +2244,6 @@ class TaskService:
                 and (tag_id is None or tag_id in task.tag_ids)
                 and (not unassigned_project or task.project_id is None)
                 and (not q or self._task_matches_query(task, q))
-                and (not priority or task.priority in priority)
                 and self._task_matches_due_filter(
                     task, due_before=due_before, due_on=due_on, due_after=due_after
                 )
@@ -2273,7 +2259,6 @@ class TaskService:
         tag_id: str | None,
         unassigned_project: bool,
         q: str,
-        priority: set[str],
         due_before: date | None,
         due_on: date | None,
         due_after: date | None,
@@ -2286,7 +2271,6 @@ class TaskService:
             and (tag_id is None or tag_id in task.tag_ids)
             and (not unassigned_project or task.project_id is None)
             and (not q or self._task_matches_query(task, q))
-            and (not priority or task.priority in priority)
             and self._task_matches_due_filter(
                 task, due_before=due_before, due_on=due_on, due_after=due_after
             )
@@ -2371,8 +2355,6 @@ class TaskService:
                 task.due_date.isoformat() if task.due_date is not None else "",
                 *manual,
             )
-        if sort == "priority":
-            return (_PRIORITY_RANK[task.priority], *manual)
         if sort == "title":
             return (cls._normalize_for_search(task.title), task.id)
         return manual

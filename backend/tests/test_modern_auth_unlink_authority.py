@@ -166,6 +166,23 @@ def test_023_fr006_removed_google_cannot_restore_old_owner_by_public_login(moder
     assert service.auth.get_user_for_token(token).id == owner.id
 
 
+def test_023_fr006_binding_erased_after_callback_still_requires_existing_account(
+    modern,
+):
+    """Settled cleanup may erase the mapping between callback and completion."""
+    service, _, _, provider, clock = modern
+    owner, token = owner_with_binding(service, provider, clock)
+    with service.store.transaction() as connection:
+        connection.execute("UPDATE auth_identity_bindings SET state='unlinked'")
+    handoff = broker.provider_handoff(service)
+    with service.store.transaction() as connection:
+        connection.execute("DELETE FROM auth_identity_bindings")
+    result = service.complete_provider(handoff)
+    assert result.payload.status == "existing_account_required"
+    assert result.raw_token is None
+    assert service.auth.get_user_for_token(token).id == owner.id
+
+
 def test_023_fr006_unlink_erases_binding_account_proofs_and_staged_handoff(modern):
     """Remove erases old provider linkage and account confirmations together."""
     service, _, _, provider, clock = modern

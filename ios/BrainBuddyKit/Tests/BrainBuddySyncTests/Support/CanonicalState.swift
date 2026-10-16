@@ -13,7 +13,6 @@ struct CanonicalState: Hashable, CustomStringConvertible {
         var project: String?
         var tags: [String]
         var dueDate: CalendarDay?
-        var priority: TaskPriority
         var waitingFor: String?
         var waitingSince: Int64?
         var completedAt: Int64?
@@ -106,7 +105,7 @@ struct CanonicalState: Hashable, CustomStringConvertible {
             tasks[id] = TaskEntry(
                 title: task.title, details: task.details, state: task.state,
                 project: task.projectID.flatMap { state.projects[$0]?.serverID },
-                tags: task.tagIDs.compactMap { state.tags[$0]?.serverID }, dueDate: task.dueDate, priority: task.priority,
+                tags: task.tagIDs.compactMap { state.tags[$0]?.serverID }, dueDate: task.dueDate,
                 waitingFor: task.waitingFor, waitingSince: Self.micros(task.waitingSince),
                 completedAt: Self.micros(task.completedAt), cancelledAt: Self.micros(task.cancelledAt),
                 orderKey: task.orderKey, createdAt: Self.micros(task.createdAt), updatedAt: Self.micros(task.updatedAt),
@@ -128,7 +127,7 @@ struct CanonicalState: Hashable, CustomStringConvertible {
         for task in snapshot.tasks.values {
             tasks[task.id] = TaskEntry(
                 title: task.title, details: task.details, state: task.state, project: task.projectID, tags: task.tagIDs,
-                dueDate: task.dueDate, priority: task.priority, waitingFor: task.waitingFor,
+                dueDate: task.dueDate, waitingFor: task.waitingFor,
                 waitingSince: Self.micros(task.waitingSince), completedAt: Self.micros(task.completedAt),
                 cancelledAt: Self.micros(task.cancelledAt), orderKey: task.orderKey, createdAt: Self.micros(task.createdAt),
                 updatedAt: Self.micros(task.updatedAt), revision: task.revision,

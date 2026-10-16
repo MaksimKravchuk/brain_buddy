@@ -357,12 +357,12 @@ data, or need a sign-in.
       new project.
 - [ ] Move between lists, complete (the undo toast reopens into the previous
       list), cancel, and reopen from Completed / Cancelled into a chosen list.
-- [ ] Edit title, notes, due date, priority, project, tags and waiting-for;
+- [ ] Edit title, notes, due date, project, tags and waiting-for;
       add, rename, complete and reopen subtasks; add and edit comments.
 - [ ] Projects: create, rename, recolour, archive ("needs a next action"
       shows correctly). Tags: create, rename, delete.
 - [ ] Today shows Overdue / Today / Upcoming; search, sort, group by project,
-      and the priority and tag filters all work.
+      and the tag filter all work.
 - [ ] Widgets show current counts and tasks; completing from a widget or a
       Control Center control updates the app.
 - [ ] Siri / Shortcuts capture and completion work and appear in the app.

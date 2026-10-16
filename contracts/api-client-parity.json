@@ -2,7 +2,7 @@
   "version": 1,
   "purpose": "Test-only common wire parity inventory; not an API authority or bundled asset.",
   "operations": {
-    "listTasks": {"family":"Tasks","method":"GET","path":"/tasks?state=inbox&project_id=project-1&tag_id=tag-1&cursor=page-2&limit=25&include_completed=true&include_cancelled=true&q=shared&unassigned_project=true&priority=high&priority=medium&due_before=2026-08-01&due_on=2026-08-02&due_after=2026-08-03&sort=due","body":"none","idempotency":false,"headers":[],"notes":"filters are trimmed, omitted when empty, and repeated for priority"},
+    "listTasks": {"family":"Tasks","method":"GET","path":"/tasks?state=inbox&project_id=project-1&tag_id=tag-1&cursor=page-2&limit=25&include_completed=true&include_cancelled=true&q=shared&unassigned_project=true&due_before=2026-08-01&due_on=2026-08-02&due_after=2026-08-03&sort=due","body":"none","idempotency":false,"headers":[],"notes":"filters are trimmed and omitted when empty"},
     "createTask": {"family":"Tasks","method":"POST","path":"/tasks","body":"json","idempotency":true,"headers":[],"notes":"caller supplies Idempotency-Key"},
     "smartAddTask": {"family":"Tasks","method":"POST","path":"/tasks/smart-add","body":"json","idempotency":true,"headers":[],"notes":"caller supplies Idempotency-Key"},
     "getTask": {"family":"Tasks","method":"GET","path":"/tasks/task-1","body":"none","idempotency":false,"headers":[],"notes":"task id is path input"},

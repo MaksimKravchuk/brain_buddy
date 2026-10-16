@@ -367,7 +367,6 @@ def test_020_FR_044_sweep_over_an_invalid_payload_logs_only_the_exception_type(
             ).fetchone()[0]
         )
         payload["title"] = PAYLOAD_TEXT * 40  # over the 500-character limit
-        payload["priority"] = PAYLOAD_TEXT
         conn.execute(
             "UPDATE tasks SET payload = ? WHERE id = ?",
             (json.dumps(payload), task["id"]),

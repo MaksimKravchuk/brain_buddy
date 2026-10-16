@@ -251,9 +251,6 @@ export const apiClient = {
     if (filters.unassignedProject) {
       params.set("unassigned_project", "true");
     }
-    for (const priority of filters.priority ?? []) {
-      params.append("priority", priority);
-    }
     if (filters.dueBefore) {
       params.set("due_before", filters.dueBefore);
     }

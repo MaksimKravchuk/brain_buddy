@@ -47,14 +47,14 @@ struct SyncEnginePushTests {
             .createTask(
                 .init(
                     taskID: "x", title: "  Renew passport ", details: "", list: .inbox,
-                    dueDate: CalendarDay(year: 2026, month: 10, day: 15), priority: .high, projectID: "p", tagIDs: ["t"]
+                    dueDate: CalendarDay(year: 2026, month: 10, day: 15), projectID: "p", tagIDs: ["t"]
                 )
             ),
             on: device, expecting: "POST /tasks"
         )
         let taskServerID = try #require(try await device.document().base.tasks["x"]?.serverID)
         try await push(
-            .updateTask(.init(taskID: "x", changes: TaskChanges(details: .set("Photos first"), priority: .set(.medium)))),
+            .updateTask(.init(taskID: "x", changes: TaskChanges(details: .set("Photos first")))),
             on: device, expecting: "PATCH /tasks/\(taskServerID)"
         )
         try await push(
@@ -95,7 +95,6 @@ struct SyncEnginePushTests {
         #expect(task.title == "Renew passport")
         #expect(task.details == "Photos first")
         #expect(task.state == .completed)
-        #expect(task.priority == .medium)
         #expect(task.projectID == projectServerID, "an archive leaves the task in its project")
         #expect(task.tagIDs.isEmpty)
         #expect(task.subtasks.map(\.title) == ["Book photo studio"])

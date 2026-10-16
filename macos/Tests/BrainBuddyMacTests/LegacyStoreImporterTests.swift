@@ -62,7 +62,6 @@ struct LegacyStoreImporterTests {
         #expect(van.subtasks.map(\.state) == [.open, .completed, .cancelled])
         #expect(van.comments.map(\.body) == ["Van company said Friday is free", "Budget is 120 EUR, fuel included"])
         #expect(van.comments.allSatisfy { $0.editedAt == nil }, "the edit marker is not carried")
-        #expect(van.priority == .medium)
         let deposit = try task(state, "Deposit back from landlord")
         #expect(deposit.state == .waiting && deposit.waitingFor == "Landlord")
         #expect(deposit.createdAt == LegacySnapshot.date("2026-09-25T09:00:00Z"))
@@ -704,7 +703,7 @@ struct LegacyStoreGenerator {
             var task: [String: Any] = [
                 "id": "task_\(index)", "title": text(maxGraphemes: 500), "state": state, "revision": int(1...5),
                 "tagIDs": Array(Set((0..<int(0...2)).compactMap { _ in tags.isEmpty ? nil : pick(tags)["id"] as? String })).sorted(),
-                "priority": pick(["none", "low", "medium", "high"]), "orderKey": int(1...50), "createdAt": created,
+                "orderKey": int(1...50), "createdAt": created,
             ]
             if !projects.isEmpty, int(0...1) == 0 { task["projectID"] = pick(projects)["id"] }
             if int(0...3) == 0 {

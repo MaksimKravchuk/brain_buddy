@@ -1,5 +1,8 @@
 # Contract: iOS core commands, records and outbox (020)
 
+> **Superseded in part (2026-10-15)**: [ADR-0033](../../../docs/decisions/0033-remove-task-priority.md) removes task priority. Every
+> task-priority field, value, filter, sort and control in this document is withdrawn.
+
 **Package**: `ios/BrainBuddyKit` (Swift 6.2, no third-party dependencies, every target
 Linux-testable via `sh ios/scripts/swift-linux.sh test`). **Rule source**:
 `contracts/formulation-clock.md`. **Wire**: `contracts/http.md`.

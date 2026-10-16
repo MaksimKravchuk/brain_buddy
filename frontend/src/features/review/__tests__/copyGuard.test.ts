@@ -46,7 +46,6 @@ function task(overrides: Partial<TaskResponse> = {}, formulation: Partial<NonNul
     project_id: null,
     tag_ids: [],
     due_date: null,
-    priority: "none",
     waiting_for: null,
     waiting_since: null,
     order_key: 1,

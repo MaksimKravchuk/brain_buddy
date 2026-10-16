@@ -60,7 +60,6 @@ fn task_from(record: &Value) -> Task {
         "state",
         "project_id",
         "due_date",
-        "priority",
         "waiting_for",
         "waiting_since",
         "created_at",

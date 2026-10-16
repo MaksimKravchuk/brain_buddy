@@ -6,6 +6,9 @@
 
 **Status**: Planning repaired; implementation prohibited until the campaign-2 gate closes
 
+**Superseded in part (2026-10-15)**: ADR-0033 removes task priority from the product.
+FR-006, SC-014 and the priority parts of FR-025, FR-028 and FR-039 are withdrawn.
+
 **Input**: `intake.md` — portable founder brief and Max's named 2026-08-15 answers to
 HD-01…HD-09; `research.md` embeds the portable source provenance and campaign-1 carry-forward.
 

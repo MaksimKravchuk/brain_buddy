@@ -151,7 +151,7 @@ extension StoreDocument {
         return TaskRecord(
             id: id, serverID: dto.id, serverRevision: dto.revision, title: dto.title, details: dto.details,
             state: dto.state, lastOpenList: lastOpenList, projectID: projectID, tagIDs: tagIDs, dueDate: dto.dueDate,
-            priority: dto.priority, waitingFor: dto.waitingFor, waitingSince: dto.waitingSince,
+            waitingFor: dto.waitingFor, waitingSince: dto.waitingSince,
             completedAt: dto.completedAt, cancelledAt: dto.cancelledAt, orderKey: dto.orderKey,
             createdAt: dto.createdAt, updatedAt: dto.updatedAt, subtasks: existing?.subtasks ?? [],
             comments: existing?.comments ?? [], childrenSyncedAt: existing?.childrenSyncedAt,

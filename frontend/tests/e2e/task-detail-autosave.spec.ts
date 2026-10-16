@@ -29,9 +29,9 @@ test("task edits stay saved after independently revised subtasks and comments", 
 
   await test.step("save a parent field without mistaking the child projection for a conflict", async () => {
     const saved = page.waitForResponse((response) => response.request().method() === "PATCH" && response.url().endsWith(`/api/tasks/${task.id}`));
-    await panel.getByLabel("Priority", { exact: true }).selectOption("high");
+    await panel.getByLabel("Due date", { exact: true }).fill("2026-09-03");
     const response = await saved;
-    if (!response.ok()) throw new Error(`Priority save failed with ${response.status()}`);
+    if (!response.ok()) throw new Error(`Due date save failed with ${response.status()}`);
     await expect(panel.getByText("Not saved", { exact: true })).toHaveCount(0);
     await expect(panel.getByRole("alert")).toHaveCount(0);
     await expect(panel.getByRole("button", { name: "Complete Check navigation labels" })).toBeVisible();
@@ -41,16 +41,16 @@ test("task edits stay saved after independently revised subtasks and comments", 
 
   await test.step("reload the canonical task and verify durable edits without false recovery", async () => {
     await page.reload();
-    await expect(panel.getByLabel("Priority", { exact: true })).toHaveValue("high");
+    await expect(panel.getByLabel("Due date", { exact: true })).toHaveValue("2026-09-03");
     await expect(panel.getByRole("button", { name: "Complete Check navigation labels" })).toBeVisible();
     await expect(panel.getByText("Check the mobile drawer too.")).toBeVisible();
     await expect(panel.getByText("Not saved", { exact: true })).toHaveCount(0);
     await expect(page.getByText("Unsaved task change recovered. Retry or Discard.", { exact: true })).toHaveCount(0);
-    const canonical = await apiGet<{ priority: string; subtasks: Array<{ title: string }>; comments: Array<{ body: string }> }>(page, `/api/tasks/${task.id}`);
+    const canonical = await apiGet<{ due_date: string | null; subtasks: Array<{ title: string }>; comments: Array<{ body: string }> }>(page, `/api/tasks/${task.id}`);
     await attachment("Persisted synthetic task", JSON.stringify(canonical), ContentType.JSON);
-    if (canonical.priority !== "high" || canonical.subtasks.length !== 1 || canonical.subtasks[0].title !== "Check navigation labels" ||
+    if (canonical.due_date !== "2026-09-03" || canonical.subtasks.length !== 1 || canonical.subtasks[0].title !== "Check navigation labels" ||
       canonical.comments.length !== 1 || canonical.comments[0].body !== "Check the mobile drawer too.") {
-      throw new Error("Expected the priority, subtask and comment to remain durable after reload");
+      throw new Error("Expected the due date, subtask and comment to remain durable after reload");
     }
   });
 });
