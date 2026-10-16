@@ -8,6 +8,8 @@ enum MacSettingsTab: Int, CaseIterable, Identifiable {
 
     var id: Int { rawValue }
     var title: String { AccountSettingsCopy.tabNames[rawValue] }
+    /// Each tab's own accessible name (028-FR-002); never shared between tabs.
+    var accessibilityName: String { title }
     var icon: MacBoardIcon {
         switch self {
         case .account: .account
@@ -46,6 +48,7 @@ struct MacSettingsView: View {
         .toolbar {
             ToolbarItem(placement: .principal) {
                 HStack(spacing: 4) { ForEach(MacSettingsTab.allCases) { tabButton($0) } }
+                    .accessibilityElement(children: .contain)
             }
         }
     }
@@ -70,9 +73,12 @@ struct MacSettingsView: View {
                 if chosen { RoundedRectangle(cornerRadius: 8, style: .continuous).fill(CarryOnColorStyle.coControlQuiet) }
             }
             .contentShape(Rectangle())
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(tab.accessibilityName)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(tab.title)
+        .accessibilityLabel(tab.accessibilityName)
+        .accessibilityIdentifier("settings-tab-\(tab.accessibilityName.lowercased())")
         .accessibilityAddTraits(chosen ? .isSelected : [])
     }
 
