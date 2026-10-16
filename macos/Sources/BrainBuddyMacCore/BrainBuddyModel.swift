@@ -1479,7 +1479,7 @@ private final class AgentStepsBox {
 private struct AccountAgentRuns: AgentRunsRemote {
     let workspace: Workspace
 
-    static func client(for account: LinkedAccount) -> BrainBuddyAPIClient {
+    @MainActor static func client(for account: LinkedAccount) -> BrainBuddyAPIClient {
         BrainBuddyAPIClient(
             baseURL: account.serverURL, tokenStore: WorkspaceHost.systemTokenStore(), identity: WorkspaceHost.clientIdentity)
     }
