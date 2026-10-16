@@ -156,9 +156,13 @@ is also pinned to a commit SHA (with its tag in a comment).
   passed and its commit changed the app itself, it uploads that commit, so
   every `main` build passed `ios-kit` and `ios-app` first. "The app itself"
   is `BrainBuddy/`, `BrainBuddyWidgets/`, `Shared/`, the kit's `Sources/`,
-  `Package.swift`/`Package.resolved` and `project.yml`, minus Markdown
-  (`ci/testflight_changes.py`); tests, docs, `ci/`, `scripts/` and the macOS
-  app alone never upload. The commit is compared with its first parent,
+  `Package.swift`/`Package.resolved`, `project.yml`,
+  `scripts/build-rust-bridge.sh` and the Rust crates the app links through
+  `bb-swift` (its dependency closure, read from the Cargo manifests, plus
+  `rust/Cargo.lock` and the toolchain file), minus Markdown and crate tests
+  (`ios-testflight` in `../scripts/release_graph.py`; run
+  `python3 scripts/release_graph.py show` to list it); tests, docs, `ci/`,
+  the macOS app and Rust crates the app does not link never upload. The commit is compared with its first parent,
   which covers a trunk landing and a merged or squashed pull request; if
   several commits are pushed at once only the last one is checked, so
   dispatch the workflow for anything that missed an upload.
