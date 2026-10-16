@@ -338,7 +338,7 @@ function AgentRegistryTable({
 }): React.JSX.Element {
   return (
     <div className="min-w-0">
-      <table aria-label="Your agents" className="block w-full">
+      <table aria-label="Your agents" className="block w-full md:table md:table-fixed md:border-separate md:border-spacing-y-3">
         <thead className="sr-only">
           <tr>
             {['Agent', 'Version', 'Protocol', 'Interface', 'Status', 'Actions'].map((heading) => (
@@ -348,7 +348,7 @@ function AgentRegistryTable({
             ))}
           </tr>
         </thead>
-        <tbody className="block space-y-3">
+        <tbody className="block space-y-3 md:table-row-group md:space-y-0">
           {connections.map((connection) => (
             <ConnectionRow
               key={connection.id}
@@ -444,8 +444,8 @@ function ConnectionRow({
 
   return (
     <>
-      <tr aria-label={connection.name} className="block">
-        <td colSpan={6} className="block p-0">
+      <tr aria-label={connection.name} className="block md:table-row">
+        <td colSpan={6} className="block p-0 md:table-cell">
         <article
           aria-label={connection.name}
           className="flex flex-col gap-2 rounded-card bg-card p-4"
