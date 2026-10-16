@@ -100,7 +100,9 @@ final class AgentRunSectionModel {
     private(set) var runs: [AgentRunDTO] = []
     private(set) var asksPassword = false
     var selectedRunID: String?
-    var answer = "", nextStep = "", password = ""
+    var answer = ""
+    var nextStep = ""
+    var password = ""
 
     let taskServerID: String
     let projectID: String?
@@ -249,14 +251,14 @@ struct AgentRunSectionView: View {
     }
 
     private func plain(_ text: String, _ color: CarryOnColorStyle) -> some View {
-        Text(verbatim: text).font(MacInspectorFont.body).foregroundStyle(color)
+        Text(verbatim: text).font(MacRowFont.action(size: 14, weight: 400, relativeTo: .body)).foregroundStyle(color)
             .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
     }
 
     private func card(_ title: String, _ text: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(verbatim: title).font(MacRowFont.sectionHeader).foregroundStyle(CarryOnColorStyle.coTextSecondary)
-            Text(verbatim: text).font(MacInspectorFont.body).foregroundStyle(CarryOnColorStyle.coTextPrimary)
+            Text(verbatim: text).font(MacRowFont.action(size: 14, weight: 400, relativeTo: .body)).foregroundStyle(CarryOnColorStyle.coTextPrimary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(10).frame(maxWidth: .infinity, alignment: .leading)
