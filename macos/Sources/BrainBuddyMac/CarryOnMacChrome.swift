@@ -122,6 +122,8 @@ struct MacSidebarRowLabel: View {
     enum Leading {
         case symbol(String)
         case dot(Color)
+        /// One of the board's own icons, drawn at 16pt.
+        case icon(MacBoardIcon)
     }
 
     let title: String
@@ -174,6 +176,9 @@ struct MacSidebarRowLabel: View {
                 .foregroundStyle(symbolStyle)
         case .dot(let color):
             Circle().fill(color).frame(width: 9, height: 9)
+        case .icon(let icon):
+            MacBoardIconView(icon: icon, size: 16)
+                .foregroundStyle(symbolStyle)
         }
     }
 }

@@ -597,6 +597,13 @@ struct WorkspaceView: View {
         .selectionDisabled()
     }
 
+    /// A project's colour dot, else the board's own icon for a fixed destination, else the SF Symbol.
+    private func leading(symbol: String, destination: WorkspaceDestination, tint: Color?) -> MacSidebarRowLabel.Leading {
+        if let tint { return .dot(tint) }
+        if let icon = MacBoardIcon(destination: destination) { return .icon(icon) }
+        return .symbol(symbol)
+    }
+
     private func sidebarButton(
         _ title: String, symbol: String, destination: WorkspaceDestination, tint: Color? = nil
     ) -> some View {
@@ -609,7 +616,7 @@ struct WorkspaceView: View {
             requestNavigation(.destination(destination))
         } label: {
             MacSidebarRowLabel(
-                title: title, leading: tint.map { MacSidebarRowLabel.Leading.dot($0) } ?? .symbol(symbol),
+                title: title, leading: leading(symbol: symbol, destination: destination, tint: tint),
                 trailing: count.map { "\($0)" }, selected: model.destination == destination
             )
         }
