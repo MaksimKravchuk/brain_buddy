@@ -1701,91 +1701,60 @@ struct WorkspaceView: View {
         return "Preparing preview…"
     }
 
+    /// The new-task card (board "10 Create task"): ⌘N focuses its title field. Smart Add's preview
+    /// files the draft under a project and tags, shown as chips once it is ready.
     private var smartAdd: some View {
         let preview = model.capturePreview
         let hasDraft = !model.draft.isEmpty
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 12) {
-                Image(systemName: "plus.circle")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-                TextField("Add a task", text: $model.draft)
-                    .textFieldStyle(.plain)
-                    .focused($addFocused)
-                    .onSubmit { requestNavigation(.createTask) }
-            }
+        let ready = model.capturePreviewReadiness == .ready
+        return MacNewTaskCard(listTitle: model.selectedList.title) {
+            TextField("Add a task", text: $model.draft)
+                .textFieldStyle(.plain)
+                .macNewTaskTitleField()
+                .focused($addFocused)
+                .onSubmit { requestNavigation(.createTask) }
+        } details: {
             if model.selectedList == .waiting {
                 TextField("Waiting for person, event, or condition", text: $model.waitingForDraft)
+                    .textFieldStyle(.plain)
+                    .macCaptureField()
                     .onSubmit { requestNavigation(.createTask) }
+                    .padding(.top, 12)
             }
             if hasDraft || model.selectedList == .waiting {
-                HStack {
-                    if model.capturePreviewReadiness == .ready, !preview.tokens.isEmpty, !preview.title.isEmpty {
-                        Text("“\(preview.title)”")
-                            .font(.caption.weight(.semibold))
-                            .lineLimit(1)
-                    }
-                    if model.capturePreviewReadiness == .ready {
-                        Text("Will save in \(model.selectedList.title)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text(capturePreviewStatus)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    if case .failed = model.capturePreviewReadiness {
-                        Button("Retry preview") { Task { await model.prepareCapturePreview(model.captureDraft) } }
-                    }
-                    Button("Add task") { requestNavigation(.createTask) }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(model.capturePreviewReadiness != .ready || addDisabled(preview))
+                if ready, !preview.tokens.isEmpty, !preview.title.isEmpty {
+                    MacCaptureNote(text: "“\(preview.title)”")
                 }
-                if model.capturePreviewReadiness == .ready {
-                    Text(previewClassification(preview))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                if ready {
+                    MacNewTaskClassification(project: preview.project, tags: preview.tags)
+                } else {
+                    MacCaptureNote(text: capturePreviewStatus, topPadding: 14)
                 }
-                if model.capturePreviewReadiness == .ready, hasDraft, let problem = preview.problemMessage, preview.problem != .emptyTitle {
-                    Text(problem)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                        .fixedSize(horizontal: false, vertical: true)
+                if ready, hasDraft, let problem = preview.problemMessage, preview.problem != .emptyTitle {
+                    MacCaptureNote(text: problem, danger: true)
                 }
                 if model.hasAppliedTaskFilter || !model.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text("Current search may hide the new task from this list.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    MacCaptureNote(text: "Current search may hide the new task from this list.")
+                }
+                MacNewTaskFooter(
+                    addEnabled: ready && !addDisabled(preview), hint: "⌘N · Return adds",
+                    onAdd: { requestNavigation(.createTask) }
+                ) {
+                    if case .failed = model.capturePreviewReadiness {
+                        Button("Retry preview") { Task { await model.prepareCapturePreview(model.captureDraft) } }
+                            .buttonStyle(.macQuietPill)
+                    }
                 }
             }
             if let notice = model.captureNotice {
-                Text(notice)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                MacCaptureNote(text: notice, topPadding: 12)
                 if model.hasAppliedTaskFilter {
                     Button("Clear search") { requestNavigation(.clearTaskFilters) }
-                        .font(.caption)
+                        .buttonStyle(.macQuietPill)
+                        .padding(.top, 4)
                 }
             }
         }
-        .textFieldStyle(.roundedBorder)
-        .padding(13)
-        .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 13))
-        .overlay {
-            RoundedRectangle(cornerRadius: 13)
-                .strokeBorder(Color.primary.opacity(0.12))
-                .allowsHitTesting(false)
-        }
-    }
-
-    private func previewClassification(_ preview: CapturePreview) -> String {
-        let project = preview.project.map { $0.isNew ? "\($0.name) (new project)" : $0.name } ?? "No project"
-        let tags = preview.tags.map { $0.isNew ? "#\($0.name) (new tag)" : "#\($0.name)" }
-        return ([project] + (tags.isEmpty ? ["No tags"] : tags)).joined(separator: " · ")
     }
 
     private func addDisabled(_ preview: CapturePreview) -> Bool {
@@ -1954,29 +1923,13 @@ extension WorkspaceView {
     }
 
     private var captureListSheet: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Add task to").font(.title2.bold())
-            Picker("GTD list", selection: $captureListChoice) {
-                ForEach(TaskList.allCases) { list in
-                    Text(list.title).tag(list)
-                }
-            }
-            .pickerStyle(.radioGroup)
-            HStack {
-                Spacer()
-                Button("Cancel") { choosingCaptureList = false }
-                    .keyboardShortcut(.cancelAction)
-                Button("Continue") {
-                    model.choose(.list(captureListChoice))
-                    focusCaptureAfterChoice = true
-                    choosingCaptureList = false
-                }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
-            }
+        MacPutItInContent(selection: $captureListChoice) {
+            model.choose(.list(captureListChoice))
+            focusCaptureAfterChoice = true
+            choosingCaptureList = false
+        } onCancel: {
+            choosingCaptureList = false
         }
-        .padding(24)
-        .frame(width: 360)
     }
 
     private func reopenSheet(_ task: TaskRecord) -> some View {

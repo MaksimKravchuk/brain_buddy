@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import BrainBuddyDesign
 import SwiftUI
 // `@preconcurrency`, documented as research R2 asks: WhisperKit 0.18.0 declares `WhisperKit` as an
 // `open class` with no `Sendable` conformance and no isolation, so every `await` on it from an actor
@@ -140,75 +141,68 @@ final class VoiceCaptureModel: ObservableObject {
     }
 }
 
+/// The voice sheet in Carry On (board "11 Voice capture"): `MacVoiceCaptureCard` over this model.
 struct VoiceCaptureView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var model = VoiceCaptureModel()
     @State private var language = "ru"
     let onUseAsTask: ((String) -> Void)?
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Text("Voice to task draft").font(.title2.bold())
-                Spacer()
-                Button("Close") { dismiss() }
-            }
-            Picker("Language", selection: $language) {
-                Text("Russian").tag("ru")
-                Text("English").tag("en")
-                Text("Auto").tag("auto")
-            }
-            .pickerStyle(.segmented)
-            .disabled(model.recording || model.transcribing)
-            HStack {
-                if model.recording {
-                    Button("Stop & transcribe") {
-                        Task { await model.stopAndTranscribe(language: language) }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    Button("Discard") { model.discard() }
-                } else {
-                    Button("Record") { Task { await model.start() } }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(model.transcribing)
-                }
-                if model.transcribing {
-                    ProgressView(model.preparingModel ? "Loading local speech model…" : "Transcribing on this Mac…")
-                }
-            }
-            if let error = model.error {
-                Text(error).foregroundStyle(.red)
-            }
-            if !model.transcript.isEmpty {
-                TextEditor(text: $model.transcript)
-                    .font(.body)
-                    .frame(minHeight: 88, maxHeight: 150)
-                    .accessibilityLabel("Editable transcript")
-            }
-            HStack(spacing: 10) {
-                if let onUseAsTask {
-                    Button("Use as task draft") {
-                        onUseAsTask(model.transcript.trimmingCharacters(in: .whitespacesAndNewlines))
-                        dismiss()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(model.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-                Spacer()
-                if !model.transcript.isEmpty {
-                    Menu("More") {
-                        Button("Record again") { model.discard(); Task { await model.start() } }
-                        Button("Copy transcript") {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(model.transcript, forType: .string)
-                        }
-                        Button("Discard transcript", role: .destructive) { model.discard() }
-                    }
-                }
-            }
+    private static let languages = [
+        MacChoice(value: "ru", title: "Russian"),
+        MacChoice(value: "en", title: "English"),
+        MacChoice(value: "auto", title: "Auto"),
+    ]
+
+    private var phase: MacVoicePhase {
+        if model.recording { return .recording }
+        if model.transcribing { return model.preparingModel ? .preparingModel : .transcribing }
+        return .idle
+    }
+
+    private var cleanTranscript: String { model.transcript.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    /// "Use as task draft": hands the transcript as it is when chosen to the caller, then closes.
+    private var useAsTask: (() -> Void)? {
+        guard let onUseAsTask else { return nil }
+        return {
+            onUseAsTask(cleanTranscript)
+            dismiss()
         }
-        .padding(22)
-        .frame(minWidth: 460, minHeight: 220)
+    }
+
+    var body: some View {
+        MacVoiceCaptureCard(
+            phase: phase, languages: Self.languages, language: $language, error: model.error,
+            hasTranscript: !model.transcript.isEmpty, canUseTranscript: !cleanTranscript.isEmpty,
+            onRecord: { Task { await model.start() } },
+            onStop: { Task { await model.stopAndTranscribe(language: language) } },
+            onDiscardRecording: { model.discard() },
+            onUseAsTask: useAsTask,
+            onClose: { dismiss() }
+        ) {
+            TextEditor(text: $model.transcript)
+                .font(MacCaptureFont.field)
+                .foregroundStyle(CarryOnColorStyle.coTextPrimary)
+                .scrollContentBackground(.hidden)
+                .frame(minHeight: 88, maxHeight: 150)
+                .accessibilityLabel("Editable transcript")
+        } more: {
+            Menu {
+                Button("Record again") { model.discard(); Task { await model.start() } }
+                Button("Copy transcript") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(model.transcript, forType: .string)
+                }
+                Button("Discard transcript", role: .destructive) { model.discard() }
+            } label: {
+                Text("More")
+                    .font(MacRowFont.pill)
+                    .foregroundStyle(CarryOnColorStyle.coTextPrimary)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+        }
         .onDisappear { model.cancel() }
     }
 }
