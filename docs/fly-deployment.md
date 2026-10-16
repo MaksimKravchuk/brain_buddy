@@ -23,6 +23,7 @@ Deploy the Brain Buddy backend and frontend as separate Fly.io apps. The backend
 - **Workflow location:** `.github/workflows/ci.yml` runs on pushes/PRs to `main`. It lints and type-checks the backend (Ruff + mypy), runs backend pytest with coverage, executes frontend unit tests with coverage, builds the frontend bundle, and performs Docker image builds for both services.
 - **Run locally:** `make test-backend` and `make test-frontend` mirror the CI steps. Optionally, `docker compose build` validates the Dockerfiles locally.
 - **Deploy only after green:** Wait for the CI badge in the README or the Actions tab to go green. If CI is red, fix the failures locally before running any Fly deploys.
+- **Only what changed is released:** `deploy-fly-production.yml` deploys the backend only when the landing touches `backend/`, `fly.backend.toml` or the Rust crates the backend wheel links (`bb-python` and its dependencies, read from the Cargo manifests), and the frontend only for `frontend/`, `fly.frontend.toml` or `deploy/nginx/`. Shared inputs (`fly.toml`, `.dockerignore`, Dockerfiles) and any unknown path deploy both; docs, specs, CI config, `ios/`, `macos/`, `cli/`, `contracts/` and other Rust crates deploy neither. A changed backend secret (a rotated smoke identity) still forces a backend deploy so the smoke test logs in against it. The rules live in `scripts/release_graph.py` (`python3 scripts/release_graph.py show`), shared with the TestFlight upload.
 
 ## Backend setup (API)
 1. **Create the app (once):**
