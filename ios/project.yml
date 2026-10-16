@@ -165,6 +165,7 @@ targets:
         products:
           - BrainBuddyWorkspace
           - BrainBuddyCore
+          - BrainBuddyDesign
       - sdk: WidgetKit.framework
       - sdk: SwiftUI.framework
       - sdk: AppIntents.framework

@@ -101,9 +101,9 @@ struct InboxWidgetView: View {
 
     // MARK: Copy
 
-    /// "3 to process" or "Inbox is clear".
+    /// "3 to sort" or "Inbox is clear".
     private var status: String {
-        entry.count == 0 ? "Inbox is clear" : "\(entry.count) to process"
+        entry.count == 0 ? "Inbox is clear" : "\(entry.count) to sort"
     }
 
     /// "3 in Inbox" or "Inbox is clear", for the one-line Lock Screen slot.
@@ -127,21 +127,18 @@ struct InboxWidgetView: View {
 
     // MARK: Families
 
+    /// Board 12: a card with "Inbox", the count in a serif, "to sort" and a
+    /// round basalt "+" at the bottom right. The whole widget opens capture
+    /// (`widgetURL`); the "+" only says so. Sizes are the board's (`WidgetFont`).
     private var small: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Label {
-                Text("Inbox")
-                    .foregroundStyle(palette.primaryText)
-            } icon: {
-                Image(systemName: "tray")
-                    .foregroundStyle(palette.accent)
-                    .widgetAccentable()
-            }
-            .font(.caption.weight(.semibold))
+            Text("Inbox")
+                .font(WidgetFont.action(size: 13))
+                .foregroundStyle(palette.secondaryText)
 
             if entry.isAvailable {
                 Text(entry.count, format: .number)
-                    .font(.system(size: 40, weight: .semibold))
+                    .font(WidgetFont.voice(size: 44))
                     .monospacedDigit()
                     .foregroundStyle(palette.primaryText)
                     .contentTransition(.numericText())
@@ -151,24 +148,30 @@ struct InboxWidgetView: View {
                     if entry.count == 0 {
                         Text("Inbox is clear")
                     } else {
-                        Text("to process")
+                        Text("to sort")
                     }
                 }
-                .font(.footnote)
+                .font(WidgetFont.action(size: 12))
                 .foregroundStyle(palette.secondaryText)
                 .accessibilityHidden(true)
             } else {
                 Text("Open Brain Buddy to see your inbox.")
-                    .font(.footnote)
+                    .font(WidgetFont.action(size: 12))
                     .foregroundStyle(palette.secondaryText)
             }
 
             Spacer(minLength: 0)
 
-            Label("Capture", systemImage: "plus.circle.fill")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(palette.accentText)
-                .widgetAccentable()
+            HStack {
+                Spacer(minLength: 0)
+                Image(systemName: "plus")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(palette.background)
+                    .frame(width: 36, height: 36)
+                    .background(palette.primaryText, in: Circle())
+                    .widgetAccentable()
+                    .accessibilityLabel("Capture")
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }

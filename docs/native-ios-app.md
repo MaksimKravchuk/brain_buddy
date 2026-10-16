@@ -305,9 +305,11 @@ Navigation (iPhone; iPad uses the adaptable sidebar):
 | Search | `Tab(role: .search)` across all tasks |
 
 - **Capture is always one tap away**: a glass capture bar in the tab view's
-  bottom accessory opens the capture sheet — Smart Add with highlighted
-  tokens and a live preview of the project and tags that will be used or
-  created, list picker (Waiting asks who or what), due date, notes.
+  bottom accessory opens the capture sheet (Carry On board 10, a large
+  sheet) — a "New · goes to <list or project>" line, Smart Add with
+  highlighted tokens and a live preview of the project and tags that will be
+  used or created, "+ Date" and "+ Note" chips, "Put it in" list chips
+  (Waiting asks who or what), and Add in a floating glass bar.
 - Task detail is a half sheet over the list (Carry On boards 13 to 20),
   presented by the router for every row, the Next actions card and the
   `brainbuddy://task/<id>` link; it pulls up to full height for properties
