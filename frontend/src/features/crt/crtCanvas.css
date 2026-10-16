@@ -11,13 +11,6 @@
   color: var(--role-ink);
 }
 
-.crt-canvas-definitions {
-  position: absolute;
-  width: 0;
-  height: 0;
-  overflow: hidden;
-}
-
 /* One 56px bar, the height of the app's top bar: exit link and tree menu on
    the left, save state and shortcuts on the right. */
 .crt-canvas-toolbar {
@@ -42,13 +35,6 @@
   margin: 0;
   font-size: 1.1rem;
   font-weight: 700;
-}
-
-.crt-canvas-eyebrow {
-  margin: 0 0 0.2rem;
-  color: var(--role-ink-muted);
-  font-size: 0.9375rem;
-  font-weight: 600;
 }
 
 .crt-canvas-toolbar-actions,
