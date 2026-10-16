@@ -176,7 +176,7 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
           <DeletionCancelledBanner />
           <div className="flex h-[calc(100vh-56px)] min-h-0 overflow-hidden">
             <aside className="hidden w-[248px] shrink-0 pb-3 pl-3 lg:block">
-              <div className="h-full overflow-y-auto rounded-card bg-sunken px-3 pb-6 pt-4">
+              <div className="h-full overflow-y-auto rounded-card co-glass px-3 pb-6 pt-4">
                 <Sidebar {...props} />
               </div>
             </aside>
@@ -668,7 +668,7 @@ function NavigationDrawer({ open, onClose, ...props }: NavigationDrawerProps): R
         </div>
         <TaskSearch className="mb-3 flex gap-2 px-2 md:hidden" onSubmit={onClose} />
         <div
-          className="min-h-0 flex-1 overflow-y-auto rounded-card bg-sunken px-3 pb-6 pt-4"
+          className="min-h-0 flex-1 overflow-y-auto rounded-card co-glass px-3 pb-6 pt-4"
           onClick={(event) => {
             const target = event.target as HTMLElement;
             if (target.closest("a")) {
