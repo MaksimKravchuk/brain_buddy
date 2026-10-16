@@ -12,6 +12,7 @@ struct AgentDetailsScreen: View {
     let connectionID: String
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(AgentsSession.self) private var agents: AgentsSession?
     @State private var editor: AgentConnectionEditor?
 
     private var connection: AgentConnectionDTO? { model.connections.first { $0.id == connectionID } }
@@ -155,6 +156,10 @@ struct AgentDetailsScreen: View {
 
     // MARK: actions
 
+    /// Test again and Replace credential need the relay flag on, as Add new agent does (030-FR-002, 030-FR-036);
+    /// Delete works with it off.
+    private var relayActionsEnabled: Bool { agents?.canAddAgent == true }
+
     private func actions(_ connection: AgentConnectionDTO) -> some View {
         VStack(spacing: CGFloat(CarryOnSpace.md)) {
             HStack(spacing: CGFloat(CarryOnSpace.xs)) {
@@ -165,7 +170,7 @@ struct AgentDetailsScreen: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.carryOnSecondary)
-                .disabled(!model.canTest)
+                .disabled(!model.canTest || !relayActionsEnabled)
                 if !model.isPasswordless {
                     Button {
                         open(.replaceCredential(connection))
@@ -174,7 +179,7 @@ struct AgentDetailsScreen: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.carryOnSecondary)
-                    .disabled(!model.controlsEnabled)
+                    .disabled(!model.controlsEnabled || !relayActionsEnabled)
                 }
             }
             // Deleting needs the current password, so a passwordless account is not offered it (030-FR-036).
