@@ -37,8 +37,8 @@
                     showsLocalTasksNotice: message == nil, message: message, footer: nil, submitTitle: SignInCopy.signIn,
                     isSigningIn: false, canCancel: true, canSubmit: true, onCancel: {}, onSubmit: {}
                 ) {
-                    Text("max@example.com").macSheetField()
-                    Text("••••••••••").macSheetField()
+                    Text(verbatim: "max@example.com").macSheetField()
+                    Text(verbatim: "••••••••••").macSheetField()
                 },
                 padding: 28, width: 460)
         }
