@@ -15,17 +15,32 @@ struct AgentsSettingsTab: View {
     }
 
     var body: some View {
-        let ready: URL? = if case .ready(let url) = link.state { url } else { nil }
+        AgentsSettingsContent(
+            state: link.state,
+            onOpen: { url in NSWorkspace.shared.open(url) },
+            onTryAgain: { Task { await link.load(server: server) } }
+        )
+        .task(id: server) { await link.load(server: server) }
+    }
+}
+
+/// What the Agents tab shows for one `AgentsWebLink.State`; the snapshot tests render it directly.
+struct AgentsSettingsContent: View {
+    let state: AgentsWebLink.State
+    let onOpen: (URL) -> Void
+    let onTryAgain: () -> Void
+
+    var body: some View {
+        let ready: URL? = if case .ready(let url) = state { url } else { nil }
         VStack(spacing: 14) {
             Text(AccountSettingsCopy.agentsText).font(MacSheetFont.body).foregroundStyle(CarryOnColorStyle.coTextPrimary)
-            Button(AccountSettingsCopy.agentsAction) { if let ready { NSWorkspace.shared.open(ready) } }
+            Button(AccountSettingsCopy.agentsAction) { if let ready { onOpen(ready) } }
                 .buttonStyle(.macSecondaryPill).disabled(ready == nil)
-            if link.state == .unavailable {
+            if state == .unavailable {
                 MacSheetStatus(text: AccountSettingsCopy.agentsUnavailable, tone: .danger, font: MacSheetFont.note)
-                Button(AccountSettingsCopy.tryAgain) { Task { await link.load(server: server) } }.buttonStyle(.macText)
+                Button(AccountSettingsCopy.tryAgain) { onTryAgain() }.buttonStyle(.macText)
             }
         }
         .frame(maxWidth: .infinity, minHeight: 220)
-        .task(id: server) { await link.load(server: server) }
     }
 }
