@@ -9,6 +9,10 @@
     /// On the Mac (`\.carryOnPlatform`, board M10) both sizes are one 26 pt chip with
     /// 13 pt text, and a selected chip keeps the regular weight: the inversion alone
     /// marks it.
+    ///
+    /// `.outlined` is the board's add-chip ("+ Date", "+ Note"): no fill, an inset
+    /// ring in control-quiet-pressed and secondary text, at the same height, padding
+    /// and font as a standard chip on each platform. It is never drawn selected.
     public struct CarryOnChip: View {
         public enum Tone: Sendable {
             case plain, dueSoon, overdue
@@ -19,6 +23,11 @@
             case standard, quick
         }
 
+        /// `outlined` is the transparent add-chip with a ring.
+        public enum Variant: Sendable {
+            case filled, outlined
+        }
+
         typealias Metrics = CarryOnLayout.Chip
 
         let text: String
@@ -26,17 +35,20 @@
         let dot: RGBColor?
         let size: Size
         let isSelected: Bool
+        let variant: Variant
         @Environment(\.carryOnPlatform) private var platform
 
         public init(
             _ text: String, tone: Tone = .plain, dot: RGBColor? = nil,
-            size: Size = .standard, isSelected: Bool = false
+            size: Size = .standard, isSelected: Bool = false,
+            variant: Variant = .filled
         ) {
             self.text = text
             self.tone = tone
             self.dot = dot
             self.size = size
             self.isSelected = isSelected
+            self.variant = variant
         }
 
         public var body: some View {
@@ -49,8 +61,20 @@
             .foregroundStyle(foreground)
             .padding(.horizontal, paddingX)
             .frame(minHeight: height)
-            .background(fill, in: Capsule())
+            .background {
+                if variant == .filled {
+                    Capsule().fill(fill)
+                }
+            }
+            .overlay {
+                if variant == .outlined {
+                    Capsule().strokeBorder(.coControlQuietPressed, lineWidth: Metrics.outlineWidth)
+                }
+            }
         }
+
+        /// An outlined chip is never inverted.
+        private var showsSelected: Bool { isSelected && variant == .filled }
 
         private var isQuick: Bool { size == .quick && platform != .mac }
 
@@ -69,14 +93,15 @@
                 let meta = CarryOnTypeScale.meta
                 return .custom(meta.postScriptName, size: Metrics.macFontSize, relativeTo: meta.textStyle.swiftUI)
             }
-            return .carryOn(isSelected ? CarryOnTypeScale.metaStrong : CarryOnTypeScale.meta, on: platform)
+            return .carryOn(showsSelected ? CarryOnTypeScale.metaStrong : CarryOnTypeScale.meta, on: platform)
         }
 
         private var fill: CarryOnColorStyle {
-            isSelected ? .coChipSelectedBg : .coChipBg
+            showsSelected ? .coChipSelectedBg : .coChipBg
         }
 
         private var foreground: CarryOnColorStyle {
+            if variant == .outlined { return .coTextSecondary }
             if isSelected { return .coChipSelectedFg }
             switch tone {
             case .plain: return .coChipFg

@@ -265,7 +265,7 @@ struct CaptureSheet: View {
                 if let dueDate = draft.dueDate {
                     CarryOnChip(DueChip.label(for: dueDate, today: workspace.today))
                 } else {
-                    CaptureAddChipLabel(title: "+ Date")
+                    CarryOnChip("+ Date", variant: .outlined)
                 }
             }
             .frame(minHeight: BBMetrics.hitTarget)
@@ -295,7 +295,7 @@ struct CaptureSheet: View {
         } label: {
             Group {
                 if draft.details.isEmpty {
-                    CaptureAddChipLabel(title: "+ Note")
+                    CarryOnChip("+ Note", variant: .outlined)
                 } else {
                     CarryOnChip("Note · added")
                 }
@@ -394,28 +394,6 @@ struct CaptureSheet: View {
         } else {
             isConfirmingDiscard = true
         }
-    }
-}
-
-/// The board's outlined add-chip ("+ Date", "+ Note"): transparent, a ring in
-/// control-quiet-pressed and secondary text, in a 44 pt hit area. Carry On has no
-/// such `CarryOnChip` variant yet.
-private struct CaptureAddChipLabel: View {
-    /// The board's ring, 1.5 pt; no layout token carries it.
-    private static let ringWidth: CGFloat = 1.5
-
-    let title: String
-
-    var body: some View {
-        Text(title)
-            .carryOnFont(CarryOnTypeScale.meta)
-            .lineLimit(1)
-            .foregroundStyle(.coTextSecondary)
-            .padding(.horizontal, CGFloat(CarryOnLayout.Chip.paddingX))
-            .frame(minHeight: CGFloat(CarryOnLayout.Chip.height))
-            .overlay {
-                Capsule().strokeBorder(.coControlQuietPressed, lineWidth: Self.ringWidth)
-            }
     }
 }
 
