@@ -158,9 +158,9 @@ describe("AppShell canonical sidebar", () => {
     const weeklyReview = screen.getByRole("button", { name: "Weekly review — Coming soon" });
     const thinkingMode = screen.getByRole("button", { name: "Thinking Mode — Coming soon" });
     expect(weeklyReview).toBeDisabled();
-    expect(weeklyReview).toHaveClass("cursor-not-allowed", "text-slate-400");
+    expect(weeklyReview).toHaveClass("cursor-not-allowed", "text-ink-muted");
     expect(thinkingMode).toBeDisabled();
-    expect(thinkingMode).toHaveClass("cursor-not-allowed", "text-slate-400");
+    expect(thinkingMode).toHaveClass("cursor-not-allowed", "text-ink-muted");
     expect(screen.getByText("Next task list content")).toBeInTheDocument();
   });
 
@@ -342,7 +342,7 @@ describe("AppShell canonical sidebar", () => {
     });
 
     const swatch = screen.getByRole("link", { name: "Uncoloured" }).querySelector("span[aria-hidden]");
-    expect(swatch).toHaveStyle({ backgroundColor: "#0ea5e9" });
+    expect(swatch).toHaveStyle({ backgroundColor: "var(--role-mark-open)" });
   });
 
   it("offers no editing affordances when the host supplies no mutation handlers", () => {
@@ -379,10 +379,10 @@ describe("AppShell canonical sidebar", () => {
 
     const sidebar = screen.getByRole("navigation", { name: "Task navigation" });
     expect(within(within(sidebar).getByRole("link", { name: /Inbox/ })).getByText("17")).toBeInTheDocument();
-    expect(within(sidebar).getByRole("link", { name: "Launch v2" })).toHaveClass("bg-white", "shadow-soft");
-    expect(within(sidebar).getByRole("link", { name: "Onboarding drop-off" })).not.toHaveClass("bg-white");
-    expect(within(sidebar).getByRole("link", { name: "@calls" })).toHaveClass("border-brand-primary");
-    expect(within(sidebar).getByRole("link", { name: "#deep-work" })).not.toHaveClass("border-brand-primary");
+    expect(within(sidebar).getByRole("link", { name: "Launch v2" })).toHaveClass("bg-selected", "font-semibold");
+    expect(within(sidebar).getByRole("link", { name: "Onboarding drop-off" })).not.toHaveClass("bg-selected");
+    expect(within(sidebar).getByRole("link", { name: "@calls" })).toHaveClass("bg-ink");
+    expect(within(sidebar).getByRole("link", { name: "#deep-work" })).not.toHaveClass("bg-ink");
   });
 
   it("leaves keys other than Escape alone in the drawer", async () => {

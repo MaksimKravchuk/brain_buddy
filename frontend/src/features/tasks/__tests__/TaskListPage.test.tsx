@@ -1108,7 +1108,7 @@ describe("TaskListPage rows", () => {
 });
 
 describe("016 completed task presentation", () => {
-  it("outlines and rounds task lists without doubling the bottom row border", async () => {
+  it("lists rows without hairline borders", async () => {
     mocked.listTasks.mockResolvedValue(listResponse([
       taskFixture({ id: "active", title: "Active task" }),
       taskFixture({ id: "done-1", title: "First completed", state: "completed" }),
@@ -1119,12 +1119,12 @@ describe("016 completed task presentation", () => {
     const completed = await screen.findByRole("list", { name: "Completed" });
     const active = screen.getByRole("list", { name: "Launch v2" });
     for (const list of [active, completed]) {
-      expect(list).toHaveClass("rounded-xl", "border", "border-slate-200", "overflow-hidden");
+      expect(list).not.toHaveClass("border");
     }
     const rows = within(completed).getAllByRole("listitem");
     expect(rows).toHaveLength(2);
-    expect(rows[0]).toHaveClass("border-b");
-    expect(rows[1]).toHaveClass("last:border-b-0");
+    expect(rows[0]).not.toHaveClass("border-b");
+    expect(rows[1]).not.toHaveClass("border-b");
   });
 
   it.each(["/tasks/next", "/projects/project-launch", "/tags/tag-deep-work", "/tasks/next?q=shared", "/tasks/today"])(
@@ -1143,7 +1143,7 @@ describe("016 completed task presentation", () => {
       expect(screen.getAllByRole("heading", { name: "Completed" })).toHaveLength(1);
       const completed = screen.getByRole("list", { name: "Completed" });
       expect(within(completed).getAllByRole("listitem")).toHaveLength(1);
-      expect(within(completed).getByRole("link", { name: "Finished shared task" })).toHaveClass("text-slate-500", "line-through");
+      expect(within(completed).getByRole("link", { name: "Finished shared task" })).toHaveClass("text-ink-done", "line-through");
       expect(within(completed).getByRole("listitem").className).not.toMatch(/opacity-/);
       expect(screen.getByText("2 tasks")).toBeInTheDocument();
     }
@@ -2774,8 +2774,8 @@ describe("020-FR-004 D-01 Next actions age markers", () => {
     expect(within(list).queryByText("Paused until the due date")).not.toBeInTheDocument();
     const chip = screen.getByRole("button", { name: /Open decision for Renovate the bathroom/ });
     expect(chip).toHaveTextContent("Asks for a decision");
-    expect(chip).toHaveClass("border-indigo-200", "bg-indigo-50", "text-indigo-700");
-    expect(screen.getByRole("button", { name: /Open decision for Sort the paperwork drawer/ })).toHaveClass("border-amber-200", "bg-amber-50", "text-amber-800");
+    expect(chip).toHaveClass("bg-quiet", "text-ink");
+    expect(screen.getByRole("button", { name: /Open decision for Sort the paperwork drawer/ })).toHaveClass("bg-quiet", "text-warning");
     // 390 px: the marker wraps under the title on its own line; the 44 px hit area stays.
     expect(chip.parentElement).toHaveClass("max-sm:order-last", "max-sm:basis-full");
     expect(chip.closest("[data-testid=task-row-header]")).toHaveClass("max-sm:flex-wrap", "max-sm:h-auto");

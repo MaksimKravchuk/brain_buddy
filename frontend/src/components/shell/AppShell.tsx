@@ -50,6 +50,8 @@ interface AppShellProps {
   /** Overlay detail surface, outside the inert workspace. */
   panel?: ReactNode;
   panelModal?: boolean;
+  /** Carry On limestone ground. Screens not yet migrated keep the legacy surface, so their palette text stays readable. */
+  ground?: boolean;
   counts: TaskCounts;
   projects: ProjectResponse[];
   tags: TagResponse[];
@@ -79,31 +81,32 @@ const dateItems: Array<{ path: string; label: string; icon: ComponentType<{ clas
   { path: "/tasks/upcoming", label: "Upcoming", icon: CalendarRange }
 ];
 
-const fallbackProjectColors = ["#0ea5e9", "#6366f1", "#94a3b8", "#10b981"];
+// Fallback project dots use the dust mark role, never a palette colour.
+const fallbackProjectColor = "var(--role-mark-open)";
 
 // Sidebar create/rename popovers. Inputs are 16px below `lg`, where the sidebar
 // lives in the touch drawer: iOS zooms the page into any smaller focused field.
 const popoverClass =
-  "z-50 w-56 rounded-2xl border border-slate-200 bg-white p-2 shadow-floating motion-safe:animate-scale-fade-in";
+  "z-50 w-56 rounded-card bg-card p-2 motion-safe:animate-scale-fade-in";
 const popoverInputClass =
-  "min-w-0 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-base text-slate-900 outline-hidden transition-colors duration-200 ease-smooth placeholder:text-slate-400 focus:border-brand-primary lg:text-xs";
+  "min-w-0 rounded-control bg-ground px-3 py-1.5 text-base text-ink outline-hidden transition-colors duration-200 ease-smooth placeholder:text-ink-muted focus-visible:shadow-ring-focus lg:text-co-meta";
 const popoverPrimaryClass =
-  "rounded-md bg-sky-700 px-2 py-1.5 text-xs font-semibold text-white transition-colors duration-200 ease-smooth hover:bg-sky-800 disabled:opacity-50";
+  "rounded-control bg-ink px-3 py-1.5 text-co-meta font-semibold text-ground transition-colors duration-200 ease-smooth hover:bg-ink/85 disabled:opacity-50";
 const popoverDangerClass =
-  "rounded-md border border-rose-200 bg-white px-2 py-1.5 text-xs font-medium text-rose-600 transition-colors duration-200 ease-smooth hover:border-rose-300 hover:bg-rose-50";
+  "rounded-control bg-quiet px-3 py-1.5 text-co-meta font-medium text-danger transition-colors duration-200 ease-smooth hover:bg-quiet-pressed";
 
 const navRowClass = (active: boolean, tall = false): string =>
-  `flex ${tall ? "min-h-[34px] py-1" : "h-[34px]"} w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium transition-colors duration-200 ease-smooth ${
-    active ? "bg-white text-slate-900 shadow-soft" : "text-slate-600 hover:bg-surface-sunken hover:text-slate-900"
+  `flex ${tall ? "min-h-[34px] py-1" : "h-[34px]"} w-full items-center gap-2.5 rounded-card px-2.5 text-left text-co-meta transition-colors duration-200 ease-smooth ${
+    active ? "bg-selected font-semibold text-ink [&_span]:text-ink [&_svg]:text-ink" : "font-normal text-ink hover:bg-quiet-pressed/40"
   }`;
 
 function SectionLabel({ children }: { children: ReactNode }): React.JSX.Element {
-  return <div className="px-2.5 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">{children}</div>;
+  return <div className="px-2.5 pb-1 text-co-meta text-ink-muted">{children}</div>;
 }
 
 export function SoonChip(): React.JSX.Element {
   return (
-    <span aria-hidden className="rounded-full border border-slate-200 bg-surface-sunken px-[7px] py-[2px] text-[10px] font-semibold text-slate-600">
+    <span aria-hidden className="rounded-control bg-quiet px-2 py-0.5 text-co-meta font-medium text-ink">
       Soon
     </span>
   );
@@ -135,17 +138,17 @@ function WeeklyReviewLink(): React.JSX.Element {
   const recap = lastReviewText(useReviewState().data);
   return (
     <NavLink to="/review" className={({ isActive }) => navRowClass(isActive, true)}>
-      <RotateCcw className="h-4 w-4 shrink-0" aria-hidden />
+      <RotateCcw className="h-4 w-4 shrink-0 text-mark-open" aria-hidden />
       <span className="min-w-0 flex-1">
         <span className="block truncate">Weekly review</span>
-        {recap ? <span className="block truncate text-xs font-normal text-slate-500">{recap}</span> : null}
+        {recap ? <span className="block truncate text-co-meta font-normal text-ink-muted">{recap}</span> : null}
       </span>
     </NavLink>
   );
 }
 
 export function AppShell(props: AppShellProps): React.JSX.Element {
-  const { children, panel, panelModal } = props;
+  const { children, panel, panelModal, ground } = props;
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const navigationTriggerRef = useRef<HTMLButtonElement>(null);
   const location = useLocation();
@@ -167,13 +170,15 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
 
   return (
     <ShellToastProvider>
-      <div className="min-h-screen bg-surface-base text-slate-900">
+      <div className={`min-h-screen text-ink ${ground ? "bg-ground" : "bg-surface-base"}`}>
         <div inert={panelModal}>
           <TopBar onOpenDrawer={() => setIsDrawerOpen(true)} navigationTriggerRef={navigationTriggerRef} />
           <DeletionCancelledBanner />
           <div className="flex h-[calc(100vh-56px)] min-h-0 overflow-hidden">
-            <aside className="hidden w-[248px] shrink-0 overflow-y-auto border-r border-slate-200 px-3 pb-6 pt-4 lg:block">
-              <Sidebar {...props} />
+            <aside className="hidden w-[248px] shrink-0 pb-3 pl-3 lg:block">
+              <div className="h-full overflow-y-auto rounded-card bg-card px-3 pb-6 pt-4">
+                <Sidebar {...props} />
+              </div>
             </aside>
             <main className="min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 lg:px-8 lg:pb-16 lg:pt-8">
               {children}
@@ -237,7 +242,7 @@ function ShellToastView({ toast, onDismiss }: { toast: ShellToastState; onDismis
     return (
       <div
         role="status"
-        className="fixed bottom-6 left-1/2 z-[200] w-max max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-[12px] border border-slate-200 bg-white/95 px-4 py-2.5 text-center text-[13px] text-slate-700 shadow-floating backdrop-blur-sm motion-safe:animate-fade-in-up"
+        className="fixed bottom-6 left-1/2 z-[200] w-max max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-card bg-ink px-4 py-2.5 text-center text-co-meta text-ground motion-safe:animate-fade-in-up"
       >
         {toast.message}
       </div>
@@ -268,13 +273,13 @@ function ShellToastView({ toast, onDismiss }: { toast: ShellToastState; onDismis
       onMouseLeave={release}
       onFocus={hold}
       onBlur={release}
-      className="fixed bottom-6 left-6 z-[200] flex max-w-[calc(100vw-3rem)] items-center gap-2 rounded-[12px] border border-slate-200 bg-white/95 py-1 pl-4 pr-1 text-[13px] text-slate-700 shadow-floating backdrop-blur-sm motion-safe:animate-fade-in-up"
+      className="fixed bottom-6 left-6 z-[200] flex max-w-[calc(100vw-3rem)] items-center gap-2 rounded-card bg-ink py-1 pl-4 pr-1 text-co-meta text-ground motion-safe:animate-fade-in-up"
     >
       <span className="min-w-0">{toast.message}</span>
       <button
         type="button"
         aria-label={action.accessibleLabel}
-        className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg px-3 text-[13px] font-semibold text-sky-700 transition-colors duration-200 ease-smooth hover:bg-sky-50"
+        className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-control px-3 text-co-meta font-semibold text-ground underline transition-colors duration-200 ease-smooth hover:bg-ground/15"
         onClick={() => {
           onDismiss();
           action.onAction();
@@ -297,13 +302,13 @@ function DeletionCancelledBanner(): React.JSX.Element | null {
   return (
     <div
       role="status"
-      className="flex items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800"
+      className="flex items-center justify-between gap-3 bg-quiet px-4 py-2 text-co-meta text-warning"
     >
       <span>Welcome back — your scheduled account deletion has been cancelled.</span>
       <button
         type="button"
         aria-label="Dismiss deletion notice"
-        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-amber-700 hover:bg-amber-100"
+        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-warning hover:bg-quiet-pressed"
         onClick={dismiss}
       >
         <X className="h-4 w-4" aria-hidden />
@@ -399,7 +404,7 @@ function AccountMenu(): React.JSX.Element {
   };
 
   const itemClass =
-    "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-slate-700 transition-colors duration-200 ease-smooth hover:bg-surface-sunken hover:text-slate-900";
+    "flex w-full items-center gap-2.5 rounded-control px-2.5 py-2 text-left text-co-meta text-ink transition-colors duration-200 ease-smooth hover:bg-quiet";
 
   return (
     <div ref={containerRef} className="relative">
@@ -411,7 +416,7 @@ function AccountMenu(): React.JSX.Element {
         // The signed-in email stays in the accessible name: e2e helpers (and
         // screen-reader users) identify the session by it.
         aria-label={user?.email ? `Account menu for ${user.email}` : "Account menu"}
-        className="account-menu-trigger flex h-8 w-8 items-center justify-center rounded-full bg-sky-100 text-xs font-semibold text-sky-700 transition-shadow duration-200 ease-smooth hover:shadow-soft"
+        className="account-menu-trigger flex h-8 w-8 items-center justify-center rounded-full bg-quiet text-co-meta font-semibold text-ink transition-[background-color] duration-200 ease-smooth hover:bg-quiet-pressed"
         onClick={() => setOpen((value) => !value)}
       >
         {initial}
@@ -420,17 +425,17 @@ function AccountMenu(): React.JSX.Element {
         <div
           role="menu"
           aria-label="Account"
-          className="absolute right-0 top-[calc(100%+8px)] z-50 w-60 origin-top-right rounded-xl border border-slate-200 bg-white p-1.5 shadow-floating motion-safe:animate-scale-fade-in"
+          className="absolute right-0 top-[calc(100%+8px)] z-50 w-60 origin-top-right rounded-card bg-card p-1.5 motion-safe:animate-scale-fade-in"
         >
           <div className="px-2.5 py-2">
-            <p className="truncate text-sm font-medium text-slate-900">
+            <p className="truncate text-co-meta font-medium text-ink">
               {user?.display_name ?? user?.email ?? "Signed in"}
             </p>
             {user?.display_name && user?.email ? (
-              <p className="truncate text-xs text-slate-500">{user.email}</p>
+              <p className="truncate text-co-meta text-ink-muted">{user.email}</p>
             ) : null}
           </div>
-          <div className="my-1 h-px bg-slate-100" aria-hidden />
+          <div className="my-1 h-2" aria-hidden />
           <button
             type="button"
             role="menuitem"
@@ -440,7 +445,7 @@ function AccountMenu(): React.JSX.Element {
               navigate("/settings/account");
             }}
           >
-            <Settings className="h-4 w-4 text-slate-500" aria-hidden /> Account settings
+            <Settings className="h-4 w-4 text-ink-muted" aria-hidden /> Account settings
           </button>
           <button
             type="button"
@@ -451,7 +456,7 @@ function AccountMenu(): React.JSX.Element {
               navigate("/settings/agents");
             }}
           >
-            <Bot className="h-4 w-4 text-slate-500" aria-hidden /> Connected agents
+            <Bot className="h-4 w-4 text-ink-muted" aria-hidden /> Connected agents
           </button>
           <button
             type="button"
@@ -462,21 +467,21 @@ function AccountMenu(): React.JSX.Element {
               navigate("/privacy");
             }}
           >
-            <FileText className="h-4 w-4 text-slate-500" aria-hidden /> Privacy policy
+            <FileText className="h-4 w-4 text-ink-muted" aria-hidden /> Privacy policy
           </button>
           {/* No admin entry here, deliberately (spec 009 PD-1, 009-FR-010/011):
               `/admin` is reached by typing the URL. A menu item would mean every
               member's shell issues an operator capability probe on load, which
               both changes a member-facing screen and floods the denial log the
               feature relies on as a signal. */}
-          <div className="my-1 h-px bg-slate-100" aria-hidden />
+          <div className="my-1 h-2" aria-hidden />
           <button
             type="button"
             role="menuitem"
             className={itemClass}
             onClick={() => void requestSignOut()}
           >
-            <LogOut className="h-4 w-4 text-slate-500" aria-hidden /> Sign out
+            <LogOut className="h-4 w-4 text-ink-muted" aria-hidden /> Sign out
           </button>
         </div>
       ) : null}
@@ -554,7 +559,7 @@ function TaskSearch({ className, onSubmit, findShortcut = false }: {
         onSubmit?.();
       }}
     >
-      <label className="flex h-11 min-w-0 flex-1 cursor-text items-center gap-2 rounded-lg border border-transparent bg-surface-sunken px-3 text-slate-500 transition-[background-color,border-color,box-shadow] duration-200 ease-smooth hover:border-slate-200 focus-within:border-sky-700 focus-within:bg-white focus-within:shadow-soft md:h-[34px]">
+      <label className="flex h-11 min-w-0 flex-1 cursor-text items-center gap-2 rounded-control bg-card px-3 text-ink-muted transition-[background-color,box-shadow] duration-200 ease-smooth focus-within:shadow-ring-focus md:h-[34px]">
         <Search className="h-[15px] w-[15px] shrink-0" aria-hidden />
         <input
           ref={searchInputRef}
@@ -564,14 +569,14 @@ function TaskSearch({ className, onSubmit, findShortcut = false }: {
           aria-keyshortcuts={findShortcut ? "Control+O Meta+O" : undefined}
           value={searchValue}
           onChange={(event) => updateSearch(event.currentTarget.value)}
-          className="min-w-0 flex-1 bg-transparent text-base text-slate-900 outline-hidden placeholder:text-slate-500 focus-visible:shadow-none md:text-sm"
+          className="min-w-0 flex-1 bg-transparent text-base text-ink outline-hidden placeholder:text-ink-muted focus-visible:shadow-none md:text-co-meta"
         />
         {findShortcut ? (
-          <kbd aria-hidden className="shrink-0 font-sans text-xs text-slate-600">{findShortcutLabel()}</kbd>
+          <kbd aria-hidden className="shrink-0 font-sans text-xs text-ink-muted">{findShortcutLabel()}</kbd>
         ) : null}
       </label>
       {onSubmit ? (
-        <button type="submit" className="h-11 shrink-0 rounded-lg bg-sky-700 px-3 text-sm font-medium text-white transition-colors duration-200 ease-smooth hover:bg-sky-800 active:scale-[0.98]">
+        <button type="submit" className="h-11 shrink-0 rounded-control bg-ink px-4 text-co-meta font-semibold text-ground transition-colors duration-200 ease-smooth hover:bg-ink/85 active:scale-[0.98]">
           Search
         </button>
       ) : null}
@@ -588,27 +593,27 @@ function TopBar({ onOpenDrawer, navigationTriggerRef }: {
 
   return (
     <header
-      className="relative z-30 flex h-14 items-center gap-2 border-b border-slate-200 bg-white/90 px-4 backdrop-blur-sm max-[359px]:gap-1 max-[359px]:px-2 sm:gap-4 sm:px-5"
+      className="relative z-30 flex h-14 items-center gap-2 px-4 max-[359px]:gap-1 max-[359px]:px-2 sm:gap-4 sm:px-5"
       style={{ height: "56px" }}
     >
       <button
         ref={navigationTriggerRef}
         type="button"
-        className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 max-[359px]:shrink-0 lg:hidden"
+        className="inline-flex h-11 w-11 items-center justify-center rounded-control text-ink-muted hover:bg-quiet hover:text-ink max-[359px]:shrink-0 lg:hidden"
         aria-label="Open task navigation"
         onClick={onOpenDrawer}
       >
         <Menu className="h-5 w-5" />
       </button>
-      <Link to="/tasks/next" className="flex shrink-0 items-center gap-2 whitespace-nowrap text-sm font-semibold tracking-[-0.005em] text-slate-900 sm:text-[15px]">
-        <Sprout className="h-[22px] w-[22px] text-brand-primary max-[359px]:hidden" aria-hidden />
+      <Link to="/tasks/next" className="flex shrink-0 items-center gap-2 whitespace-nowrap font-voice text-xl text-ink">
+        <Sprout className="h-[22px] w-[22px] text-ink max-[359px]:hidden" aria-hidden />
         <span>BrainBuddy</span>
       </Link>
       <TaskSearch className="hidden w-[340px] max-w-[32vw] md:flex" findShortcut />
       <div className="ml-auto flex shrink-0 items-center gap-2 max-[359px]:gap-1 sm:gap-3">
         <button
           type="button"
-          className="inline-flex h-9 shrink-0 items-center gap-2 whitespace-nowrap rounded-lg bg-sky-700 px-3 text-sm font-medium text-white shadow-soft transition-colors duration-200 ease-smooth hover:bg-sky-800 active:scale-[0.98] max-[359px]:px-2 sm:px-4"
+          className="inline-flex h-9 shrink-0 items-center gap-2 whitespace-nowrap rounded-control bg-card px-3 text-co-meta font-medium text-ink transition-colors duration-200 ease-smooth hover:bg-quiet active:scale-[0.98] max-[359px]:px-2 sm:px-4"
           // Stamping the current location makes brain dump open as a modal over
           // this view instead of replacing it — see AppRoutes.
           onClick={() => navigate("/brain-dump/new", { state: { backgroundLocation: location } })}
@@ -647,14 +652,14 @@ function NavigationDrawer({ open, onClose, ...props }: NavigationDrawerProps): R
 
   return (
     <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label="Task navigation">
-      <button type="button" className="absolute inset-0 bg-slate-900/30 motion-safe:animate-fade-in" aria-label="Close task navigation" onClick={onClose} />
-      <div className="absolute inset-y-0 left-0 flex w-[min(320px,calc(100vw-32px))] flex-col bg-surface-base px-3 pb-6 pt-3 shadow-floating motion-safe:animate-drawer-in-left">
+      <button type="button" className="absolute inset-0 bg-ink/30 motion-safe:animate-fade-in" aria-label="Close task navigation" onClick={onClose} />
+      <div className="absolute inset-y-0 left-0 flex w-[min(320px,calc(100vw-32px))] flex-col bg-ground px-3 pb-6 pt-3 motion-safe:animate-drawer-in-left">
         <div className="mb-2 flex h-11 items-center justify-between px-2">
-          <span className="text-sm font-semibold text-slate-900">Navigation</span>
+          <span className="text-co-meta font-semibold text-ink">Navigation</span>
           <button
             ref={closeButtonRef}
             type="button"
-            className="-mr-2 inline-flex h-10 w-10 items-center justify-center rounded-lg text-slate-600 transition-colors duration-200 ease-smooth hover:bg-white hover:text-slate-900"
+            className="-mr-2 inline-flex h-10 w-10 items-center justify-center rounded-control text-ink-muted transition-colors duration-200 ease-smooth hover:bg-card hover:text-ink"
             aria-label="Close task navigation"
             onClick={onClose}
           >
@@ -663,7 +668,7 @@ function NavigationDrawer({ open, onClose, ...props }: NavigationDrawerProps): R
         </div>
         <TaskSearch className="mb-3 flex gap-2 px-2 md:hidden" onSubmit={onClose} />
         <div
-          className="min-h-0 flex-1 overflow-y-auto"
+          className="min-h-0 flex-1 overflow-y-auto rounded-card bg-card px-3 pb-6 pt-4"
           onClick={(event) => {
             const target = event.target as HTMLElement;
             if (target.closest("a")) {
@@ -710,7 +715,7 @@ function Sidebar({
   };
 
   return (
-    <nav aria-label="Task navigation" className="flex flex-col gap-5 text-sm">
+    <nav aria-label="Task navigation" className="flex flex-col gap-5 text-co-meta">
       <ul className="space-y-0.5">
         {listItems.map((item) => (
           <li key={item.state}>
@@ -718,16 +723,14 @@ function Sidebar({
               to={`/tasks/${item.state}`}
               className={({ isActive }) => navRowClass(isActive || activeState === item.state)}
             >
-              <item.icon className="h-4 w-4 shrink-0" aria-hidden />
+              <item.icon className="h-4 w-4 shrink-0 text-mark-open" aria-hidden />
               <span className="min-w-0 flex-1 truncate">{item.label}</span>
               {item.state === "inbox" ? (
                 counts.inbox > 0 ? (
-                  <span className="inline-flex h-[18px] min-w-[20px] items-center justify-center rounded-full bg-sky-700 px-1.5 text-[11px] font-semibold text-white">
-                    {counts.inbox}
-                  </span>
+                  <span className="min-w-[20px] text-center text-co-meta tabular-nums text-ink-muted">{counts.inbox}</span>
                 ) : null
               ) : (
-                <span className="min-w-[20px] text-center text-xs font-medium text-slate-400">{counts[item.state]}</span>
+                <span className="min-w-[20px] text-center text-co-meta tabular-nums text-ink-muted">{counts[item.state]}</span>
               )}
             </NavLink>
           </li>
@@ -740,7 +743,7 @@ function Sidebar({
               type="button"
               disabled
               aria-label="Weekly review — Coming soon"
-              className="flex h-[34px] w-full cursor-not-allowed items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium text-slate-400"
+              className="flex h-[34px] w-full cursor-not-allowed items-center gap-2.5 rounded-card px-2.5 text-left text-co-meta text-ink-muted"
             >
               <RotateCcw className="h-4 w-4 shrink-0" aria-hidden />
               <span className="min-w-0 flex-1 truncate">Weekly review</span>
@@ -751,7 +754,7 @@ function Sidebar({
         <li>
           {hasCrtCanvas ? (
             <NavLink to="/crt" className={({ isActive }) => navRowClass(isActive)}>
-              <Network className="h-4 w-4 shrink-0" aria-hidden />
+              <Network className="h-4 w-4 shrink-0 text-mark-open" aria-hidden />
               <span className="min-w-0 flex-1 truncate">Thinking Mode</span>
             </NavLink>
           ) : (
@@ -759,7 +762,7 @@ function Sidebar({
               type="button"
               disabled
               aria-label="Thinking Mode — Coming soon"
-              className="flex h-[34px] w-full cursor-not-allowed items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium text-slate-400"
+              className="flex h-[34px] w-full cursor-not-allowed items-center gap-2.5 rounded-card px-2.5 text-left text-co-meta text-ink-muted"
             >
               <Network className="h-4 w-4 shrink-0" aria-hidden />
               <span className="min-w-0 flex-1 truncate">Thinking Mode</span>
@@ -775,7 +778,7 @@ function Sidebar({
           {dateItems.map((item) => (
             <li key={item.path}>
               <NavLink to={item.path} className={({ isActive }) => navRowClass(isActive)}>
-                <item.icon className="h-4 w-4 shrink-0" aria-hidden />
+                <item.icon className="h-4 w-4 shrink-0 text-mark-open" aria-hidden />
                 <span className="min-w-0 flex-1 truncate">{item.label}</span>
               </NavLink>
             </li>
@@ -787,17 +790,17 @@ function Sidebar({
         <SectionLabel>Projects</SectionLabel>
         <ul className="space-y-0.5">
           {projects.length ? (
-            projects.map((project, index) => {
-              const color = project.color ?? fallbackProjectColors[index % fallbackProjectColors.length];
+            projects.map((project) => {
+              const color = project.color ?? fallbackProjectColor;
               const popoverId = `project-${project.id}`;
               return (
                 <li key={project.id} className="group relative">
                   <NavLink
                     to={`/projects/${project.id}`}
-                    className={`flex min-h-[34px] w-full items-start gap-2.5 rounded-lg px-2.5 py-[7px] pr-7 text-sm font-medium transition-colors duration-200 ease-smooth ${
+                    className={`flex min-h-[34px] w-full items-start gap-2.5 rounded-card px-2.5 py-[7px] pr-7 text-co-meta transition-colors duration-200 ease-smooth ${
                       activeProjectId === project.id
-                        ? "bg-white text-slate-900 shadow-soft"
-                        : "text-slate-600 hover:bg-surface-sunken hover:text-slate-900"
+                        ? "bg-selected font-semibold text-ink"
+                        : "text-ink hover:bg-quiet-pressed/40"
                     }`}
                   >
                     <span className="mt-[5px] h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: color }} aria-hidden />
@@ -809,7 +812,7 @@ function Sidebar({
                         type="button"
                         aria-label={`Project options ${project.name}`}
                         aria-expanded={openPopover === popoverId}
-                        className="absolute right-1 top-[7px] hidden h-5 w-5 items-center justify-center rounded-md text-slate-400 hover:bg-slate-200/70 hover:text-slate-600 focus-visible:inline-flex group-focus-within:inline-flex group-hover:inline-flex max-lg:inline-flex"
+                        className="absolute right-1 top-[7px] hidden h-5 w-5 items-center justify-center rounded-control text-ink-muted hover:bg-quiet-pressed hover:text-ink focus-visible:inline-flex group-focus-within:inline-flex group-hover:inline-flex max-lg:inline-flex"
                         onClick={() => setOpenPopover(openPopover === popoverId ? null : popoverId)}
                       >
                         <MoreHorizontal className="h-3.5 w-3.5" aria-hidden />
@@ -865,7 +868,7 @@ function Sidebar({
               );
             })
           ) : (
-            <li className="px-2.5 py-2 text-xs text-slate-500">No active projects yet</li>
+            <li className="px-2.5 py-2 text-co-meta text-ink-muted">No active projects yet</li>
           )}
           {onCreateProject ? (
             <li className="relative">
@@ -873,7 +876,7 @@ function Sidebar({
                 type="button"
                 aria-label="New project"
                 aria-expanded={openPopover === "new-project"}
-                className="flex h-[34px] w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium text-slate-600 transition-colors duration-200 ease-smooth hover:bg-surface-sunken hover:text-slate-900"
+                className="flex h-[34px] w-full items-center gap-2.5 rounded-card px-2.5 text-left text-co-meta text-ink-muted transition-colors duration-200 ease-smooth hover:bg-quiet-pressed/40 hover:text-ink"
                 onClick={() => setOpenPopover(openPopover === "new-project" ? null : "new-project")}
               >
                 <Plus className="h-3.5 w-3.5 shrink-0" aria-hidden />
@@ -936,12 +939,12 @@ function Sidebar({
                     <NavLink
                       to={`/tags/${tag.id}`}
                       title={tag.name}
-                      className={`max-w-full truncate rounded-full border px-2.5 py-[3px] text-xs font-medium transition-colors duration-200 ease-smooth ${
+                      className={`max-w-full truncate rounded-control px-2.5 py-[3px] text-co-meta transition-colors duration-200 ease-smooth ${
                         onRenameTag || onDeleteTag ? "max-lg:pr-6" : ""
                       } ${
                         activeTagId === tag.id
-                          ? "border-brand-primary bg-info-bg text-info-fg"
-                          : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
+                          ? "bg-ink font-medium text-ground"
+                          : "bg-quiet text-ink hover:bg-quiet-pressed"
                       }`}
                     >
                       {tag.name.startsWith("@") ? tag.name : `#${tag.name.replace(/^#/, "")}`}
@@ -954,7 +957,7 @@ function Sidebar({
                         type="button"
                         aria-label={`Tag options ${tag.name}`}
                         aria-expanded={openPopover === popoverId}
-                        className="absolute -right-1.5 -top-1.5 hidden h-4 w-4 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-soft transition-colors duration-200 ease-smooth hover:text-slate-900 group-focus-within:inline-flex group-hover:inline-flex max-lg:right-1 max-lg:top-1/2 max-lg:inline-flex max-lg:h-5 max-lg:w-5 max-lg:-translate-y-1/2 max-lg:border-transparent max-lg:bg-transparent max-lg:shadow-none"
+                        className="absolute -right-1.5 -top-1.5 hidden h-4 w-4 items-center justify-center rounded-full bg-quiet text-ink transition-colors duration-200 ease-smooth group-focus-within:inline-flex group-hover:inline-flex max-lg:right-1 max-lg:top-1/2 max-lg:inline-flex max-lg:h-5 max-lg:w-5 max-lg:-translate-y-1/2 max-lg:bg-transparent"
                         onClick={() => setOpenPopover(openPopover === popoverId ? null : popoverId)}
                       >
                         <MoreHorizontal className="h-2.5 w-2.5 max-lg:h-3.5 max-lg:w-3.5" aria-hidden />
@@ -1012,7 +1015,7 @@ function Sidebar({
               );
             })
           ) : (
-            <span className="text-xs text-slate-500">No tags yet</span>
+            <span className="text-co-meta text-ink-muted">No tags yet</span>
           )}
           {onCreateTag ? (
             <span className="relative inline-flex">
@@ -1020,7 +1023,7 @@ function Sidebar({
                 type="button"
                 aria-label="New tag"
                 aria-expanded={openPopover === "new-tag"}
-                className="rounded-full border border-dashed border-slate-300 bg-transparent px-2.5 py-[3px] text-xs font-medium text-slate-600 transition-colors duration-200 ease-smooth hover:border-slate-400 hover:text-slate-900"
+                className="rounded-control bg-transparent px-2.5 py-[3px] text-co-meta text-ink-muted transition-colors duration-200 ease-smooth hover:bg-quiet-pressed/40 hover:text-ink"
                 onClick={() => setOpenPopover(openPopover === "new-tag" ? null : "new-tag")}
               >
                 New tag
