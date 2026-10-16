@@ -11,7 +11,7 @@ import SwiftUI
 /// under large Dynamic Type.
 ///
 /// The row is content only. Inside a `List`, apply `bbCardRow()` to it (outside
-/// the `NavigationLink`) for the card: surface, radius, padding and no divider.
+/// the `TaskOpenButton`) for the card: surface, radius, padding and no divider.
 /// Outside a `List`, wrap it with `.padding().bbCard()`.
 ///
 /// `showsMark: false` is the Inbox, whose rows are the raw text alone;

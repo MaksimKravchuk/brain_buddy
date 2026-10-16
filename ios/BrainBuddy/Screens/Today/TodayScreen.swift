@@ -92,11 +92,10 @@ private struct AgendaSection: View {
     var body: some View {
         Section {
             ForEach(section.tasks) { task in
-                NavigationLink(value: AppRoute.task(task.id)) {
+                TaskOpenButton(task.id) {
                     TaskRow(task: task, showsProject: true, showsList: true,
                         preparedFormulation: workspace.listFormulation(task.id, destination: .agenda))
                 }
-                .navigationLinkIndicatorVisibility(.hidden)
                 .bbCardRow()
                 .taskActions(task)
             }

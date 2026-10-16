@@ -7,8 +7,6 @@ struct AppRouteView: View {
 
     var body: some View {
         switch route {
-        case .task(let id):
-            TaskDetailScreen(taskID: id)
         case .destination(let destination):
             TaskListScreen(destination: destination)
         case .projects:

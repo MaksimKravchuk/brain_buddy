@@ -117,11 +117,10 @@ private struct SearchResultsView: View {
                 ForEach(sections) { section in
                     Section {
                         ForEach(section.tasks) { task in
-                            NavigationLink(value: AppRoute.task(task.id)) {
+                            TaskOpenButton(task.id) {
                                 TaskRow(task: task, showsProject: true, showsList: true,
                                     preparedFormulation: workspace.listFormulation(task.id, destination: .search(text)))
                             }
-                            .navigationLinkIndicatorVisibility(.hidden)
                             .bbCardRow()
                             .taskActions(task)
                         }

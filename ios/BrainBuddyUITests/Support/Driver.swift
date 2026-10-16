@@ -55,8 +55,14 @@ struct Driver {
         _ = app.navigationBars["Settings"].waitForExistence(timeout: 5)
     }
 
-    /// Leaves Settings (or any pushed screen) with the back button.
+    /// Leaves Settings (or any pushed screen) with the back button, or closes
+    /// the task sheet with its Close button.
     func back() {
+        let close = app.navigationBars.buttons["Close"].firstMatch
+        if close.exists {
+            close.tap()
+            return
+        }
         let button = app.navigationBars.buttons.firstMatch
         if button.exists { button.tap() }
     }
