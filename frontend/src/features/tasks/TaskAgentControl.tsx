@@ -7,11 +7,9 @@ import { compactRunLabel, compactTaskRunStateLabel } from "../agents/agentCopy";
 
 function statusClasses(label: string, needsUser: boolean): string {
   const normalized = label.toLowerCase();
-  if (needsUser) return "border-needs-you-border text-needs-you-fg";
-  if (normalized.includes("failed")) return "border-rose-200 text-rose-700";
-  if (normalized.includes("reported") || normalized.includes("complete")) return "border-emerald-200 text-emerald-700";
-  if (normalized.includes("running")) return "border-sky-200 text-sky-700";
-  return "border-slate-200 text-slate-500";
+  if (needsUser) return "text-ink-accent";
+  if (normalized.includes("failed")) return "text-danger";
+  return "text-ink-muted";
 }
 
 function StatusIcon({ label }: { label: string }): React.JSX.Element {
@@ -75,14 +73,14 @@ export function TaskAgentControl({
       <button
         type="button"
         data-agent-assigned-control={task.id}
-        className={`grid h-7 w-[184px] shrink-0 grid-cols-[14px_minmax(0,62px)_4px_14px_minmax(0,1fr)] items-center gap-1 rounded-lg border bg-white px-2 text-xs font-medium ${statusClasses(run.primary_state_label, run.needs_user)}`}
+        className={`grid h-7 w-[184px] shrink-0 grid-cols-[14px_minmax(0,62px)_4px_14px_minmax(0,1fr)] items-center gap-1 rounded-control bg-quiet px-2.5 text-co-meta font-medium ${statusClasses(run.primary_state_label, run.needs_user)}`}
         aria-label={`Open ${task.title}. Agent ${run.agent_name}. ${fullStatus}`}
         title={`${run.agent_name} · ${fullStatus}`}
         onClick={onOpenTask}
       >
-        <Bot className="h-3.5 w-3.5 text-slate-500" aria-hidden />
-        <span className="truncate text-left text-slate-700">{run.agent_name}</span>
-        <span className="text-slate-300" aria-hidden>·</span>
+        <Bot className="h-3.5 w-3.5 text-ink-muted" aria-hidden />
+        <span className="truncate text-left text-ink">{run.agent_name}</span>
+        <span className="text-mark-open" aria-hidden>·</span>
         <StatusIcon label={run.primary_state_label} />
         <span className="truncate text-left">{status}</span>
       </button>
@@ -127,7 +125,7 @@ export function TaskAgentControl({
     }}>
       <button
         type="button"
-        className="inline-flex h-7 w-9 items-center justify-center rounded-l-lg border border-r-0 border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-800 focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-primary"
+        className="inline-flex h-7 w-9 items-center justify-center rounded-l-control bg-quiet text-ink-muted transition-colors hover:bg-quiet-pressed hover:text-ink focus-visible:z-10 focus-visible:shadow-ring-focus"
         aria-label={`Hand ${task.title} to ${preferred.name}`}
         title={`Hand to ${preferred.name}`}
         onClick={() => onReview(preferred.id)}
@@ -137,7 +135,7 @@ export function TaskAgentControl({
       <button
         ref={chooserRef}
         type="button"
-        className="inline-flex h-7 w-6 items-center justify-center rounded-r-lg border border-slate-200 bg-white text-slate-400 transition-colors hover:bg-slate-50 hover:text-slate-700 focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-primary"
+        className="inline-flex h-7 w-6 items-center justify-center rounded-r-control bg-quiet text-ink-muted transition-colors hover:bg-quiet-pressed hover:text-ink focus-visible:z-10 focus-visible:shadow-ring-focus"
         aria-label={`Choose agent for ${task.title}`}
         aria-expanded={menuOpen}
         aria-haspopup="menu"
@@ -149,14 +147,14 @@ export function TaskAgentControl({
         <ChevronDown className="h-3 w-3" aria-hidden />
       </button>
       {menuOpen ? (
-        <span role="menu" aria-label="Choose agent" className="absolute right-0 top-8 z-40 min-w-44 rounded-lg border border-slate-200 bg-white p-1 shadow-floating">
+        <span role="menu" aria-label="Choose agent" className="absolute right-0 top-8 z-40 min-w-44 rounded-card p-1 co-glass-dense">
           {eligible.map((connection, index) => (
             <button
               key={connection.id}
               ref={(item) => { menuItemRefs.current[index] = item; }}
               type="button"
               role="menuitem"
-              className="block w-full rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 focus:bg-slate-50 focus:outline-hidden"
+              className="block w-full rounded-md px-2.5 py-1.5 text-left text-co-meta text-ink hover:bg-quiet focus:bg-quiet focus:outline-hidden"
               onClick={() => {
                 setMenuOpen(false);
                 onReview(connection.id);
