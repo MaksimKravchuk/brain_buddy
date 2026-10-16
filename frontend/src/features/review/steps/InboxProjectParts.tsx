@@ -24,7 +24,7 @@ export interface ProjectPickerProps {
 export function ProjectPicker({ projects, value, newName, busy, disabled, onSelect, onNewName, onAdd }: ProjectPickerProps): React.JSX.Element {
   return (
     <div className="flex flex-col gap-2">
-      <label className="flex flex-col gap-1 text-sm font-medium text-slate-800">
+      <label className="flex flex-col gap-1 text-co-meta font-medium text-ink">
         Project
         <select value={value} disabled={disabled} className={fieldClass} onChange={(event) => onSelect(event.currentTarget.value)}>
           <option value="">No project</option>
@@ -36,7 +36,7 @@ export function ProjectPicker({ projects, value, newName, busy, disabled, onSele
       </label>
       {value === NEW_PROJECT ? (
         <form className="flex flex-col gap-2 sm:flex-row sm:items-end" onSubmit={onAdd}>
-          <label className="flex flex-1 flex-col gap-1 text-sm font-medium text-slate-800">
+          <label className="flex flex-1 flex-col gap-1 text-co-meta font-medium text-ink">
             New project name
             <input value={newName} maxLength={500} readOnly={busy} className={fieldClass} onChange={(event) => onNewName(event.currentTarget.value)} />
           </label>
@@ -69,15 +69,15 @@ export interface MakeProjectFormProps {
 export function MakeProjectForm({ draft, actionRef, busy, disabled, onChange, onBack, onSubmit }: MakeProjectFormProps): React.JSX.Element {
   return (
     <form className="flex flex-col gap-2" onSubmit={onSubmit}>
-      <label className="flex flex-col gap-1 text-sm font-medium text-slate-800">
+      <label className="flex flex-col gap-1 text-co-meta font-medium text-ink">
         Project name
         <input value={draft.name} maxLength={500} readOnly={busy} className={fieldClass} onChange={(event) => onChange({ ...draft, name: event.currentTarget.value })} />
       </label>
-      <label className="flex flex-col gap-1 text-sm font-medium text-slate-800">
+      <label className="flex flex-col gap-1 text-co-meta font-medium text-ink">
         Desired outcome (optional)
         <textarea value={draft.outcome} maxLength={1000} rows={2} readOnly={busy} className={fieldClass} onChange={(event) => onChange({ ...draft, outcome: event.currentTarget.value })} />
       </label>
-      <label className="flex flex-col gap-1 text-sm font-medium text-slate-800">
+      <label className="flex flex-col gap-1 text-co-meta font-medium text-ink">
         First next action
         <input ref={actionRef} value={draft.action} maxLength={500} readOnly={busy} className={fieldClass} onChange={(event) => onChange({ ...draft, action: event.currentTarget.value })} />
       </label>

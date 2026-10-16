@@ -17,8 +17,8 @@ export function DatesStep(): React.JSX.Element {
         if (days.length === 0) {
           return (
             <>
-              <p className="m-0 text-base font-medium text-slate-900">A clear two weeks</p>
-              <p className="m-0 text-sm text-slate-600">Nothing has a due date in the next 14 days.</p>
+              <p className="m-0 text-co-body font-medium text-ink">A clear two weeks</p>
+              <p className="m-0 text-co-meta text-ink-muted">Nothing has a due date in the next 14 days.</p>
             </>
           );
         }
@@ -30,14 +30,14 @@ export function DatesStep(): React.JSX.Element {
               const label = formatReviewDate(`${entry.day}T12:00:00Z`, "UTC");
               return (
                 <section key={entry.day} role="group" aria-label={label} className="flex flex-col gap-1">
-                  <h2 className="m-0 text-xs font-semibold uppercase tracking-[0.06em] text-slate-500">{label}</h2>
-                  <ul className="m-0 flex list-none flex-col divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white p-0 text-sm text-slate-800">
+                  <h2 className="m-0 text-co-meta font-semibold text-ink-muted">{label}</h2>
+                  <ul className="m-0 flex list-none flex-col gap-2 p-0 text-co-meta text-ink">
                     {entry.task_ids.map((id) => {
                       const task = byId.get(id) as NonNullable<ReturnType<typeof byId.get>>;
                       return (
-                        <li key={id} className="flex items-baseline justify-between gap-3 px-3 py-2.5">
+                        <li key={id} className="flex items-baseline justify-between gap-3 rounded-card bg-card px-3 py-2.5">
                           <span>{task.title}</span>
-                          <span className="text-xs text-slate-500">{LIST_NAMES[task.state]}</span>
+                          <span className="text-co-meta text-ink-muted">{LIST_NAMES[task.state]}</span>
                         </li>
                       );
                     })}
