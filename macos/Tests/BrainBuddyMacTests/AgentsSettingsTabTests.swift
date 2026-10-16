@@ -77,6 +77,14 @@
             #expect(MacSettingsView.selection(current: .sync, addAgentRequested: false) == .sync)
         }
 
+        @Test("030_FR_036 the hand-off Open Settings request selects Agents from any tab")
+        func openSettingsRequestSelectsAgentsTab() {
+            for tab in MacSettingsTab.allCases {
+                #expect(MacSettingsView.selection(current: tab, agentsTabRequested: true) == .agents)
+                #expect(MacSettingsView.selection(current: tab, agentsTabRequested: false) == tab)
+            }
+        }
+
         @Test("030_FR_036 030_SC_006 the request opens the Add sheet exactly once")
         func requestOpensAddOnce() async {
             let controller = await make()
