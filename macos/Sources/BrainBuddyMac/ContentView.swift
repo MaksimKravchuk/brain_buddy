@@ -17,6 +17,8 @@ import SwiftUI
 struct ContentView: View {
     let launch: MacLaunch
     @State private var showsPlaceholders = false
+    /// 029-FR-002: the first-run decision is made before the workspace window renders.
+    @State private var firstRunDecided = false
 
     var body: some View {
         Group {
@@ -24,6 +26,8 @@ struct ContentView: View {
                 if host.workspace.loadError != nil {
                     // X-09: nothing syncs until the file can be read (mac-app-host §9).
                     UnreadableWorkspaceView(host: host)
+                } else if !firstRunDecided {
+                    LaunchPlaceholderView(visible: showsPlaceholders)
                 } else {
                     WorkspaceView(model: model, sync: sync)
                         .task {
@@ -38,6 +42,11 @@ struct ContentView: View {
             } else {
                 LaunchPlaceholderView(visible: showsPlaceholders)
             }
+        }
+        .onChange(of: launch.host != nil, initial: true) { _, ready in
+            guard ready, !firstRunDecided else { return }
+            if launch.host?.workspace.loadError == nil { launch.model?.decideFirstRun() }
+            firstRunDecided = true
         }
         .task {
             await launch.run { notice in UpgradeNotice.present(notice) }
@@ -249,6 +258,7 @@ struct WorkspaceView: View {
     @State private var renamingTask: TaskRecord?
     @State private var quickRenameTitle = ""
     @State private var quickRenameError: String?
+    @State private var capturingFirstItem = false
     @FocusState private var addFocused: Bool
     @FocusState private var quickRenameFocused: Bool
     @FocusState private var collectionNameFocused: Bool
@@ -311,7 +321,7 @@ struct WorkspaceView: View {
         .onChange(of: selectedTaskID) { _, id in sync.triggers?.setOpenTask(id) }
         .focusedSceneValue(\.workspaceModel, model)
         .focusedSceneValue(\.macSyncController, sync)
-        .onAppear { quickCapture.start(model: model) }
+        .onAppear(perform: windowAppeared)
         .onDisappear {
             quickCapture.stop()
             saveTaskEditsOnClose()
@@ -409,13 +419,15 @@ struct WorkspaceView: View {
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
                 .selectionDisabled()
-            ForEach(SidebarEntries.standard.sections) { section in
-                if section.id == "dates" { agentsSection }
+            ForEach(fixedSidebarSections) { section in
+                if section.id == "dates", !firstRun.showsFirstRunSidebar { agentsSection }
                 sidebarSection(section)
             }
-            projectsSection
-            archivedProjectsSection
-            tagsSection
+            if !firstRun.showsFirstRunSidebar {
+                projectsSection
+                archivedProjectsSection
+                tagsSection
+            }
         }
         .listStyle(.sidebar)
         .navigationTitle("BrainBuddy")
@@ -438,6 +450,12 @@ struct WorkspaceView: View {
                 MacSidebarSectionHeader(title: AgentsCopy.sidebar)
             }
         }
+    }
+
+    /// F-04: Lists and Dates only while the first run shows.
+    private var fixedSidebarSections: [SidebarSection] {
+        let all = SidebarEntries.standard.sections
+        return firstRun.showsFirstRunSidebar ? all.filter { $0.header == "Lists" || $0.header == "Dates" } : all
     }
 
     private var projectsSection: some View {
@@ -688,7 +706,7 @@ struct WorkspaceView: View {
         _ title: String, symbol: String, destination: WorkspaceDestination, tint: Color? = nil, trailing: String? = nil
     ) -> some View {
         let count: Int? = {
-            guard case .list(let list) = destination else { return nil }
+            guard case .list(let list) = destination, !firstRun.showsFirstRunSidebar else { return nil }
             guard model.countsReadiness == .ready else { return nil }
             // Waiting for counts its people and its listed agent runs: n + m (030-FR-009).
             return model.sidebarCounts.count(for: list) + (list == .waiting ? model.listedRuns.count : 0)
@@ -1125,13 +1143,91 @@ struct WorkspaceView: View {
         return section.title
     }
 
+    private var firstRun: FirstRunModel { model.firstRun }
+
+    /// F-03 stands in for the list only on Next actions; any other list the person opens shows as usual.
+    private var showsLanding: Bool { firstRun.phase == .landing && model.destination == .list(.next) }
+
+    private func windowAppeared() {
+        quickCapture.start(model: model)
+        firstRun.hotkeyAvailable = quickCapture.hotkeyRegistered
+        firstRun.speechAvailable = VoiceTranscriber.bundledModel() != nil
+    }
+
+    /// The detail column with the first-run hooks; they live here, not on `window`, so that
+    /// modifier chain stays within the type checker's budget.
+    private var detailCanvas: some View {
+        firstRunCanvas
+            // 029-FR-013: an account linked at any step ends the first run.
+            .onChange(of: model.workspace.account != nil) { _, linked in
+                if linked { firstRun.accountLinked() }
+            }
+            .onChange(of: firstRun.phase) { _, phase in firstRunPhaseChanged(phase) }
+    }
+
+    /// F-01 replaces the empty Inbox; every other phase uses the list with F-02/F-03 around it.
+    @ViewBuilder
+    private var firstRunCanvas: some View {
+        if firstRun.phase == .welcome {
+            WelcomeInboxView(
+                text: $model.draft, hotkeyAvailable: firstRun.hotkeyAvailable, speechAvailable: firstRun.speechAvailable,
+                errorText: model.error, onSubmit: submitFirstCapture, onSkip: { firstRun.skip() },
+                onMic: { voicePresented = true }
+            )
+            .frame(minWidth: 560, minHeight: 480)
+            .background(.coBgGround)
+        } else {
+            taskCanvas
+        }
+    }
+
+    /// F-01.03: Return adds one Inbox item with exactly the typed text; the draft clears only then.
+    private func submitFirstCapture() {
+        guard !capturingFirstItem else { return }
+        capturingFirstItem = true
+        let written = model.draft
+        Task {
+            defer { capturingFirstItem = false }
+            if await firstRun.capture(written, using: model) { model.draft = "" }
+        }
+    }
+
+    private func firstRunPhaseChanged(_ phase: FirstRunPhase) {
+        switch phase {
+        case .firstStep(let id):
+            model.choose(.list(.inbox))
+            select(id)
+        case .landing:
+            model.choose(.list(.next))
+            select(nil)
+        case .undecided, .welcome, .done:
+            break
+        }
+    }
+
+    /// F-03: the card and the tip stand in for the list's one row.
+    @ViewBuilder
+    private var landing: some View {
+        if showsLanding {
+            let step = model.tasks.first { $0.state == .next }
+            LandingTip(
+                step: step?.title, tip: firstRun.landingTip,
+                onOpenStep: { if let step { requestNavigation(.task(step.id)) } },
+                onDismiss: { firstRun.dismissTip() }
+            )
+            .padding(.horizontal, 28)
+            .padding(.bottom, 16)
+        }
+    }
+
     private var taskCanvas: some View {
-        let sections = presentedSections(model.sections)
+        let sections = showsLanding ? [] : presentedSections(model.sections)
         let orders = Dictionary(sections.map { ($0.id, $0.rows.map(\.id)) }, uniquingKeysWith: { first, _ in first })
         let onScreen = sections.flatMap { $0.rows.map(\.id) }
         return VStack(alignment: .leading, spacing: 0) {
             canvasHeader
             canvasMessages
+            landing
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
@@ -1210,7 +1306,10 @@ struct WorkspaceView: View {
 
     @ViewBuilder
     private var inspectorContent: some View {
-        if let id = selectedTaskID, let task = model.task(id) {
+        if case .firstStep(let id) = firstRun.phase, let task = model.task(id) {
+            FirstStepInspector(firstRun: firstRun, writer: model, original: task.title)
+                .id(id)
+        } else if let id = selectedTaskID, let task = model.task(id) {
             TaskInspector(
                 task: task, model: model,
                 title: formBinding(\.title, task.title),
@@ -1411,7 +1510,7 @@ struct WorkspaceView: View {
                     .foregroundStyle(.coTextSecondary)
                     .carryOnFont(CarryOnTypeScale.meta)
             }
-            listControls
+            if !firstRun.showsFirstRunSidebar { listControls }
         }
         .padding(.horizontal, 28)
         .padding(.top, 28)
@@ -1524,6 +1623,12 @@ struct WorkspaceView: View {
     }
 
     private var taskCountCaption: String {
+        switch firstRun.phase {
+        case .firstStep where model.destination == .list(.inbox): return FirstRunCopy.listHeader
+        case .landing where showsLanding:
+            return FirstRunCopy.landingHeader.replacingOccurrences(of: "\(destinationTitle) · ", with: "")
+        case .undecided, .welcome, .firstStep, .landing, .done: break
+        }
         if model.destination.isHistory { return Self.plural(model.listResult?.totalCount ?? 0, "task") }
         if model.destination == .list(.waiting), !model.listedRuns.isEmpty {
             return AgentsCopy.waitingHeader(people: model.openTaskCount, agents: model.listedRuns.count)
