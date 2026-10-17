@@ -1180,7 +1180,8 @@ struct WorkspaceView: View {
     private func windowAppeared() {
         quickCapture.start(model: model)
         firstRun.hotkeyAvailable = quickCapture.hotkeyRegistered
-        firstRun.speechAvailable = VoiceTranscriber.bundledModel() != nil
+        // 037-FR-001: Apple's on-device speech, or the Whisper the person downloaded.
+        firstRun.speechAvailable = !AppleSpeech.onDeviceLocales().isEmpty || WhisperDownload.shared.files.isInstalled
     }
 
     /// The detail column with the first-run hooks; they live here, not on `window`, so that

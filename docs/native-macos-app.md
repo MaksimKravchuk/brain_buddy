@@ -13,7 +13,7 @@ above all).
 | part | where | what it does |
 |---|---|---|
 | `BrainBuddyMacCore` | `macos/Sources/BrainBuddyMacCore/` | Foundation only, so it builds and tests outside the app: `mac-local.json`, the single-instance lock, `WorkspaceHost` and the launch (`MacLaunch`), the window's model, and the sync UI's logic (`SyncStatusLineModel`, `SyncPopoverModel`, `SignInFlow`, `SignOutFlow`, `SyncTriggerSource`, `MacPresentationRouter`, `MacSyncController`) |
-| `BrainBuddyMac` | `macos/Sources/BrainBuddyMac/` | the SwiftUI and AppKit views that lay that logic out, the menus, `NWPathMonitor`, the App Nap activity, and WhisperKit inside the `VoiceTranscriber` actor |
+| `BrainBuddyMac` | `macos/Sources/BrainBuddyMac/` | the SwiftUI and AppKit views that lay that logic out, the menus, `NWPathMonitor`, the App Nap activity, Apple speech recognition and the optional Whisper model inside the `VoiceTranscriber` actor, and the Whisper download in `WhisperDownload` (spec 037) |
 | the kit | `ios/BrainBuddyKit` | `Workspace`, `SyncEngine`, `FileDocumentStore`, `KeychainSessionTokenStore`, the status describer and its copy |
 
 Launch order (contracts/mac-app-host.md §1): the single-instance lock; the Rust runtime's

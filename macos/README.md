@@ -29,9 +29,13 @@ The Waiting, Someday and Project reviews keep their "reviewed" marks only on thi
 `mac-local.json`; an item returns after seven days or when its task changes, and a project
 review decision is refused once the project's actions changed since the review opened.
 
-The voice sheet records and transcribes locally with WhisperKit, then places one editable
-transcript into the task draft. WhisperKit runs only inside the `VoiceTranscriber` actor, and the
-voice sources have no network API (`MacPrivacyGuardTests`).
+The voice sheet records and transcribes on this Mac, then places one editable transcript into
+the task draft (spec 037). By default it uses Apple's speech recognition with on-device
+recognition required, for the languages this Mac recognises. For other languages, and "Auto",
+the person can download Whisper (about 145 MB, from Hugging Face) in Settings › Voice; it lands
+in `Whisper/` beside `store.json` and Remove deletes it. Whisper runs only inside the
+`VoiceTranscriber` actor; the voice sources have no network API, and the download lives only in
+`WhisperDownload.swift` (`MacPrivacyGuardTests`).
 
 ## Signing in and syncing
 
@@ -70,12 +74,8 @@ and sign in again (`docs/native-macos-app.md`).
 
 ## Build and run
 
-Build a launchable `.app` on macOS 26+ with Xcode installed. The build includes the local Whisper
-base model and tokenizer. By default it reads the model from
-`~/Documents/huggingface/models/argmaxinc/whisperkit-coreml/openai_whisper-base` and the
-tokenizer from `~/Documents/huggingface/models/openai/whisper-base`. Set
-`WHISPERKIT_MODEL_SOURCE` and `WHISPERKIT_TOKENIZER_SOURCE` to other complete local folders
-when needed; the build stops if either asset is missing.
+Build a launchable `.app` on macOS 26+ with Xcode installed. The bundle carries no speech
+model: Apple's recognition needs none, and Whisper is downloaded from Settings › Voice.
 
 ```sh
 cd macos

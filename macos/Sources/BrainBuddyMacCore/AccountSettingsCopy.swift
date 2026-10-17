@@ -1,7 +1,7 @@
 /// Every string of design.md § Copy for the Mac Settings window (spec 028-FR-022): sentence-case
 /// English, states in words. The views and models read these; none is typed into a screen.
 package enum AccountSettingsCopy {
-    package static let tabNames = ["Account", "Agents", "Sync"]
+    package static let tabNames = ["Account", "Agents", "Sync", VoiceSettingsCopy.tabName]
 
     package static let nameLabel = "Name"
     package static let stepsLabel = "Steps taken"
