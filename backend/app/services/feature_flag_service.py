@@ -1,9 +1,9 @@
 """Resolve effective rollout flags exclusively from the SQLite store (ADR-0019).
 
-**SQLite is authoritative, not an overlay.** Each of the three **managed**
-flags (`voice_brain_dump`, `mobile_task_classification`, `external_agent_relay`)
-resolves exclusively from its SQLite row — there is no per-request fallback to
-`config.feature_flags` for these three any more (DD-15, 010-FR-003).
+**SQLite is authoritative, not an overlay.** Each **managed** flag
+(`voice_brain_dump`, `external_agent_relay`, ...) resolves exclusively from its
+SQLite row — there is no per-request fallback to `config.feature_flags` for
+these any more (DD-15, 010-FR-003).
 `delivery_canary` alone still resolves from config, through the narrow
 `FeatureFlagSettings.delivery_canary_effective` — never through
 `FeatureFlagSettings.effective_flags`, the retired aggregate resolver that

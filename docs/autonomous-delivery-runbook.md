@@ -122,8 +122,8 @@ external effects — never land automatically; they use the ASK landing procedur
    ADR-0022; all verification and rollback requirements still apply.
    `delivery_canary` still rolls out OFF → INTERNAL → ON via
    `BRAIN_BUDDY_FEATURE_FLAGS` / `BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS` at
-   deploy time. The three SQLite-managed flags (`voice_brain_dump`,
-   `mobile_task_classification`, `external_agent_relay`) instead roll out
+   deploy time. The SQLite-managed flags (`voice_brain_dump`,
+   `external_agent_relay`, ...) instead roll out
    OFF → SELECTED_USERS → ON through the Admin Portal at runtime, independent
    of this landing/deploy path (ADR-0019).
 7. Evidence for the landing is the selected independent-gate verdict, candidate push

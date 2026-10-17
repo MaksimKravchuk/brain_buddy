@@ -232,35 +232,29 @@ CREATE TABLE auth_migration_ledger (
 class AuthStore(SQLiteRepositorySupport):
     """Own auth schema and reuse one connection for nested facade operations."""
 
-    def __init__(self, root: Path, *, require_ready: bool = True) -> None:
+    def __init__(self, root: Path) -> None:
         self.root = ensure_directory(root)
         self.db_path = self.root / "auth.sqlite3"
         self._write_lock = threading.RLock()
         self._thread_state = threading.local()
-        exists = self.db_path.exists()
-        legacy = any(
-            directory.exists() and any(directory.iterdir())
-            for directory in (self.root / "users", self.root / "sessions")
-        )
-        if not exists and legacy and require_ready:
-            raise RepositoryError("Explicit authentication migration is required.")
-        if not exists:
-            self._initialize(cleanup_complete=not legacy)
-        if require_ready:
-            self.check_ready()
+        if not self.db_path.exists():
+            self._initialize()
+        self.check_ready()
 
     def _connect(self) -> sqlite3.Connection:
         connection = super()._connect()
         connection.execute("PRAGMA secure_delete = ON")
         return connection
 
-    def _initialize(self, *, cleanup_complete: bool) -> None:
+    def _initialize(self) -> None:
         with self.connection() as connection:
             try:
                 connection.executescript("BEGIN IMMEDIATE;\n" + _SCHEMA)
+                # scripts/auth_migration_guard.py reads this ledger around
+                # deploys; a fresh store has nothing to import or clean up.
                 connection.execute(
-                    "INSERT INTO auth_migration_ledger(id,schema_epoch,cleanup_complete) VALUES(1,?,?)",
-                    (AUTH_SCHEMA_EPOCH, int(cleanup_complete)),
+                    "INSERT INTO auth_migration_ledger(id,schema_epoch,cleanup_complete) VALUES(1,?,1)",
+                    (AUTH_SCHEMA_EPOCH,),
                 )
                 connection.commit()
             except BaseException:
@@ -268,15 +262,13 @@ class AuthStore(SQLiteRepositorySupport):
                 raise
 
     def check_ready(self) -> None:
-        """Block readiness until the authoritative migration cleanup completes."""
+        """Refuse a store written under another schema epoch."""
         with self.connection() as connection:
             ledger = connection.execute(
-                "SELECT schema_epoch,cleanup_complete FROM auth_migration_ledger WHERE id=1"
+                "SELECT schema_epoch FROM auth_migration_ledger WHERE id=1"
             ).fetchone()
             if ledger is None or ledger["schema_epoch"] != AUTH_SCHEMA_EPOCH:
                 raise RepositoryError("Unsupported authentication storage epoch.")
-            if not ledger["cleanup_complete"]:
-                raise RepositoryError("Authentication migration cleanup is incomplete.")
 
     @contextmanager
     def connection(self) -> Iterator[sqlite3.Connection]:

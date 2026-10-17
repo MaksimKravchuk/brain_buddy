@@ -18,10 +18,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 const PASSWORD: &str = "Conformance-pass-1!";
 const NEW_PASSWORD: &str = "Conformance-pass-2!";
 const COOKIE_PREFIX: &str = "brainbuddy_session=";
-const KNOWN_FLAGS: [&str; 9] = [
+const KNOWN_FLAGS: [&str; 8] = [
     "delivery_canary",
     "voice_brain_dump",
-    "mobile_task_classification",
     "external_agent_relay",
     "task_title_autocomplete",
     "crt_canvas",

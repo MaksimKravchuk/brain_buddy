@@ -39,7 +39,6 @@ from app.repositories.validation import VALIDATION_DIRNAME
 from app.repositories.version import _slugify_version_id
 from app.schemas.auth import User
 from app.services.auth_apple_lifecycle import AuthAppleLifecycle
-from app.services.auth_migration import AuthMigration
 from app.services.auth_service import ACCOUNT_DELETION_GRACE, AuthService
 from app.services.tree_service import TreeService
 from app.utils.time import utcnow
@@ -79,7 +78,6 @@ class AccountService:
         auth_service: AuthService,
         reserved_emails: frozenset[str] = frozenset(),
         deletion_grace: timedelta = DELETION_GRACE,
-        auth_migration: AuthMigration | None = None,
     ) -> None:
         self.user_repo = user_repo
         self.session_repo = session_repo
@@ -99,7 +97,6 @@ class AccountService:
         # invert the layering for one frozenset (009-FR-012).
         self.reserved_emails = reserved_emails
         self.deletion_grace = deletion_grace
-        self.auth_migration = auth_migration
         self.apple_lifecycle: AuthAppleLifecycle | None = None
         self._control_ledger: ControlLedger | None = None
         self._retire_restore_points: Callable[[str], None] | None = None
@@ -592,8 +589,6 @@ class AccountService:
         if self._control_ledger is not None:
             # Before any destructive step, so a restored backup replays the purge.
             self._control_ledger.record_purge(user_id, now=utcnow())
-        if self.auth_migration is not None:
-            self.auth_migration.erase_backup()
         self.feature_flag_repo.scrub_user(user_id)
         self.session_repo.delete_all_for_user(user_id)
         self.voice_operation_repo.delete_all_for_owner(owner_id=user_id)

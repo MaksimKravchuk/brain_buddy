@@ -84,7 +84,6 @@ HANDED_OFF = (
 )
 STAYS_LEGACY = (
     "auth.cleanup_metadata",
-    "auth.cleanup_backup",
     "auth.cli_cleanup",
     "crt.reconcile",
 )
@@ -158,7 +157,6 @@ class Rig:
             modern_auth_service=_ports(
                 j, cleanup_expired_metadata="auth.cleanup_metadata"
             ),
-            auth_migration=_ports(j, cleanup_expired_backup="auth.cleanup_backup"),
             cli_auth_service=_ports(j, cleanup="auth.cli_cleanup"),
             voice_brain_dump_service=self.voice,
             agent_observer=self.observer,

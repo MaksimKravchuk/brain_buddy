@@ -45,11 +45,9 @@ struct UnreadableWorkspaceView: View {
     }
 }
 
-/// The launch's import-failed state (data-model E7.1 invariant 4): the upgrade import could not
-/// reach a terminal state, so no workspace opens. One calm panel in the X-09 pattern with only
-/// "Try again" (default, focused): it runs the import again, which resumes from what the failed
-/// attempt recorded. There is no "Start fresh": an empty workspace would make the previous
-/// version's file a "later file" that is never imported.
+/// The launch's stopped state: the runtime could not be opened, so no workspace opens. One calm
+/// panel in the X-09 pattern with only "Try again" (default, focused): it runs the launch again.
+/// There is no "Start fresh": an empty workspace would fork from the retired file.
 struct LegacyImportFailedView: View {
     let launch: MacLaunch
     @FocusState private var tryAgainFocused: Bool

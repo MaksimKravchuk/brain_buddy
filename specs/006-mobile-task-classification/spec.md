@@ -9,14 +9,16 @@
 
 **Status**: Client behavior retired (2026-10-05). The Expo client this feature
 specified was removed with `mobile/`, and its tests went with it, so the
-requirements that described that client (27 of 30; every id except 006-FR-013,
-006-FR-015 and 006-SC-003) have no implementation and no traced evidence, and
-`check_requirement_coverage.py` reports them uncovered. 006-FR-013, 006-FR-015
-(the backend `mobile_task_classification` flag) and 006-SC-003 are still
-implemented and still covered by backend tests; they remain live
-contracts. Project and tag assignment in the native app (`ios/`) is specified
-in `docs/native-ios-app.md`; any new client work needs a new feature spec, not
-an amendment here.
+requirements that described that client (28 of 30; every id except 006-FR-013
+and 006-SC-003) have no implementation and no traced evidence, and
+`check_requirement_coverage.py` reports them uncovered. 006-FR-013 and
+006-SC-003 are still implemented and still covered by backend tests; they remain
+live contracts. **006-FR-015 is retired (2026-10-16)** together with the backend
+`mobile_task_classification` flag it required: the Expo client was removed and
+no client reads the flag, so the flag is gone from the backend configuration,
+the managed-flag set and `/auth/me`. Project and tag assignment in the native
+app (`ios/`) is specified in `docs/native-ios-app.md`; any new client work needs
+a new feature spec, not an amendment here.
 
 **Input**: Business intake at `intake.md`, produced by `/speckit-interview` with
 the founder on 2026-08-10. The scope boundary and non-goals in §4 of that
@@ -362,7 +364,7 @@ time advances.
   authoritative; on a cold read it is reset so the ordinary drain picks it up.
   This is the lease reconciliation ADR-0002 already specifies for the voice
   operation queue, applied to the same problem.
-- **FR-015**: Production exposure of this behavior MUST be controlled by a
+- **FR-015** *(retired 2026-10-16; see Status)*: Production exposure of this behavior MUST be controlled by a
   server-owned feature flag defaulting to OFF, per AGENTS.md. The flag governs
   exposure only and is never authorization.
 - **FR-016**: Creating a project or tag MUST require connectivity, and the
