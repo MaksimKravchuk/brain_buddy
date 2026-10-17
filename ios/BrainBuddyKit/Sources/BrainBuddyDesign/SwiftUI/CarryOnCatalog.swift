@@ -27,6 +27,13 @@
                 CatalogCell { Button("Done") {}.buttonStyle(.carryOnPrimary).disabled(true) }
                 CatalogCell { Button("Not now") {}.buttonStyle(.carryOnSecondary) }
                 CatalogCell { CarryOnButtonStyle.Preview(kind: .secondary, title: "Not now", pressed: true) }
+                CatalogCell {
+                    HStack(spacing: CarryOnSpace.xs) {
+                        Button("+") {}.buttonStyle(.carryOnSecondaryIcon)
+                        CarryOnButtonStyle.Preview(kind: .secondary, title: "−", pressed: true, iconOnly: true)
+                        Button("−") {}.buttonStyle(.carryOnSecondaryIcon).disabled(true)
+                    }
+                }
                 CatalogCell { Button("Write my own") {}.buttonStyle(.carryOnQuiet) }
                 CatalogCell {
                     HStack(spacing: CarryOnSpace.sm) {
@@ -102,9 +109,10 @@
             let kind: Kind
             let title: String
             let pressed: Bool
+            var iconOnly = false
 
             var body: some View {
-                CarryOnButtonBody(kind: kind, label: Text(title), isPressed: pressed)
+                CarryOnButtonBody(kind: kind, iconOnly: iconOnly, label: Text(title), isPressed: pressed)
             }
         }
     }

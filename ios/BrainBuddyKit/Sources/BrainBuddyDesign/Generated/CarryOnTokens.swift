@@ -247,6 +247,18 @@ public enum CarryOnLayout {
     public enum MacSidebarRow {
         public static let height: Double = 34
     }
+    public enum MacAgents {
+        public static let listWidth: Double = 220
+        public static let paddingX: Double = 40
+        public static let paddingY: Double = 22
+        public static let gap: Double = 18
+        public static let detailPadding: Double = 18
+        public static let labelWidth: Double = 130
+        public static let rowHeight: Double = 26
+        public static let icon: Double = 16
+        public static let statusDot: Double = 7
+        public static let actionSize: Double = 26
+    }
 }
 
 /// Every token by its JSON path, for the test that keeps this file in step with the JSON.
@@ -501,6 +513,16 @@ public enum CarryOnTokenTable {
         "layout.code-box.gap": CarryOnLayout.CodeBox.gap,
         "layout.code-box.radius": CarryOnLayout.CodeBox.radius,
         "layout.mac-sidebar-row.height": CarryOnLayout.MacSidebarRow.height,
+        "layout.mac-agents.list-width": CarryOnLayout.MacAgents.listWidth,
+        "layout.mac-agents.padding-x": CarryOnLayout.MacAgents.paddingX,
+        "layout.mac-agents.padding-y": CarryOnLayout.MacAgents.paddingY,
+        "layout.mac-agents.gap": CarryOnLayout.MacAgents.gap,
+        "layout.mac-agents.detail-padding": CarryOnLayout.MacAgents.detailPadding,
+        "layout.mac-agents.label-width": CarryOnLayout.MacAgents.labelWidth,
+        "layout.mac-agents.row-height": CarryOnLayout.MacAgents.rowHeight,
+        "layout.mac-agents.icon": CarryOnLayout.MacAgents.icon,
+        "layout.mac-agents.status-dot": CarryOnLayout.MacAgents.statusDot,
+        "layout.mac-agents.action-size": CarryOnLayout.MacAgents.actionSize,
     ]
     public static let strings: [String: String] = [
         "font.voice.family": CarryOnFontFace.voice.family,
