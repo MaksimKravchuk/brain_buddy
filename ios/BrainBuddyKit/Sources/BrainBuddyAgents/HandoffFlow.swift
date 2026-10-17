@@ -153,14 +153,14 @@ public final class HandoffFlow {
     }
 
     /// The agent `steps` rows from the selected one (-1 up, +1 down), clamped at both ends (030-FR-040).
-    package func agentID(movingBy steps: Int) -> String? {
+    public func agentID(movingBy steps: Int) -> String? {
         guard !agents.isEmpty else { return nil }
         let current = agents.firstIndex { $0.id == selectedID } ?? 0
         return agents[min(max(current + steps, 0), agents.count - 1)].id
     }
 
     /// ↑/↓ in the agent list: selects the neighbouring agent; a no-op at either end or while sending.
-    package func moveSelection(by steps: Int) async {
+    public func moveSelection(by steps: Int) async {
         guard phase != .sending, let id = agentID(movingBy: steps), id != selectedID else { return }
         await select(id)
     }
