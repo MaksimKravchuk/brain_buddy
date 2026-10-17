@@ -146,18 +146,18 @@
             let dto = AgentFixtures.connection()
             var rows = AgentSettingsModel.details(dto)
             let view = AgentDetailsView(
-                rows: rows, isTesting: false, canTest: true, controlsEnabled: true, canReplaceCredential: true,
+                name: "Hermes", rows: rows, isTesting: false, canTest: true, controlsEnabled: true, canReplaceCredential: true,
                 now: dto.lastContactAt ?? Self.now, onTest: {}, onReplace: {}, onEdit: {})
             #expect(
                 view.lines.map(\.label) == [
-                    "Status", "Address", "Credential", "Last contact", "Agent card", "Skills", "Updates", "Guarantee",
+                    "Address", "Credential", "Last contact", "Agent card", "Skills", "Updates", "Guarantee",
                 ])
             #expect(view.lines.first { $0.label == "Last contact" }?.value.hasPrefix("Today ") == true)
             rows.card = nil
             rows.skills = nil
             rows.guarantee = nil
             let bare = AgentDetailsView(
-                rows: rows, isTesting: false, canTest: true, controlsEnabled: true, canReplaceCredential: true,
+                name: "Hermes", rows: rows, isTesting: false, canTest: true, controlsEnabled: true, canReplaceCredential: true,
                 now: Self.now, onTest: {}, onReplace: {}, onEdit: {})
             #expect(!bare.lines.map(\.label).contains("Skills"))
             let earlier = AgentDetailsView.contact(Self.now, now: Self.now.addingTimeInterval(3 * 86_400))

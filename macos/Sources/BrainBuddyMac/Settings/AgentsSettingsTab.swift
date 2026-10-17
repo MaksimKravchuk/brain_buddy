@@ -110,16 +110,18 @@ final class AgentsTabController {
 /// G-06: the list with + and −, the details and, under them, the password-less line, the offline line or
 /// the read failure (030-FR-025, 030-FR-029, 030-FR-036, 030-FR-038).
 struct AgentsManagerView: View {
+    private typealias Metrics = CarryOnLayout.MacAgents
     let controller: AgentsTabController
     let accountURL: URL?
     let onOpen: (URL) -> Void
+    var now: Date = Date()
 
     @FocusState private var focusedRow: String?
 
     private var model: AgentSettingsModel { controller.model }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: CarryOnSpace.md) {
             switch model.phase {
             case .loading where model.connections.isEmpty:
                 ProgressView().controlSize(.small).frame(maxWidth: .infinity, minHeight: 160)
@@ -128,36 +130,48 @@ struct AgentsManagerView: View {
             case .failed(let notice):
                 failure(notice)
             default:
-                HStack(alignment: .top, spacing: 18) {
+                HStack(alignment: .top, spacing: Metrics.gap) {
                     list
                     detail
                 }
+                .frame(maxHeight: .infinity)
                 footer
             }
         }
-        .padding(20)
-        .frame(maxWidth: .infinity, minHeight: 220, alignment: .topLeading)
+        .padding(.horizontal, Metrics.paddingX)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .containerRelativeFrame(.vertical, alignment: .topLeading) { height, _ in
+            max(0, height - Metrics.paddingY * 2)
+        }
+        .padding(.vertical, Metrics.paddingY)
         .sheet(isPresented: Binding(get: { controller.editor != nil }, set: { if !$0 { controller.closeEditor() } })) {
             if let editor = controller.editor { AgentEditorSheet(editor: editor, onClose: { controller.closeEditor() }) }
         }
     }
 
     private var list: some View {
-        VStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: CarryOnSpace.xs) {
             ScrollView {
-                VStack(spacing: 0) {
+                VStack(spacing: CarryOnSpace.xxs) {
                     ForEach(model.rows) { row in
                         let chosen = row.id == model.selectedID
                         Button { model.select(row.id) } label: {
-                            HStack(spacing: 6) {
-                                Text(row.name).font(MacSheetFont.body).lineLimit(1)
-                                Spacer(minLength: 4)
+                            HStack(spacing: CarryOnSpace.xs) {
+                                MacBoardIconView(icon: .agents, size: Metrics.icon).accessibilityHidden(true)
+                                Text(row.name).font(chosen ? MacSheetFont.heading : MacSheetFont.body).lineLimit(1)
+                                Spacer(minLength: CarryOnSpace.xxs)
+                                statusDot(row.id)
                                 Text(row.status).font(MacSheetFont.meta).lineLimit(1)
-                                    .foregroundStyle(CarryOnColorStyle.coTextSecondary)
+                                    .foregroundStyle(statusStyle(row.id))
                             }
-                            .padding(.horizontal, 8).padding(.vertical, 6)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(chosen ? CarryOnColorStyle.coSurfaceSelected : CarryOnColorStyle.coBgGround)
+                            .padding(.horizontal, CarryOnSpace.sm)
+                            .frame(maxWidth: .infinity, minHeight: CarryOnLayout.MacSidebarRow.height, alignment: .leading)
+                            .background {
+                                if chosen {
+                                    RoundedRectangle(cornerRadius: CarryOnRadius.sm, style: .continuous)
+                                        .fill(CarryOnColorStyle.coSurfaceCard)
+                                }
+                            }
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
@@ -170,19 +184,18 @@ struct AgentsManagerView: View {
             }
             .onKeyPress(.upArrow) { moveSelection(by: -1) }
             .onKeyPress(.downArrow) { moveSelection(by: 1) }
-            .frame(width: 200, height: 160)
-            .overlay { RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(CarryOnColorStyle.coControlQuiet) }
+            .frame(maxHeight: .infinity)
             if !model.isPasswordless {
-                HStack(spacing: 6) {
-                    Button { controller.open(.add) } label: { MacBoardIconView(icon: .plus, size: 15) }
+                HStack(spacing: CarryOnSpace.xs) {
+                    Button { controller.open(.add) } label: { MacBoardIconView(icon: .plus, size: Metrics.icon) }
                         .disabled(!model.canAdd).accessibilityLabel(AgentsCopy.addAgentEllipsis)
                     Button { if let target = model.selected { controller.open(.delete(target)) } } label: { Text("−") }
                         .disabled(!model.controlsEnabled || model.selected == nil).accessibilityLabel("Delete")
-                    Spacer()
                 }
-                .buttonStyle(.carryOnQuiet)
+                .buttonStyle(.carryOnSecondaryIcon)
             }
         }
+        .frame(width: Metrics.listWidth)
     }
 
     /// Up/Down change the selected agent and carry focus with it (030-FR-040).
@@ -192,26 +205,43 @@ struct AgentsManagerView: View {
         return .handled
     }
 
-    @ViewBuilder private var detail: some View {
-        if let rows = model.details, let target = model.selected {
-            VStack(alignment: .leading, spacing: 8) {
-                AgentDetailsView(
-                    rows: rows, isTesting: model.isTesting, canTest: model.canTest, controlsEnabled: model.controlsEnabled,
-                    canReplaceCredential: !model.isPasswordless, onTest: { Task { await model.testAgain() } },
-                    onReplace: { controller.open(.replaceCredential(target)) }, onEdit: { controller.open(.edit(target)) })
-                if let notice = model.notice { noticeLines(notice) }
-            }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-        } else {
-            VStack(spacing: 10) {
-                Text(AgentsCopy.noAgents).font(MacSheetFont.body).foregroundStyle(CarryOnColorStyle.coTextSecondary)
-                if !model.isPasswordless {
-                    Button(AgentsCopy.addAgentEllipsis) { controller.open(.add) }
-                        .buttonStyle(.carryOnSecondary).disabled(!model.canAdd)
+    private func statusStyle(_ id: String) -> CarryOnColorStyle {
+        model.connections.first { $0.id == id }?.stale == true ? .coStatusWarning : .coTextSecondary
+    }
+
+    private func statusDotStyle(_ id: String) -> CarryOnColorStyle {
+        model.connections.first { $0.id == id }?.stale == true ? .coStatusWarning : .coMarkOpen
+    }
+
+    private func statusDot(_ id: String) -> some View {
+        Circle().fill(statusDotStyle(id))
+            .frame(width: Metrics.statusDot, height: Metrics.statusDot).accessibilityHidden(true)
+    }
+
+    private var detail: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: CarryOnSpace.xs) {
+                if let rows = model.details, let target = model.selected {
+                    AgentDetailsView(
+                        name: target.name, rows: rows, isTesting: model.isTesting, canTest: model.canTest,
+                        controlsEnabled: model.controlsEnabled, canReplaceCredential: !model.isPasswordless,
+                        statusStyle: statusStyle(target.id), statusDotStyle: statusDotStyle(target.id), now: now,
+                        onTest: { Task { await model.testAgain() } },
+                        onReplace: { controller.open(.replaceCredential(target)) }, onEdit: { controller.open(.edit(target)) })
+                    if let notice = model.notice { noticeLines(notice) }
+                } else {
+                    Text(AgentsCopy.noAgents).font(MacSheetFont.body).foregroundStyle(CarryOnColorStyle.coTextSecondary)
+                    if !model.isPasswordless {
+                        Button(AgentsCopy.addAgentEllipsis) { controller.open(.add) }
+                            .buttonStyle(.carryOnSecondary).disabled(!model.canAdd)
+                    }
                 }
             }
-            .frame(maxWidth: .infinity, minHeight: 160)
+            .padding(Metrics.detailPadding)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(CarryOnColorStyle.coSurfaceCard, in: RoundedRectangle(cornerRadius: CarryOnRadius.md, style: .continuous))
     }
 
     @ViewBuilder private var footer: some View {
@@ -241,7 +271,6 @@ struct AgentsManagerView: View {
             MacSheetStatus(text: notice.message, tone: .danger, font: MacSheetFont.note)
             if let reference = notice.reference { referenceLine(reference) }
         }
-        .padding(.leading, 164)
     }
 
     private func referenceLine(_ reference: String) -> some View {

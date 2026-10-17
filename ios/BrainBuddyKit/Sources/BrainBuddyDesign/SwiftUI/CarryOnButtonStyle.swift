@@ -14,13 +14,15 @@
         }
 
         public let kind: Kind
+        public let iconOnly: Bool
 
-        public init(_ kind: Kind) {
+        public init(_ kind: Kind, iconOnly: Bool = false) {
             self.kind = kind
+            self.iconOnly = iconOnly
         }
 
         public func makeBody(configuration: Configuration) -> some View {
-            CarryOnButtonBody(kind: kind, label: configuration.label, isPressed: configuration.isPressed)
+            CarryOnButtonBody(kind: kind, iconOnly: iconOnly, label: configuration.label, isPressed: configuration.isPressed)
         }
     }
 
@@ -28,6 +30,7 @@
         typealias Metrics = CarryOnLayout.Button
 
         let kind: CarryOnButtonStyle.Kind
+        var iconOnly: Bool = false
         let label: Label
         let isPressed: Bool
         @Environment(\.isEnabled) private var isEnabled
@@ -39,14 +42,19 @@
                 .carryOnFont(CarryOnTypeScale.bodyStrong)
                 .foregroundStyle(foreground)
                 .padding(.horizontal, paddingX)
-                .frame(minHeight: platform == .mac ? Metrics.macHeight : Metrics.height)
+                .frame(width: compactIcon ? CarryOnLayout.MacAgents.actionSize : nil,
+                    height: compactIcon ? CarryOnLayout.MacAgents.actionSize : nil)
+                .frame(minHeight: compactIcon ? CarryOnLayout.MacAgents.actionSize : (platform == .mac ? Metrics.macHeight : Metrics.height))
                 .modifier(CarryOnButtonSurface(kind: kind, fill: background, glassTint: glassTint))
                 .scaleEffect(isPressed && kind != .quiet && kind != .glassPrimary ? Metrics.pressedScale : 1)
                 .opacity(isEnabled ? 1 : Metrics.disabledOpacity)
                 .contentShape(Capsule())
         }
 
+        private var compactIcon: Bool { iconOnly && platform == .mac }
+
         private var paddingX: Double {
+            if compactIcon { return 0 }
             if platform == .mac { return Metrics.macPaddingX }
             return kind == .quiet ? Metrics.quietPaddingX : Metrics.paddingX
         }
@@ -98,6 +106,8 @@
     extension ButtonStyle where Self == CarryOnButtonStyle {
         public static var carryOnPrimary: CarryOnButtonStyle { CarryOnButtonStyle(.primary) }
         public static var carryOnSecondary: CarryOnButtonStyle { CarryOnButtonStyle(.secondary) }
+        /// M29's compact circular secondary controls, sharing the pill's interaction states.
+        public static var carryOnSecondaryIcon: CarryOnButtonStyle { CarryOnButtonStyle(.secondary, iconOnly: true) }
         public static var carryOnQuiet: CarryOnButtonStyle { CarryOnButtonStyle(.quiet) }
         public static var carryOnStrong: CarryOnButtonStyle { CarryOnButtonStyle(.strong) }
         public static var carryOnGlassPrimary: CarryOnButtonStyle { CarryOnButtonStyle(.glassPrimary) }
