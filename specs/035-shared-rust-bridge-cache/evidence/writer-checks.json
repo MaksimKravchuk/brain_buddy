@@ -1,0 +1,14 @@
+{
+  "utility_tests": {
+    "passed": 93,
+    "log": "/tmp/bb-cache-writer-tests.log"
+  },
+  "focused_regressions": {
+    "passed": 2,
+    "red_before_green": "/tmp/bb-cache-writer-red.log"
+  },
+  "workflow_contract": "passed",
+  "validate_ci": "running",
+  "local_actionlint": "not installed; required CI runs actionlint",
+  "verify_all": "not run locally: workflow-only change, full required GitHub CI will run exact candidate"
+}

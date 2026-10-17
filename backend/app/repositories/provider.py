@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.schemas.domain import ProviderConfig, ProviderRegistryDocument
+from app.schemas.domain import ProviderRegistryDocument
 
 from .base import BaseRepository
 
@@ -25,19 +25,3 @@ class ProviderRepository(BaseRepository):
 
     def save(self, config: ProviderRegistryDocument) -> None:
         self.dump_model(self.config_path, config)
-
-    def set_default_provider(self, provider_id: str | None) -> ProviderRegistryDocument:
-        registry = self.load()
-        registry = registry.model_copy(update={"default_provider": provider_id})
-        self.save(registry)
-        return registry
-
-    def upsert_provider(
-        self, provider_id: str, config: ProviderConfig
-    ) -> ProviderRegistryDocument:
-        registry = self.load()
-        providers = dict(registry.providers)
-        providers[provider_id] = config
-        registry = registry.model_copy(update={"providers": providers})
-        self.save(registry)
-        return registry

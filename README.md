@@ -14,7 +14,7 @@ See [Product direction: executable next actions](docs/product-direction.md) for 
 ## Highlights
 - **Interactive canvas** powered by React Flow with undo/redo, optimistic updates, and large-graph tuning for 200+ nodes.
 - **GTD task tracker** with inbox/next/waiting/someday lists, due dates, projects, tags, and voice brain-dump capture that drafts tasks from speech.
-- **FastAPI backend** persisting trees on the filesystem with LRU caching and version history snapshots; task data lives in SQLite (`tasks.sqlite3`) under the same data dir.
+- **FastAPI backend** persisting trees on the filesystem with version history snapshots; task data lives in SQLite (`tasks.sqlite3`) under the same data dir.
 - **AI validation pipeline** with provider abstraction and mock provider for offline workflows.
 - **Operational polish** including correlation-ID tracing, optional API key guardrails, and expanded troubleshooting guides.
 - **Data safety by default** with 5s local autosave, exit warnings, and explicit consent gating before any AI request.
@@ -162,17 +162,8 @@ the optional Hermes managed-delivery mode additionally follow ADR-0010 and
 ## Documentation
 
 - `docs/mcp.md` — GPT task tools and MCP connection setup.
-- `docs/architecture_overview.md`
-- `docs/api_usage.md`
-- `docs/troubleshooting.md`
-- `docs/contributing.md`
-- `docs/performance_report_phase5.md`
-- `docs/deployment_smoke.md`
-- `docs/infrastructure_runbook.md`
-- `docs/release_checklist.md`
-- `docs/pilot_dataset.json`
 
 Historical requirements, contracts, and the phased roadmap remain under `requirements/`.
 
 ## Contributing
-Guidelines, branching strategy, and review expectations are documented in `docs/contributing.md`. We welcome issue reports captured via `docs/troubleshooting.md#reporting`.
+Contributor guidelines, commit and pull-request conventions, and the delivery workflow are documented in `AGENTS.md`.

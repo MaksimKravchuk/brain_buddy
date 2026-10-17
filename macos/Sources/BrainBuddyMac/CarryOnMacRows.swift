@@ -221,28 +221,6 @@ struct MacTaskRowShell<Leading: View, Title: View, Trailing: View>: View {
     }
 }
 
-/// One complete, static row: the board's rows with fixture values.
-struct MacTaskRow: View {
-    let title: String
-    var kind: MacRowKind = .open
-    var meta: String?
-    var tone: MacDueTone = .plain
-    var selected = false
-
-    var body: some View {
-        MacTaskRowShell {
-            if kind.hasMark { MacRowMark(kind: kind) }
-        } title: {
-            MacRowTitleText(title: title, kind: kind, selected: selected)
-        } trailing: {
-            if let meta {
-                Text(meta).macRowMeta(tone: tone, selected: selected)
-            }
-        }
-        .macRowSurface(selected: selected)
-    }
-}
-
 /// A section header inside the list: Instrument Sans 12, secondary, in line with the rows' text.
 struct MacListSectionHeader: View {
     let title: String

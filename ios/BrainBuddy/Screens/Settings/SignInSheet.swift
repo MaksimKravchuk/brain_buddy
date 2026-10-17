@@ -73,6 +73,10 @@ struct SignInSheet: View {
 
     var body: some View {
         NavigationStack {
+            Group {
+            if step == .invite {
+                inviteStep
+            } else {
             Form {
                 Section {
                     Text(workspace.account == nil ? "Sign in or create an account" : "Sign in again")
@@ -119,6 +123,8 @@ struct SignInSheet: View {
             .carryOnFont(CarryOnTypeScale.body)
             .scrollContentBackground(.hidden)
             .background(.coBgGround)
+            }
+            }
             .navigationTitle(step == .recovery || step == .newPassword ? "Reset your password" : "Sign in")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -215,25 +221,87 @@ struct SignInSheet: View {
                 backButton
             }
         case .invite:
-            // Design M-03: .01 default, .02 busy (disabled), .03/.07 inline errors, .04 expired.
-            Section {
-                if inviteExpired {
-                    Text(InviteStepCopy.expired).carryOnFont(CarryOnTypeScale.title)
-                    Button("Back to sign in") { returnToChoice() }.signInLink()
-                } else {
-                    Text("Enter your invite code").carryOnFont(CarryOnTypeScale.title).accessibilityAddTraits(.isHeader)
-                    Text("Brain Buddy is invite-only. No account uses this sign-in yet. Enter your invite code to create one.")
-                        .carryOnFont(CarryOnTypeScale.meta).foregroundStyle(.coTextSecondary)
+            EmptyView() // Drawn by `inviteStep`, outside the Form.
+        }
+    }
+
+    /// Board 06: the invite step on a flat page with the glass action bar. One field, not the
+    /// board's six boxes, because real invite codes are long tokens.
+    private var inviteStep: some View {
+        let typed = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        return ScrollView {
+            VStack(alignment: .leading, spacing: CGFloat(CarryOnSpace.md)) {
+                if !inviteExpired {
+                    Text(typed.isEmpty ? "New account" : "New account · \(typed)")
+                        .carryOnFont(CarryOnTypeScale.meta)
+                        .foregroundStyle(.coTextSecondary)
+                }
+                Text(inviteExpired ? InviteStepCopy.expired : "Enter your invite code")
+                    .carryOnFont(CarryOnTypeScale.title)
+                    .foregroundStyle(.coTextPrimary)
+                    .accessibilityAddTraits(.isHeader)
+                if !inviteExpired {
+                    Text("Carry On is invite-only for now. No account uses this sign-in yet, so a code creates one.")
+                        .carryOnFont(CarryOnTypeScale.meta)
+                        .foregroundStyle(.coTextSecondary)
                     TextField("Invite code", text: $inviteCode)
                         .font(.body.monospaced())
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .submitLabel(.continue)
-                        .focused($focused, equals: .invite).carryOnField()
+                        .focused($focused, equals: .invite)
                         .onSubmit { if canSubmitInvite { submitInvite() } }
-                    action("Continue", enabled: canSubmitInvite) { submitInvite() }
+                        .carryOnField()
+                        .disabled(isBusy)
+                    Text("No code? You can keep using Carry On on this iPhone; nothing is lost.")
+                        .carryOnFont(CarryOnTypeScale.meta)
+                        .foregroundStyle(.coTextSecondary)
+                    if !isOnline {
+                        Text("Your local tasks are kept. Connect to the internet to sign in.")
+                            .carryOnFont(CarryOnTypeScale.meta)
+                            .foregroundStyle(.coTextSecondary)
+                    }
                 }
-            }.disabled(isBusy)
+                if let failureMessage, !inviteExpired {
+                    EditorValidationMessage(text: failureMessage)
+                    if let failureReferenceID {
+                        Text("Reference ID: \(failureReferenceID)")
+                            .font(.footnote.monospaced())
+                            .foregroundStyle(.coTextSecondary)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, CGFloat(CarryOnSpace.lg))
+            .padding(.top, CGFloat(CarryOnSpace.lg))
+            .padding(.bottom, CGFloat(CarryOnSpace.md))
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            BBGlassActionBar {
+                if !inviteExpired {
+                    Button {
+                        submitInvite()
+                    } label: {
+                        HStack(spacing: CGFloat(CarryOnSpace.xs)) {
+                            if isBusy { ProgressView() }
+                            Text("Create account")
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.carryOnStrong)
+                    .disabled(!canSubmitInvite || isBusy || !isOnline)
+                }
+                Button {
+                    returnToChoice()
+                } label: {
+                    Text(inviteExpired ? "Back to sign in" : "Back")
+                        .frame(maxWidth: inviteExpired ? .infinity : nil)
+                }
+                .buttonStyle(.carryOnQuiet)
+                .disabled(isBusy)
+            }
+        }
+        .background(.coBgGround)
     }
 
     private var canSubmitInvite: Bool {
