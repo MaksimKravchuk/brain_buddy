@@ -1,6 +1,7 @@
 # Acceptance: iPhone voice brain dump
 
 **VERDICT**: reject
+**Owner decision**: closed with the waivers below (Max, 2026-10-17)
 **Feature**: `specs/031-ios-voice-brain-dump/`
 **Graded**: 2026-10-17  **Implementation SHA**: `9a09fd2355d561953644a1cdf7f2f28129fa54f2` (plus one uncommitted test, `031-SC-001 …`, in `VoiceBrainDumpModelTests.swift` on `claude/project-thread-l3oml8`)
 **Auditor**: `acceptance-auditor` (did not write the code under grade)
@@ -134,6 +135,13 @@ No sheet state has a rendering test. The states are proved where the model decid
 
 | criterion | why it is not tested | approved by |
 |---|---|---|
-| — | No waiver is recorded. Max's reported decision (accept the interface now; voice quality and Russian as follow-up) belongs here only if Max enters it himself, per criterion (031-FR-001, 031-FR-002, US1-AS1 resting on his device check). 031-FR-013 and 031-SC-002 have no device evidence to rest on | — |
+| 031-FR-001, US1-AS1 | No app-layer UI test; the voice button in the capture bar and the sheet opening already listening rest on Max's device check of TestFlight build 9a09fd23 | Max, 2026-10-17 (decision card in the project thread: "Закрыть сейчас") |
+| 031-FR-002 | No snapshot of `VoiceCaptureSheet` against M11; rests on Max's device check. UI tests are to be written for the reworked voice input | Max, 2026-10-17 (same decision) |
+| 031-FR-013 | No test that no audio file is written or nothing is logged; the code uses on-device recognition with no file or logger (code review only) | Max, 2026-10-17 (same decision) |
+| 031-SC-002 | No network measurement; no networking API in `Voice/` or `VoiceBrainDump/` (code review only) | Max, 2026-10-17 (same decision) |
+| 031-FR-003 (weak) | Russian is not recognised on device; probable cause `Locale.current` in an English-only app. Moved to the voice-input follow-up together with voice quality | Max, 2026-10-17 (same decision; "дальше мы отдельно будем оттачивать вопрос голосового ввода") |
+
+The waivers were recorded by the implementing session from Max's own tap on the decision card; the auditor's
+verdict above is unchanged. 031-SC-001 is now reached with `add()` alone (one tap) and is committed on the branch.
 
 <!-- A waiver needs a human. An auditor cannot waive its own finding. -->

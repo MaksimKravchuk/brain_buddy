@@ -27,7 +27,7 @@ Swift function name) so `scripts/check_requirement_coverage.py` can trace them.
 
 ## Phase 4 — Close (PR-05)
 
-- [ ] T010 Write `acceptance.md`, `traceability.md` and `report.md` after Max's device check
+- [x] T010 Write `acceptance.md`, `traceability.md` and `report.md` after Max's device check
 
 ## PR-срезы
 
