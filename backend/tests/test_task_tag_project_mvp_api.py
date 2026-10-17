@@ -2,14 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
-from app.container import build_container
-from app.core import get_config
-from app.modules.tasks import TaskRepository
-from app.utils.file_ops import write_json
-from app.utils.time import utcnow
-
 
 def _post(client, path: str, key: str, payload: dict[str, object]):
     return client.post(path, headers={"Idempotency-Key": key}, json=payload)
@@ -83,83 +75,3 @@ def test_project_archive_keeps_and_tag_delete_unassigns_tasks(api_client) -> Non
 
     after_delete = api_client.get(f"/api/tasks/{task['id']}").json()
     assert after_delete["tag_ids"] == []
-
-
-def test_task_repository_migrates_existing_json_contexts_to_sqlite_tags(
-    tmp_path: Path, monkeypatch
-) -> None:
-    data_dir = tmp_path / "data"
-    data_dir.mkdir()
-    now = utcnow().isoformat().replace("+00:00", "Z")
-    owner_id = "user_legacy"
-    write_json(
-        data_dir / "projects" / owner_id / "project_legacy.json",
-        {
-            "id": "project_legacy",
-            "owner_id": owner_id,
-            "name": "Legacy Project",
-            "color": None,
-            "state": "active",
-            "linked_tree_ids": ["tree_should_not_migrate"],
-            "created_at": now,
-            "updated_at": now,
-            "revision": 1,
-            "schema_version": 1,
-        },
-    )
-    write_json(
-        data_dir / "contexts" / owner_id / "context_legacy.json",
-        {
-            "id": "context_legacy",
-            "owner_id": owner_id,
-            "name": "@Calls",
-            "state": "active",
-            "created_at": now,
-            "updated_at": now,
-            "revision": 1,
-            "schema_version": 1,
-        },
-    )
-    write_json(
-        data_dir / "tasks" / owner_id / "task_legacy.json",
-        {
-            "id": "task_legacy",
-            "owner_id": owner_id,
-            "title": "Legacy task",
-            "details": None,
-            "state": "inbox",
-            "project_id": "project_legacy",
-            "context_ids": ["context_legacy"],
-            "due_date": None,
-            "waiting_for": None,
-            "waiting_since": None,
-            "order_key": 0,
-            "source_capture_ids": [],
-            "created_at": now,
-            "updated_at": now,
-            "completed_at": None,
-            "cancelled_at": None,
-            "revision": 1,
-            "schema_version": 1,
-        },
-    )
-
-    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(data_dir))
-    monkeypatch.setenv("BRAIN_BUDDY_ENV", "test")
-    get_config.cache_clear()
-    container = build_container(get_config())
-
-    assert isinstance(container.task_repo, TaskRepository)
-    assert container.task_repo.db_path.exists()
-    migrated = container.task_service.get_task("task_legacy", owner_id=owner_id)
-    assert migrated.tag_ids == ["context_legacy"]
-    assert (
-        container.task_service.get_tag("context_legacy", owner_id=owner_id).name
-        == "Calls"
-    )
-    migrated_project = container.task_service.get_project(
-        "project_legacy", owner_id=owner_id
-    )
-    assert "linked_tree_ids" not in migrated_project.model_dump()
-
-    get_config.cache_clear()

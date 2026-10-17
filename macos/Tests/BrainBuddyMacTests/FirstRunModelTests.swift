@@ -62,10 +62,9 @@ struct FirstRunModelTests {
         #expect(recorded(folder)?.decidedAt == clock.now)
     }
 
-    @Test("029-FR-001 029-SC-002 a Mac with data, a legacy import, an account or tasks records notNeeded and shows nothing",
+    @Test("029-FR-001 029-SC-002 a Mac with data, an account or tasks records notNeeded and shows nothing",
         arguments: [
             FirstRunLaunchFacts(workspaceWrittenBefore: true),
-            FirstRunLaunchFacts(legacyImportBroughtTasks: true),
             FirstRunLaunchFacts(hasAccount: true),
             FirstRunLaunchFacts(openTaskCount: 1, projectCount: 0),
             FirstRunLaunchFacts(openTaskCount: 0, projectCount: 1),
@@ -127,7 +126,7 @@ struct FirstRunModelTests {
         #expect(after.firstRun?.outcome == .inProgress)
         after.firstRun = nil
         #expect(after == before)
-        #expect(!folder.names.contains(LegacyFileNames.store), "no workspace write")
+        #expect(!folder.names.contains(MacFileNames.store), "no workspace write")
     }
 
     // MARK: Steps

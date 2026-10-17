@@ -3,8 +3,8 @@
 This guide covers spec 023's direct Google, Apple and email-code setup and the
 Identity storage transition. It supplements [auth.md](auth.md), whose older
 JSON/invite-only limitations do not describe the modern implementation. The
-settings below come from `ModernAuthSettings`; migration and image checks come
-from the implemented CLI and release guard. Examples contain placeholders.
+settings below come from `ModernAuthSettings`; image checks come from the
+implemented release guard. Examples contain placeholders.
 Configuration is not evidence of working providers, legal compliance or an
 accepted release. Use the [release runbook](autonomous-delivery-runbook.md) for
 the existing ASK approval, exact-SHA CI, landing and deployment procedure.
@@ -155,69 +155,30 @@ To rotate, install the new key **alongside** all still-needed old keys, select
 the new ID as `CURRENT_KEY_ID`, and restart all writers consistently. New HMACs
 and encrypted records use the new key; existing envelopes identify their old
 key. Budget checks include retained keys, so rotation does not reset limits.
-Remove an old key only after its challenges, budgets, mail jobs, migration
-backup and Apple cleanup records have expired/been erased **and** no active
+Remove an old key only after its challenges, budgets, mail jobs and
+Apple cleanup records have expired/been erased **and** no active
 Apple revocation grant still depends on it. Active grants can outlive 24 hours;
 elapsed time alone is not retirement evidence. There is no automatic re-keying
 command. Record a scoped review of remaining key-ID references without printing
 payloads before removal; lost keys cannot be reconstructed from SQLite.
 
-## Explicit migration and rollback containment
+## Rollback containment
 
-An empty root initializes `auth.sqlite3` directly. A nonempty legacy
-`users/`/`sessions/` root requires a maintenance window and the explicit CLI;
-ordinary startup cannot silently import it. There is no second legacy storage
-mode, dual write or JSON fallback. An initialized epoch-1 database already
-requires a SQLite-capable image even without a legacy import.
-
-1. Rehearse the migration/parity and release-failure guard against synthetic
-   storage at the exact candidate SHA. Record the approved target volume,
-   image, key availability and recovery loss boundary.
-2. Drain ingress, disable automatic restart/autostart and stop **every** old
-   API, worker, CLI and other authentication writer against that volume.
-   Verify they remain stopped. `--writers-stopped` acknowledges this external
-   prerequisite; it does not stop processes or make rolling overlap safe.
-3. In the candidate's pinned backend environment, mounted to that stopped
-   volume and with auth keys supplied only through secret storage, run:
-
-   ```sh
-   cd backend
-   BRAIN_BUDDY_DATA_DIR=/path/to/stopped-data-root \
-     uv run --frozen python -m app.cli migrate-auth --writers-stopped
-   ```
-
-4. Require `schema_epoch: 1`, `import_committed: true` and
-   `cleanup_complete: true` in its coarse JSON result; inspect import/revoked
-   counts against the rehearsal. Invalid journals, indexes, duplicates, paths
-   or changed source bytes abort. IDs, password hashes, valid session hashes
-   and ownership remain; expired/orphan legacy sessions are revoked, while
-   malformed session payloads abort the import.
-5. Keep writers stopped on failure. Before commit, validated original authority
-   remains; after commit, retry this same CLI to finish cleanup, without
-   reimporting JSON. Startup can resume committed cleanup but readiness stays
-   blocked until it completes. Start only the approved SQLite-capable code
-   through the release procedure, then prove readiness, parity and smoke.
-
-The migration writes `.auth-migration-backup.enc` on the volume, mode `0600`,
-using authenticated encryption and a verified manifest. Its deadline is at
-most 24 hours from creation. Any account purge erases the **whole aggregate
-backup**, not only that account's part; startup/maintenance enforce expiry
-without needing a decryption key. Do not make permanent plaintext archives or
-copy this backup into longer-lived snapshots. SQLite `secure_delete` and WAL
-checkpointing reduce local remnants; they do not establish forensic erasure
-of platform/device backups. The owner must govern those external copies.
+An empty root initializes `auth.sqlite3` directly. There is no legacy
+`users/`/`sessions/` storage mode, import command, dual write or JSON fallback;
+the one-time JSON-to-SQLite importer (`migrate-auth`) was retired because no
+real accounts existed to import (ADR-0030). An initialized epoch-1 database
+requires a SQLite-capable image.
 
 The existing release workflow captures the actual previous backend image and
 its storage capability, checks the fresh ledger before deploy mutation, and
 checks again before changing rollback flags or either image. These are the
 implemented guard commands, **not deployment commands**:
 
-The forward check also detects a nonempty legacy account/session root and an
-unfinished cleanup checkpoint. It refuses that first deployment before staging
-secrets or replacing either image. The previous service stays running until the
-explicit stopped-writer migration window. Configure the master key and complete
-the migration before retrying the release; merging code alone does not migrate
-the production volume. A genuinely empty root may initialize normally.
+The forward check still refuses a nonempty legacy account/session root or an
+unfinished cleanup checkpoint, because the guard script has not been retired
+with the importer; no command can clear that state now, so such a volume has to
+be emptied by the owner. A genuinely empty root initializes normally.
 
 ```sh
 python3 scripts/auth_migration_guard.py capture --app '<backend-app>' \
@@ -240,8 +201,7 @@ drain/stop backend writers and prevent restart under the incident's recorded
 target authority. Keep the deployment **failed**. Repair forward from code
 that reads the committed epoch, obtain green exact-SHA CI and the recorded ASK
 landing, then use the normal release workflow. Native documents/outboxes stay
-on device. Restoring the short-lived backup is a separately approved data
-recovery with explicit loss/resurrection analysis, never ordinary rollback.
+on device.
 
 ## EU/GDPR launch owner checklist
 

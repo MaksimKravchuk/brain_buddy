@@ -13,10 +13,6 @@ package struct MacLocalState: Codable, Hashable, Sendable {
     package var installSalt: Data
     /// The first successful write of `store.json`, or a launch that found one; never cleared.
     package var workspaceFirstWrittenAt: Date?
-    /// Nil only before the first 021 launch decided anything.
-    package var legacyImport: LegacyImportRecord?
-    /// `LegacyCookieCleanup` ran.
-    package var legacyCleanupDoneAt: Date?
     package var waitingReviews: [String: TaskReviewMark]
     package var somedayReviews: [String: TaskReviewMark]
     package var projectReviews: [String: ProjectReviewMark]
@@ -34,16 +30,13 @@ package struct MacLocalState: Codable, Hashable, Sendable {
     }
 
     package init(
-        installSalt: Data, workspaceFirstWrittenAt: Date? = nil, legacyImport: LegacyImportRecord? = nil,
-        legacyCleanupDoneAt: Date? = nil, waitingReviews: [String: TaskReviewMark] = [:],
+        installSalt: Data, workspaceFirstWrittenAt: Date? = nil, waitingReviews: [String: TaskReviewMark] = [:],
         somedayReviews: [String: TaskReviewMark] = [:], projectReviews: [String: ProjectReviewMark] = [:],
         sidebar: Sidebar = Sidebar(), firstRun: FirstRunRecord? = nil
     ) {
         version = Self.currentVersion
         self.installSalt = installSalt
         self.workspaceFirstWrittenAt = workspaceFirstWrittenAt
-        self.legacyImport = legacyImport
-        self.legacyCleanupDoneAt = legacyCleanupDoneAt
         self.waitingReviews = waitingReviews
         self.somedayReviews = somedayReviews
         self.projectReviews = projectReviews
@@ -58,7 +51,7 @@ package struct MacLocalState: Codable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case version, installSalt, workspaceFirstWrittenAt, legacyImport, legacyCleanupDoneAt
+        case version, installSalt, workspaceFirstWrittenAt
         case waitingReviews, somedayReviews, projectReviews, sidebar, firstRun
     }
 
@@ -67,8 +60,6 @@ package struct MacLocalState: Codable, Hashable, Sendable {
         version = try values.decode(Int.self, forKey: .version)
         installSalt = try values.decode(Data.self, forKey: .installSalt)
         workspaceFirstWrittenAt = try values.decodeIfPresent(Date.self, forKey: .workspaceFirstWrittenAt)
-        legacyImport = try values.decodeIfPresent(LegacyImportRecord.self, forKey: .legacyImport)
-        legacyCleanupDoneAt = try values.decodeIfPresent(Date.self, forKey: .legacyCleanupDoneAt)
         waitingReviews = try values.decodeIfPresent([String: TaskReviewMark].self, forKey: .waitingReviews) ?? [:]
         somedayReviews = try values.decodeIfPresent([String: TaskReviewMark].self, forKey: .somedayReviews) ?? [:]
         projectReviews = try values.decodeIfPresent([String: ProjectReviewMark].self, forKey: .projectReviews) ?? [:]
@@ -91,80 +82,6 @@ package struct FirstRunRecord: Codable, Hashable, Sendable {
         self.decidedAt = decidedAt
         self.outcome = outcome
         self.tipDismissedAt = tipDismissedAt
-    }
-}
-
-/// The durable state of the one-time import of `local-gtd.json` (data-model E7.1).
-package struct LegacyImportRecord: Codable, Hashable, Sendable {
-    package enum State: String, Codable, Sendable {
-        case none, inProgress, completed, unreadable, laterFileKept
-    }
-
-    package enum UnreadableReason: String, Codable, Sendable {
-        case corrupt, newerVersion, verificationFailed
-    }
-
-    package struct Report: Codable, Hashable, Sendable {
-        package var fileName: String
-        package var adjustedCount: Int
-        package var notCarriedCount: Int
-
-        package init(fileName: String, adjustedCount: Int, notCarriedCount: Int) {
-            self.fileName = fileName
-            self.adjustedCount = adjustedCount
-            self.notCarriedCount = notCarriedCount
-        }
-    }
-
-    /// A previous-version file that appeared after the workspace existed (FR-033). Recorded once
-    /// per Mac: an older copy that keeps writing never brings the notice back.
-    package struct LaterFile: Codable, Hashable, Sendable {
-        package var digest: String
-        package var detectedAt: Date
-        package var noticeSeenAt: Date?
-
-        package init(digest: String, detectedAt: Date, noticeSeenAt: Date? = nil) {
-            self.digest = digest
-            self.detectedAt = detectedAt
-            self.noticeSeenAt = noticeSeenAt
-        }
-    }
-
-    package var state: State
-    package var decidedAt: Date
-    package var importerVersion: Int
-    package var attemptID: UUID?
-    package var importedLegacyDigest: String?
-    package var importedAt: Date?
-    package var backupFileName: String?
-    package var legacyRenamedAt: Date?
-    package var backupDeletedAt: Date?
-    package var report: Report?
-    package var unreadableReason: UnreadableReason?
-    package var noticeSeenAt: Date?
-    package var signedOutSinceImport: Bool
-    package var laterFile: LaterFile?
-
-    package init(
-        state: State, decidedAt: Date, importerVersion: Int, attemptID: UUID? = nil, importedLegacyDigest: String? = nil,
-        importedAt: Date? = nil, backupFileName: String? = nil, legacyRenamedAt: Date? = nil,
-        backupDeletedAt: Date? = nil, report: Report? = nil, unreadableReason: UnreadableReason? = nil,
-        noticeSeenAt: Date? = nil, signedOutSinceImport: Bool = false, laterFile: LaterFile? = nil
-    ) {
-        self.state = state
-        self.decidedAt = decidedAt
-        self.importerVersion = importerVersion
-        self.attemptID = attemptID
-        self.importedLegacyDigest = importedLegacyDigest
-        self.importedAt = importedAt
-        self.backupFileName = backupFileName
-        self.legacyRenamedAt = legacyRenamedAt
-        self.backupDeletedAt = backupDeletedAt
-        self.report = report
-        self.unreadableReason = unreadableReason
-        self.noticeSeenAt = noticeSeenAt
-        self.signedOutSinceImport = signedOutSinceImport
-        self.laterFile = laterFile
     }
 }
 
@@ -261,11 +178,6 @@ extension MacLocalState {
     package func projectChangedSinceReview(_ project: ProjectRecord, signature: String, recordKeys: [String]) -> Bool {
         guard let mark = mark(in: projectReviews, candidates: recordKeys) else { return false }
         return mark.taskSignature != signature
-    }
-
-    /// A keyed digest of arbitrary bytes, for the legacy file (never a fingerprint usable off this Mac).
-    package func digest(of data: Data) -> String {
-        Self.hex(HMAC<SHA256>.authenticationCode(for: data, using: key))
     }
 
     private var key: SymmetricKey { SymmetricKey(data: installSalt) }
@@ -482,7 +394,7 @@ package final class MacLocalStateStore: Sendable {
                 state = decoded
             } else {
                 let aside = fileURL.deletingLastPathComponent()
-                    .appendingPathComponent("mac-local.unreadable-\(LegacyFileNames.stamp(Date())).json")
+                    .appendingPathComponent("mac-local.unreadable-\(MacFileNames.stamp(Date())).json")
                 try MacFiles.renameExclusively(fileURL, to: aside)
                 state = .fresh()
             }

@@ -40,7 +40,7 @@ from .conftest import (
 
 FLAGS_ROOT = "/api/admin/feature-flags"
 MANAGED = "voice_brain_dump"
-OTHER_MANAGED = "mobile_task_classification"
+OTHER_MANAGED = "task_mcp"
 RELAY = "external_agent_relay"
 AUTOCOMPLETE = "task_title_autocomplete"
 CRT_CANVAS = "crt_canvas"
@@ -53,7 +53,6 @@ MANAGED_FLAG_NAMES = frozenset(
         RELAY,
         AUTOCOMPLETE,
         CRT_CANVAS,
-        "task_mcp",
         WEEKLY_REVIEW,
         RUST_CORE_SYNC,
     }
@@ -403,7 +402,6 @@ def test_010_SC_001_setting_each_mode_leaves_every_other_flag_untouched(
     assert set(flags_payload) == {
         "delivery_canary",
         "voice_brain_dump",
-        "mobile_task_classification",
         "external_agent_relay",
         "task_title_autocomplete",
         "crt_canvas",
@@ -752,7 +750,7 @@ def test_010_FR_006_the_get_read_emits_one_aggregate_record_per_call(
 
     ours = [r.getMessage() for r in caplog.records if r.name == SERVICE_LOGGER]
     assert len(ours) == 1
-    assert "flags=8" in ours[0]
+    assert "flags=7" in ours[0]
     assert "resolved_accounts=1" in ours[0]
     assert [r for r in caplog.records if r.name == ADMIN_SERVICE_LOGGER] == []
 

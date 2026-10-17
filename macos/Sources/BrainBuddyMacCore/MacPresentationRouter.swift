@@ -27,10 +27,9 @@ package enum PopoverAnchor: Hashable, Sendable {
     case toolbarItem
 }
 
-/// The launch notices: X-05 (the upgrade notice), X-08 (a second copy) and X-09 (the workspace
-/// file can't be read).
+/// The launch notices: X-08 (a second copy) and X-09 (the workspace file can't be read).
 package enum LaunchNotice: Hashable, Sendable {
-    case upgrade, alreadyOpen, unreadableWorkspace
+    case alreadyOpen, unreadableWorkspace
 }
 
 /// How the sign-in sheet closed, as the sheet knows it.
@@ -101,8 +100,6 @@ package enum MacSurface: Hashable, Sendable {
     case signIn(SignInRequest)
     /// X-04.
     case signOutConfirmation
-    /// X-05.
-    case upgradeNotice
     /// X-08.
     case alreadyOpen
     /// X-09.
@@ -157,12 +154,11 @@ package final class MacPresentationRouter {
             request(.statusWords)
         case .launchNotice(let notice):
             switch notice {
-            case .upgrade: present(.upgradeNotice)
             case .alreadyOpen: present(.alreadyOpen)
             case .unreadableWorkspace: present(.unreadableWorkspace)
             }
         case .closeLaunchNotice:
-            guard let surface, [.upgradeNotice, .alreadyOpen, .unreadableWorkspace].contains(surface) else { return }
+            guard let surface, [.alreadyOpen, .unreadableWorkspace].contains(surface) else { return }
             self.surface = nil
         case .focusInside(let target):
             request(target)

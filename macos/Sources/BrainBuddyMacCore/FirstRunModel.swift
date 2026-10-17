@@ -12,7 +12,6 @@ struct FirstRunLaunchFacts: Sendable {
     var hasAccount = false
     /// `workspaceFirstWrittenAt` was already set before this launch.
     var workspaceWrittenBefore = false
-    var legacyImportBroughtTasks = false
     /// Nil while the count is not ready; the synchronous signals alone decide then.
     var openTaskCount: Int?
     var projectCount: Int?
@@ -77,7 +76,7 @@ package final class FirstRunModel {
             decideKnown(known, facts)
             return
         }
-        let clean = !facts.hasAccount && !facts.workspaceWrittenBefore && !facts.legacyImportBroughtTasks
+        let clean = !facts.hasAccount && !facts.workspaceWrittenBefore
             && (facts.openTaskCount ?? 0) == 0 && (facts.projectCount ?? 0) == 0
         let decidedAt = now()
         guard clean else {

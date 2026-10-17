@@ -50,7 +50,7 @@ struct RustSyncFailurePopoverTests {
         let line = SyncStatusLineModel(snapshot: snapshot, now: clock.now, device: .mac, calendar: calendar)
         #expect(line.description.text == "Couldn't sync · Retry")
         let content = SyncPopoverModel.content(
-            snapshot: snapshot, issues: workspace.issues, state: workspace.state, files: .none, discarded: [],
+            snapshot: snapshot, issues: workspace.issues, state: workspace.state, discarded: [],
             now: clock.now, calendar: calendar)
         guard case .failing(_, let shownReference)? = content.notice else {
             Issue.record("expected the failing notice, got \(String(describing: content.notice))")

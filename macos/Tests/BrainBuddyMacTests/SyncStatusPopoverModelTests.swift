@@ -43,10 +43,10 @@ struct SyncStatusPopoverModelTests {
     }
 
     private static func content(
-        _ snapshot: SyncSnapshot, issues: [SyncIssue] = [], files: MacUpgradeFiles = .none, discarded: Set<UUID> = []
+        _ snapshot: SyncSnapshot, issues: [SyncIssue] = [], discarded: Set<UUID> = []
     ) -> SyncPopoverContent {
         SyncPopoverModel.content(
-            snapshot: snapshot, issues: issues, state: stateWithGarden, files: files, discarded: discarded, now: now,
+            snapshot: snapshot, issues: issues, state: stateWithGarden, discarded: discarded, now: now,
             calendar: utc
         )
     }
@@ -130,26 +130,19 @@ struct SyncStatusPopoverModelTests {
         #expect(Self.content(snapshot).queue == "Adding your tasks to your account · 1,284 left")
     }
 
-    @Test("021-FR-016 the full Tab order: issues, kept outcome, Sync now, Sign out…, then the three Show in Finder")
+    @Test("021-FR-016 the full Tab order: issues, kept outcome, Sync now, Sign out…")
     func fullTabOrder() {
-        let files = MacUpgradeFiles(
-            backup: URL(fileURLWithPath: "/tmp/backup.json"), backupKeptUntil: Self.now.addingTimeInterval(30 * 86_400),
-            report: URL(fileURLWithPath: "/tmp/report.txt"), laterFile: URL(fileURLWithPath: "/tmp/local-gtd.json")
-        )
         let issues = [Self.issue(1), Self.keptOutcome(1), Self.issue(2, reference: nil)]
         let content = Self.content(
-            SyncSnapshot(account: Self.email, lastSyncedAt: Self.now, issueCount: 3), issues: issues, files: files
+            SyncSnapshot(account: Self.email, lastSyncedAt: Self.now, issueCount: 3), issues: issues
         )
         #expect(content.issuesHeading == "3 changes couldn't sync")
         #expect(
             content.tabOrder == [
                 .issueCopy(issues[0].id), .dismiss(issues[0].id), .copyOutcome(issues[1].id), .discardOutcome(issues[1].id),
-                .dismiss(issues[2].id), .syncNow, .signOut, .backupShowInFinder, .reportShowInFinder, .laterFileShowInFinder,
+                .dismiss(issues[2].id), .syncNow, .signOut,
             ]
         )
-        #expect(content.backupLine == "Backup from before the update · kept until 5 Nov")
-        #expect(content.reportLine == "Some details changed during the update.")
-        #expect(content.laterFileLine == "A file from the previous version is on this Mac. It was not added.")
         let kept = content.issues[1]
         #expect(kept.keptOutcome == "A vegetable bed that feeds us from June to September.", "in full")
         #expect(kept.actionAccessibilityLabel == "Discard your outcome for “Garden”")
