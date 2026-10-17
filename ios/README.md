@@ -175,14 +175,6 @@ hit, normal app/widget build, package test count and stage durations. Compare wi
 a cold run using the same Rust inputs/toolchain; total CI time can still be limited
 by another required lane.
 
-### Measuring CI time
-
-Compare merge-group runs using the same source inputs and a warm Rust bridge.
-Measure from the CI run creation to the `Full CI` verdict, including the closing
-Allure report; record queue wait separately. Job durations overlap, so their sum
-is not the time a pull request waits. Keep test counts, coverage and mutation
-scope alongside timings so a faster partial run cannot look like an improvement.
-
 ## TestFlight
 
 `ios.yml` uploads from `main` and from feature branches.

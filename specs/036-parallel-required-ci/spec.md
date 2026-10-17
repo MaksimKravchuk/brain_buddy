@@ -1,5 +1,5 @@
 # Feature Specification: Parallel required CI
-**Branch**: codex/parallel-ci. **Created**: 2026-10-17. **Status**: Planning.
+**Branch**: codex/parallel-ci. **Created**: 2026-10-17. **Status**: Founder-accepted planning; implementation pending.
 
 ## User Scenarios & Testing
 ### Story 1 - Faster complete queue verdict
@@ -17,7 +17,7 @@ Acceptance scenarios:
 - **FR-003**: Partition both head and applicable PR-base mutation measurements into two independent complete scope parts; combine validated raw counts rather than averaging scores, then invoke the existing mutation gate unchanged. Preserve no-tests/zero-checked failure, threshold 95%, base regression comparison, summaries, survivors, raw state and blocking-gate Allure evidence.
 - **FR-004**: Split ios-app and a new ios-tests job, both using the existing ios path decision, platform/toolchain and exact bridge cache identity. Keep app/widgets build and complete swift test --parallel, with both required by Full CI and final Allure aggregation.
 - **FR-005**: Require every partition, coverage aggregation and native job. Missing/wrong-SHA/overlapping evidence must fail. Preserve all other checks, secrets/permissions, retention expressions, protections, release authority and product code.
-- **FR-006**: Obtain independent exact-SHA review and real queue/main evidence, compare complete test/mutant sets and total queue elapsed time, and report concurrency/cache/runner limits without claiming a fabricated speedup.
+- **FR-006**: Obtain independent frozen PR-head review before enqueue and real exact-tested queue/main evidence under the recorded Spec 036 exception, compare complete test/mutant sets and total queue elapsed time, and report concurrency/cache/runner limits without claiming a fabricated speedup.
 
 ## Success Criteria
 - **SC-001**: Executed backend assignments form the exact collected suite; all existing applicable tests, combined coverage and taxonomy pass on the queued SHA.
@@ -25,4 +25,4 @@ Acceptance scenarios:
 - **SC-003**: Real merge-group wall time is measured against a warm pre-change baseline; report absolute and relative differences. If no improvement is observed, investigate the critical path before declaring acceleration achieved; no arbitrary hard timing threshold.
 
 ## Clarifications
-The current owner explicitly authorizes implementation, CI and ordinary merge-queue delivery for this bounded proposal after the detailed analysis. This is fresh authorization, not reuse of spec 035's two-PR exception. Use a reviewed planning/baseline documentation PR and then one coherent workflow/helper PR. Re-read current protections; live main has required Full CI, Docker Images and merge queue, with no restrict_updates rule. Preserve them rather than invent an intervention for a rule that does not exist. Independently review the frozen PR head and actual merge-group SHA while full CI runs; on an adverse review remove only this owned entry before landing. If the queue regenerates SHA, repeat its independent review. No approval of protection changes, new skips, reduced crypto parameters or product changes is implied.
+The owner authorizes complete backend/mutation and parallel iOS verification, extra concurrent runners, CI and queue delivery. On 2026-10-17 Max explicitly selected “Разрешить исключение для этой задачи” in response to the fresh one-task exception question. This covers only this baseline and implementation PR, expires 2026-10-19, and permits independent frozen PR-head review before ordinary queue entry while the generated merge-group SHA is fully tested and verified at landing. The reviewed PR-head SHA may differ from that tested/landed queue SHA. Preserve protections, all checks, secrets and product code. See founder-acceptance.json for waived ADR-0008 mechanics, compensating measures and true campaign history; spec035 approval is not reused. Broader governance repair is outside scope.
