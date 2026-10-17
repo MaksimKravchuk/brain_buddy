@@ -77,6 +77,8 @@
 
         /// ImageRenderer omits ScrollView document views and native text fields. Host the real
         /// view offscreen, then use the shared assertion for the resulting unmodified bitmap.
+        /// Record with normal macOS host access: a restricted process sandbox changes
+        /// CoreText rasterization and cannot reproduce the graphics context of the full CI run.
         private func assertHostedSnapshot(
             _ view: some View, named name: String, scheme: ColorScheme, width: CGFloat,
             height: CGFloat? = nil, sourceLocation: SourceLocation = #_sourceLocation
