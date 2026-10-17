@@ -2,6 +2,7 @@ import BrainBuddyAgents
 import BrainBuddyAPI
 import BrainBuddyDesign
 import BrainBuddyMacCore
+import Observation
 import SwiftUI
 
 /// What each agent sheet says and which button Return presses (design G-07, G-08). Pure, so tests read
@@ -51,51 +52,101 @@ enum AgentSheetPlan {
     }
 }
 
-/// G-07 and G-08: one 440 pt sheet for Add, Replace credential, Edit and Delete over an
-/// `AgentConnectionEditor`. Secrets are in secure fields only and the editor empties them.
+/// The Add sheet's two presentation stages share one editor. Opening the password stage never
+/// sends a request; a rejection returns to the form because the editor clears both secrets.
+@MainActor
+@Observable
+final class AgentEditorSheetFlow {
+    private(set) var confirmingAdd = false
+
+    func performPrimary(editor: AgentConnectionEditor) async {
+        if editor.mode == .add, !confirmingAdd {
+            guard editor.canConfirmAdd else { return }
+            confirmingAdd = true
+            return
+        }
+        guard editor.canSubmit else { return }
+        await editor.submit()
+        if case .failed = editor.phase { confirmingAdd = false }
+    }
+}
+
+/// G-07 and G-08: M30's Add form and proof stage, and the existing other agent-operation sheets.
+/// Secrets stay in secure fields, and the same editor empties them on completion or dismissal.
 struct AgentEditorSheet: View {
     enum Field: Hashable { case name, address, secret, password }
 
     @Bindable var editor: AgentConnectionEditor
     let onClose: () -> Void
     @FocusState private var focus: Field?
+    @State private var flow: AgentEditorSheetFlow
+
+    init(editor: AgentConnectionEditor, onClose: @escaping () -> Void, flow: AgentEditorSheetFlow = AgentEditorSheetFlow()) {
+        self.editor = editor
+        self.onClose = onClose
+        _flow = State(initialValue: flow)
+    }
 
     private var mode: AgentEditorMode { editor.mode }
+    private var isAdd: Bool { mode == .add }
+    private var initialField: Field {
+        if isAdd, flow.confirmingAdd { return .password }
+        if isAdd, case .failed = editor.phase { return .secret }
+        return .name
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: isAdd ? CarryOnSpace.sm : 14) {
             MacSheetHeader(title: AgentSheetPlan.title(mode))
             if case .delete = mode {
                 Text(AgentsCopy.deleteNote).font(MacSheetFont.body)
                     .foregroundStyle(CarryOnColorStyle.coTextSecondary).fixedSize(horizontal: false, vertical: true)
             }
             Group {
-                if AgentSheetPlan.showsDetails(mode) { AgentDetailFields(editor: editor, focus: $focus) }
-                if AgentSheetPlan.showsSecret(mode) {
+                if AgentSheetPlan.showsDetails(mode), !flow.confirmingAdd { AgentDetailFields(editor: editor, focus: $focus) }
+                if AgentSheetPlan.showsSecret(mode), !isAdd {
                     labelled(AgentSheetPlan.credentialLabel, helper: AgentsCopy.secretHelper) {
                         SecureField(AgentSheetPlan.credentialLabel, text: $editor.secret)
                             .textFieldStyle(.plain).macSheetField().focused($focus, equals: .secret)
                     }
                 }
-                if editor.needsPassword {
+                if editor.needsPassword, !isAdd || flow.confirmingAdd {
                     labelled(AgentsCopy.currentPassword, helper: editor.destinationChanged ? AgentsCopy.confirmDestination : nil) {
                         SecureField(AgentsCopy.currentPassword, text: $editor.password)
-                            .textFieldStyle(.plain).macSheetField().focused($focus, equals: .password)
+                            .textFieldStyle(.plain).agentEditorField(isAdd: isAdd).focused($focus, equals: .password)
                             .onSubmit { if !AgentSheetPlan.returnPressesCancel(mode) { submit() } }
+                            .onAppear {
+                                if isAdd && flow.confirmingAdd {
+                                    // The field must register after the sheet replaces its form and resizes.
+                                    DispatchQueue.main.async {
+                                        focus = .password
+                                    }
+                                }
+                            }
                     }
                 }
             }
+            .id(isAdd && flow.confirmingAdd)
+            .defaultFocus($focus, initialField, priority: isAdd && flow.confirmingAdd ? .userInitiated : .automatic)
             .disabled(editor.isBusy)
             if case .failed(let notice) = editor.phase { failure(notice) }
             buttons
         }
-        .padding(20)
-        .frame(width: 440)
-        .macSheetSurface()
+        .padding(isAdd ? CarryOnLayout.MacAgentAdd.padding : 20)
+        .frame(width: isAdd ? CarryOnLayout.MacAgentAdd.width : 440)
+        .background {
+            if isAdd {
+                Rectangle().fill(.regularMaterial).background(CarryOnColorStyle.coBgGround)
+            }
+            else { Rectangle().fill(CarryOnColorStyle.coSurfaceCard) }
+        }
         .onExitCommand(perform: cancel)
         .onChange(of: editor.phase) { _, phase in
             if phase == .done { onClose() }
-            if case .failed(let notice) = phase, notice.failure == .wrongPassword { focus = .password }
+            if case .failed(let notice) = phase, notice.failure == .wrongPassword, !isAdd { focus = .password }
+        }
+        .onChange(of: flow.confirmingAdd) { _, confirming in
+            if isAdd, !confirming { focus = .secret }
         }
         .onDisappear { editor.dismiss() }
     }
@@ -105,8 +156,8 @@ struct AgentEditorSheet: View {
             Spacer()
             let cancelButton = Button(AgentsCopy.cancel, action: cancel).buttonStyle(.carryOnQuiet).disabled(editor.isBusy)
             let submitButton = Button(AgentSheetPlan.submitTitle(mode, phase: editor.phase), action: submit)
-                .buttonStyle(AgentSheetPlan.returnPressesCancel(mode) ? .carryOnSecondary : .carryOnPrimary)
-                .disabled(!editor.canSubmit)
+                .buttonStyle(isAdd ? .carryOnStrong : (AgentSheetPlan.returnPressesCancel(mode) ? .carryOnSecondary : .carryOnPrimary))
+                .disabled(!(isAdd && !flow.confirmingAdd ? editor.canConfirmAdd : editor.canSubmit))
             if AgentSheetPlan.returnPressesCancel(mode) {
                 cancelButton.keyboardShortcut(.defaultAction)
                 submitButton
@@ -127,7 +178,10 @@ struct AgentEditorSheet: View {
         }
     }
 
-    private func submit() { Task { await editor.submit() } }
+    private func submit() {
+        if isAdd, !flow.confirmingAdd, editor.canConfirmAdd { focus = nil }
+        Task { await flow.performPrimary(editor: editor) }
+    }
 
     private func cancel() { if !editor.isBusy { onClose() } }
 

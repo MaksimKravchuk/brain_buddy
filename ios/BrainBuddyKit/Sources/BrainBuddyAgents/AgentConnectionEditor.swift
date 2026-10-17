@@ -78,9 +78,16 @@ public final class AgentConnectionEditor: CustomStringConvertible {
         return true
     }
 
+    /// M30 first collects the agent fields, then asks for the server-required password. Advancing
+    /// that presentation makes no request; `submit()` still requires the complete password proof.
+    public var canConfirmAdd: Bool { mode == .add && canPrepareSubmission }
+
     public var canSubmit: Bool {
+        canPrepareSubmission && (!needsPassword || !password.isEmpty)
+    }
+
+    private var canPrepareSubmission: Bool {
         guard !isBusy, model.controlsEnabled, current != nil || mode == .add else { return false }
-        if needsPassword && password.isEmpty { return false }
         // 030-FR-036: without a password on the account only a name-only Edit is possible.
         if model.isPasswordless && needsPassword { return false }
         switch mode {
