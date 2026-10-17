@@ -10,8 +10,8 @@ Main-window chrome and commands, M29 body, M30 sheet, tab binding/order, accessi
 
 ## Native finding and comparison
 
-- Before actual: `/private/tmp/bb-mac-board-521/M29-after.png` — 1800 × 1016 pixels at native2x, or 900 × 508 pt. The header is white with a shared glass capsule, and the fixed 820 pt body sits inside 40 pt white side strips.
-- After actual: `/private/tmp/bb-mac-board-521/M29-settings-shell-after.png` — 1640 × 1240 pixels, or 820 × 620 pt. Parent manual comparison accepted the header, selected rectangle, absent capsule and removed side strips. The full existing M29 body fits with accessible actions.
+- Before actual: [Before](../../design/evidence/mac-agents-board/after.png) — 1800 × 1016 pixels at native2x, or 900 × 508 pt. The header is white with a shared glass capsule, and the fixed 820 pt body sits inside 40 pt white side strips.
+- After actual: [After](../../design/evidence/mac-settings-board/after.png) — 1640 × 1240 pixels, or 820 × 620 pt. Parent manual comparison accepted the header, selected rectangle, absent capsule and removed side strips. The full existing M29 body fits with accessible actions.
 - The native probe showed **zero horizontal safe-area insets** and an 820 pt minimum width. The side strips came from the scene’s larger default width around its fixed-width content; they were not extra content padding. No negative padding or offset was needed.
 - The existing 420 pt minimum is a **body** minimum. Native 88 pt title/toolbar chrome produces an observed 820 × 508 pt outer minimum. The correction preserves this constraint; it does not force an outer 420 pt window that would shrink existing content.
 - Parent exercised Account → Agents → Sync → Account → Agents and confirmed distinct accessible names and selected traits. Closing Settings and reopening with Cmd-comma retained Agents. Existing request handlers and model behavior were unchanged.
