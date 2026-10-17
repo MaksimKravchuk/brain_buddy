@@ -113,6 +113,8 @@ struct AgentsManagerView: View {
     let accountURL: URL?
     let onOpen: (URL) -> Void
 
+    @FocusState private var focusedRow: String?
+
     private var model: AgentSettingsModel { controller.model }
 
     var body: some View {
@@ -158,12 +160,15 @@ struct AgentsManagerView: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .focused($focusedRow, equals: row.id)
                         .foregroundStyle(CarryOnColorStyle.coTextPrimary)
                         .accessibilityElement(children: .combine)
                         .accessibilityAddTraits(chosen ? .isSelected : [])
                     }
                 }
             }
+            .onKeyPress(.upArrow) { moveSelection(by: -1) }
+            .onKeyPress(.downArrow) { moveSelection(by: 1) }
             .frame(width: 200, height: 160)
             .overlay { RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(CarryOnColorStyle.coControlQuiet) }
             if !model.isPasswordless {
@@ -177,6 +182,13 @@ struct AgentsManagerView: View {
                 .buttonStyle(.carryOnQuiet)
             }
         }
+    }
+
+    /// Up/Down change the selected agent and carry focus with it (030-FR-040).
+    private func moveSelection(by offset: Int) -> KeyPress.Result {
+        guard let id = model.moveSelection(by: offset) else { return .ignored }
+        focusedRow = id
+        return .handled
     }
 
     @ViewBuilder private var detail: some View {

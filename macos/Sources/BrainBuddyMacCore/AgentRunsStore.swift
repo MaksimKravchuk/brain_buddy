@@ -58,6 +58,8 @@ package final class AgentRunsStore {
     /// Listed runs per agent connection id, for the sidebar rows.
     package private(set) var perAgentCounts: [String: Int] = [:]
     package private(set) var lastUpdated: Date?
+    /// Return on a run row selects its step and asks the inspector's run section to take focus (030-FR-040).
+    package private(set) var inspectorFocusPending = false
     package private(set) var phase = AgentRunsPhase.loading
     /// The main window is visible; polling pauses while it is not.
     package var isWindowVisible = true
@@ -86,6 +88,14 @@ package final class AgentRunsStore {
     ) {
         (self.remote, self.steps, self.availability) = (remote, steps, availability)
         (self.cache, self.now, self.log) = (cache, now, log)
+    }
+
+    package func requestInspectorFocus() { inspectorFocusPending = true }
+
+    /// True once per request; the run section calls it when it appears or loads.
+    package func consumeInspectorFocus() -> Bool {
+        defer { inspectorFocusPending = false }
+        return inspectorFocusPending
     }
 
     /// The last-read run of an open step, for an inspector opened while the run read fails (030-FR-025).

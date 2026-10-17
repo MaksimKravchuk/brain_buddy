@@ -12,6 +12,8 @@ struct AgentRunRow: View {
     let now: Date
     let selected: Bool
     let onSelect: () -> Void
+    /// Return: select the step and move focus to the inspector's run section (030-FR-040).
+    let onOpen: () -> Void
 
     var body: some View {
         Button(action: onSelect) {
@@ -21,6 +23,10 @@ struct AgentRunRow: View {
             }
         }
         .buttonStyle(.plain)
+        .onKeyPress(.return) {
+            onOpen()
+            return .handled
+        }
         .accessibilityLabel("\(item.stepTitle), \(item.agentName), \(item.state.label)")
         .accessibilityAddTraits(selected ? .isSelected : [])
     }

@@ -189,6 +189,7 @@ struct AgentRunSectionView: View {
     /// "Hand off again" shows only when this is set (the hand-off sheet, 030 PR-09).
     var onHandOff: (() -> Void)?
     @State private var section: AgentRunSectionModel
+    @FocusState private var runFocused: Bool
 
     init?(model: BrainBuddyModel, task: TaskRecord, onHandOff: (() -> Void)? = nil) {
         guard let server = task.serverID, let account = model.workspace.account else { return nil }
@@ -215,7 +216,17 @@ struct AgentRunSectionView: View {
             }
             earlierRuns
         }
-        .task(id: refreshKey) { await section.load() }
+        .task(id: refreshKey) {
+            await section.load()
+            takeRequestedFocus()
+        }
+        .onAppear { takeRequestedFocus() }
+        .onChange(of: model.agentRuns.inspectorFocusPending) { _, _ in takeRequestedFocus() }
+    }
+
+    /// Return on a run row asked for focus here (030-FR-040); the label is the first stop of the section.
+    private func takeRequestedFocus() {
+        if section.shown != nil, model.agentRuns.consumeInspectorFocus() { runFocused = true }
     }
 
     @ViewBuilder
@@ -225,6 +236,8 @@ struct AgentRunSectionView: View {
             .font(MacRowFont.titleStrong).foregroundStyle(block.color)
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityLabel(block.label)
+            .focusable()
+            .focused($runFocused)
         if block.isExpired { EmptyView() } else { details(run, block) }
     }
 

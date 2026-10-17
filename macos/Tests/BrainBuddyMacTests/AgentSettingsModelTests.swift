@@ -273,6 +273,26 @@ struct AgentSettingsModelTests {
         #expect(model.phase == .loading)
     }
 
+    @Test("030_FR_040 Up and Down change the selected agent and stop at the ends")
+    func arrowsMoveSelection() async {
+        let model = await make(FakeAgentRemote(list: .success(three)))
+        await model.reload()
+        #expect(model.selectedID == "agent_1")
+        #expect(model.moveSelection(by: -1) == "agent_1")
+        #expect(model.moveSelection(by: 1) == "agent_2")
+        #expect(model.moveSelection(by: 1) == "agent_3")
+        #expect(model.moveSelection(by: 1) == "agent_3")
+        #expect(model.moveSelection(by: -1) == "agent_2")
+        #expect(model.selected?.name == "Claude")
+    }
+
+    @Test("030_FR_040 arrows with no agents select nothing")
+    func arrowsWithNoAgents() async {
+        let model = await make(FakeAgentRemote(list: .success([])))
+        await model.reload()
+        #expect(model.moveSelection(by: 1) == nil)
+    }
+
     @Test("030_FR_039 reads and tests log stage and outcome, never a name or address")
     func logsCarryNoContent() async {
         let log = CapturingMacLog()

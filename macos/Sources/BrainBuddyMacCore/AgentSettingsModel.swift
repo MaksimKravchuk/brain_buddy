@@ -130,6 +130,17 @@ package final class AgentSettingsModel {
         selectedID = connections.contains { $0.id == id } ? id : nil
     }
 
+    /// Up/Down in the list (030-FR-040): the neighbouring agent, stopping at the ends. With nothing selected
+    /// the first agent is chosen. Returns the new selection so the view can move focus with it.
+    @discardableResult
+    package func moveSelection(by offset: Int) -> String? {
+        guard !connections.isEmpty else { return nil }
+        let current = connections.firstIndex { $0.id == selectedID }
+        let next = current.map { min(max($0 + offset, 0), connections.count - 1) } ?? 0
+        selectedID = connections[next].id
+        return selectedID
+    }
+
     // MARK: reads
 
     /// The latest call wins; a late answer is dropped.

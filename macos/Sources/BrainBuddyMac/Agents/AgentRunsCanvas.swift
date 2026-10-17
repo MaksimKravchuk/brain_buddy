@@ -10,6 +10,7 @@ struct AgentRunsCanvas: View {
     let filter: AgentRunsFilter
     let selectedTaskID: TaskID?
     let onSelect: (AgentRunItem) -> Void
+    let onOpen: (AgentRunItem) -> Void
 
     private var store: AgentRunsStore { model.agentRuns }
 
@@ -52,7 +53,7 @@ struct AgentRunsCanvas: View {
                                 AgentRunRow(
                                     item: run, style: .canvas, now: Date(),
                                     selected: selectedTaskID != nil && selectedTaskID == model.stepID(forServerID: run.taskServerID),
-                                    onSelect: { onSelect(run) })
+                                    onSelect: { onSelect(run) }, onOpen: { onOpen(run) })
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .topLeading)

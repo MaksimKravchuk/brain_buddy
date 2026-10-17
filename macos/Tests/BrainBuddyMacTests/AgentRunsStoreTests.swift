@@ -127,6 +127,16 @@ struct AgentRunsStoreTests {
         }
     }
 
+    @Test("030_FR_040 Return on a run row asks the inspector's run section for focus once")
+    func inspectorFocusRequestIsConsumedOnce() {
+        let rig = Rig()
+        #expect(!rig.store.consumeInspectorFocus())
+        rig.store.requestInspectorFocus()
+        #expect(rig.store.inspectorFocusPending)
+        #expect(rig.store.consumeInspectorFocus())
+        #expect(!rig.store.consumeInspectorFocus())
+    }
+
     @Test("030_FR_005 030_FR_006 030_FR_009 the latest run of each open step is grouped, counted and listed for Waiting for")
     func assemblesGroups() async {
         let rig = Rig()
