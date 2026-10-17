@@ -44,7 +44,7 @@ struct AccountScreen: View {
                 failedSection(failure, model: model)
             case .ready:
                 profileSection(model)
-                // Agents (spec 034) are added here.
+                AgentsAccountSection()
                 signInSection(model)
                 dataSection(model)
             }

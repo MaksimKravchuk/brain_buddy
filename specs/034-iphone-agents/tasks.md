@@ -27,7 +27,7 @@
 
 ## Phase 5 — Account › Agents (PR-05)
 
-- [ ] T010 Agents section (I-06) in Settings, agent details (I-07), Add new agent (I-08), Replace credential and Delete (I-09)
+- [ ] T010 Agents section (I-06) in Account, agent details (I-07), Add new agent (I-08), Replace credential and Delete (I-09)
 
 ## Dependencies & Execution Order
 
@@ -204,7 +204,7 @@ parallel with PR-03 and PR-04.
         "ios/BrainBuddy/Screens/Agents/AgentDetailsScreen.swift",
         "ios/BrainBuddy/Screens/Agents/AddAgentScreen.swift",
         "ios/BrainBuddy/Screens/Agents/AgentCredentialSheets.swift",
-        "ios/BrainBuddy/Screens/Settings/SettingsScreen.swift"
+        "ios/BrainBuddy/Screens/Account/AccountScreen.swift"
       ],
       "depends_on": [
         "PR-02"
@@ -216,9 +216,10 @@ parallel with PR-03 and PR-04.
         "The Agents section, details and Add new agent match M25, M29 and M30 and call the shared editor"
       ],
       "budget": {
-        "product_loc": 400,
+        "product_loc": 840,
         "files": 5
       },
+      "oversize_reason": "Four screens (section, details, add, credential sheets) over one shared editor; each is a port of an already-reviewed Mac view and none is usable alone.",
       "implementer": "feature-implementer"
     }
   ]
