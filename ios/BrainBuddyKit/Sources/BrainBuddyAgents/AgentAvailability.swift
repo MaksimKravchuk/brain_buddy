@@ -27,6 +27,8 @@ public final class AgentAvailability {
     public private(set) var isOnline = true
     /// The one-shot "show Add new agent" request: set by the sidebar, consumed by the Settings tab.
     public private(set) var addAgentRequested = false
+    /// The one-shot "show the Agents tab" request (no Add sheet): set by the hand-off sheet.
+    public private(set) var agentsTabRequested = false
     @ObservationIgnored private var account: LinkedAccount?
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var lastRefresh: Date?
@@ -56,6 +58,7 @@ public final class AgentAvailability {
         passwordState = .unknown
         lastRefresh = nil
         addAgentRequested = false
+        agentsTabRequested = false
     }
 
     /// At sign-in, and whenever a caller needs the answer now.
@@ -109,6 +112,15 @@ public final class AgentAvailability {
 
     public func requestAddAgent() { addAgentRequested = true }
 
+    /// "Open Settings" on the hand-off sheet: bring Settings › Agents forward, without opening Add.
+    public func requestAgentsTab() { agentsTabRequested = true }
+
+    /// True once per request.
+    public func consumeAgentsTabRequest() -> Bool {
+        defer { agentsTabRequested = false }
+        return agentsTabRequested
+    }
+
     /// True once per request.
     public func consumeAddAgentRequest() -> Bool {
         defer { addAgentRequested = false }
@@ -130,7 +142,8 @@ public final class AgentAvailability {
 }
 
 extension APIError {
-    fileprivate var isNetwork: Bool {
+    /// The request never got an answer: no connection (also read by the hand-off sheet's agent tests).
+    var isNetwork: Bool {
         if case .network = kind { return true }
         return false
     }

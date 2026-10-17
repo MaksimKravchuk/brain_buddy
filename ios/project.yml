@@ -116,6 +116,9 @@ targets:
         BBAppGroupIdentifier: $(BB_APP_GROUP_ID)
         BBBuildLabel: $(BB_BUILD_LABEL)
         UILaunchScreen: {}
+        # Voice brain dump (spec 031): live listening and on-device recognition. No audio is stored.
+        NSMicrophoneUsageDescription: Brain Buddy listens while you talk so it can turn what you say into steps for your Inbox.
+        NSSpeechRecognitionUsageDescription: Brain Buddy turns your words into text on this iPhone. Nothing you say leaves the device.
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: true
         UISupportedInterfaceOrientations:

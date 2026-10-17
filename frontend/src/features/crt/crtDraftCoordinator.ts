@@ -393,8 +393,6 @@ export function draftWriteInputFromCrtState(
   return inputFromState(tree, graph, scope, journal);
 }
 
-export const toDraftWriteInput = draftWriteInputFromCrtState;
-
 export class CrtDraftCoordinator {
   private readonly store: CrtDraftStore;
   private readonly scope: DraftScope;

@@ -1,0 +1,2 @@
+# Verification
+Run python3 -m unittest scripts/test_ci_shards.py scripts/test_validate_ci_artifacts.py -v, make check-specs and make validate-ci after implementation. Full exact-SHA CI proves collection, execution, raw coverage merging, complete mutation stats and both native platforms. Read actual merge-group/main run metadata and result artifacts; compare baseline and optimized total elapsed time including closing Allure. Independent acceptance maps all FR/SC/scenarios to these executable checks and live evidence. Do not report a skipped/failed/partial result as passing.

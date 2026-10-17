@@ -10,8 +10,6 @@ export interface CrtLastTreePreferenceScope {
   origin: string;
 }
 
-export type LastTreePreferenceScope = CrtLastTreePreferenceScope;
-
 type StoredLastTreePreference = Readonly<{
   last_tree_id: string;
   updated_at: string;
@@ -164,11 +162,3 @@ export function bindCrtLastTreePreferenceSession(origin = globalThis.location?.o
     window.clearInterval(timer);
   };
 }
-
-// Short aliases keep the module convenient for CRT callers without exposing storage details.
-export const lastTreePreferenceKey = crtLastTreePreferenceKey;
-export const rememberLastTreePreference = rememberCrtLastTreePreference;
-export const clearLastTreePreference = clearCrtLastTreePreference;
-export const readLastTreePreference = readCrtLastTreePreference;
-export const sweepLastTreePreferences = sweepCrtLastTreePreferences;
-export const bindLastTreePreferenceSession = bindCrtLastTreePreferenceSession;

@@ -109,9 +109,6 @@ def test_feedback_cache_metadata_and_legacy_node_branches(tree_service) -> None:
     )
     assert len(response.recommendations) == 1
 
-    assert tree_service._cache_get("missing") is None
-    tree_service._cache_store(linked)
-    assert tree_service._cache_get(linked.id) == linked
     metadata = TreeMetadata.from_timestamps(
         created_at=_TIMESTAMP, updated_at=_TIMESTAMP, owner_id="owner"
     )

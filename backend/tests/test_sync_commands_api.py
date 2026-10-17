@@ -57,6 +57,16 @@ class AcceptEverything:
         return command.accept([], result=envelope["payload"].get("result"))
 
 
+class NoDeviceExecutor:
+    """Executes nothing: every unseen command is UPGRADE_REQUIRED, replay works."""
+
+    def supports(self, command_type: str) -> bool:
+        return False
+
+    def execute(self, command, envelope):  # type: ignore[no-untyped-def]
+        raise wire.ProtocolFailure("UPGRADE_REQUIRED")
+
+
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     client, _ = _build_authenticated_client(
@@ -412,7 +422,7 @@ def test_026_FR_012_known_receipt_recovery_precedes_tighter_execution_rules(
     with allure.step(
         "the executor stops supporting the type: lookup and replay remain"
     ):
-        client.app.state.sync_device_executor = wire.NoDeviceExecutor()  # type: ignore[attr-defined]
+        client.app.state.sync_device_executor = NoDeviceExecutor()  # type: ignore[attr-defined]
         assert submit(client, original).status_code == 200
         lookup = client.get(f"/api/sync/v1/commands/{cid(1)}?scope_id={owner}")
         assert lookup.json()["status"] == "terminal"
@@ -559,7 +569,7 @@ def test_026_FR_023_capabilities_publish_versions_limits_and_recovery(
         gone = {r["type"]: r for r in client.get(url).json()["command_versions"]}
         assert gone["task.update"]["supported_versions"] == [2]
     with allure.step("a server with no executor advertises no executable command"):
-        client.app.state.sync_device_executor = wire.NoDeviceExecutor()  # type: ignore[attr-defined]
+        client.app.state.sync_device_executor = NoDeviceExecutor()  # type: ignore[attr-defined]
         rows = client.get(url).json()["command_versions"]
         assert all(row["supported_versions"] == [] for row in rows)
 
@@ -1392,8 +1402,6 @@ def test_026_FR_023_task_family_registry_and_policy_edges(monkeypatch):
         with pytest.raises(wire.ProtocolFailure) as caught:
             DeviceExecutorRegistry().execute(Command(), {"type": "task.update"})  # type: ignore[arg-type]
         check_equal("code", caught.value.code, "UPGRADE_REQUIRED")
-        with pytest.raises(wire.ProtocolFailure):
-            wire.NoDeviceExecutor().execute(Command(), {})  # type: ignore[arg-type]
     with allure.step("an unlisted version is never executed"):
         check_equal(
             "unlisted", VersionPolicy({1: None}).executes(2, datetime.now(UTC)), False

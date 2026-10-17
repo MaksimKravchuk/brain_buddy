@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 import logging
-from collections import OrderedDict
-from collections import OrderedDict as OrderedDictType
 from collections.abc import Callable, Iterable
 from contextlib import suppress
 from datetime import datetime, timedelta
-from threading import RLock
 from typing import Any
 
 from app.exceptions import NotFoundError, StaleRevisionError, ValidationFailure
@@ -54,42 +51,14 @@ class TreeService:
         self,
         tree_repo: TreeRepository,
         index_repo: IndexRepository,
-        *,
-        cache_maxsize: int = 16,
     ) -> None:
         self.tree_repo = tree_repo
         self.index_repo = index_repo
-        self._cache: OrderedDictType[str, TreeDocument] = OrderedDict()
-        self._cache_lock = RLock()
-        self._cache_maxsize = max(cache_maxsize, 1)
 
     def list_trees(self, *, owner_id: str) -> list[IndexEntry]:
         return [
             entry for entry in self.index_repo.load_all() if entry.owner_id == owner_id
         ]
-
-    def validate_snapshot(
-        self,
-        payload: TreeCreateRequest | TreeUpdateRequest,
-        *,
-        owner_id: str,
-        tree_id: str,
-        schema_version: int,
-    ) -> None:
-        """Validate a full graph snapshot without writing tree or index state."""
-
-        metadata = self._resolve_metadata(
-            payload.metadata, owner_id=owner_id
-        ).model_copy(update={"version": schema_version})
-        self._build_tree_document(
-            tree_id=tree_id,
-            name=payload.name,
-            metadata=metadata,
-            nodes=payload.nodes,
-            relations=payload.relations,
-            owner_id=owner_id,
-            schema_version=schema_version,
-        )
 
     def prepare_create_tree(
         self,
@@ -128,7 +97,7 @@ class TreeService:
     def persist_prepared_create_tree(self, tree: TreeDocument) -> TreeDocument:
         self.tree_repo.create(tree)
         self._sync_index(tree)
-        return self._store_and_clone(tree)
+        return tree
 
     def create_tree(
         self,
@@ -150,8 +119,7 @@ class TreeService:
         return self.persist_prepared_create_tree(tree)
 
     def get_tree(self, tree_id: str) -> TreeDocument:
-        tree = self.tree_repo.read(tree_id, after_load=self._cache_store)
-        return tree.model_copy(deep=True)
+        return self.tree_repo.read(tree_id)
 
     def get_tree_for_owner(self, tree_id: str, *, owner_id: str) -> TreeDocument:
         """Return a tree only if it belongs to the given owner.
@@ -262,7 +230,7 @@ class TreeService:
             replacement=tree,
             after_save=self._commit_tree_state,
         )
-        return persisted.model_copy(deep=True)
+        return persisted
 
     def update_tree(
         self,
@@ -300,7 +268,7 @@ class TreeService:
             after_save=self._commit_tree_state,
             command_id=command_id,
         )
-        return tree.model_copy(deep=True)
+        return tree
 
     def prepare_import_tree(
         self,
@@ -346,7 +314,7 @@ class TreeService:
     def persist_prepared_import_tree(self, tree: TreeDocument) -> TreeDocument:
         self.tree_repo.create(tree)
         self._sync_index(tree)
-        return self._store_and_clone(tree)
+        return tree
 
     def import_tree(
         self,
@@ -484,40 +452,15 @@ class TreeService:
         return updated_tree.model_copy(deep=True)
 
     def _commit_tree_state(self, tree: TreeDocument) -> None:
-        """Publish index and cache state while holding the tree transaction lock."""
+        """Publish index state while holding the tree transaction lock."""
 
         self._sync_index(tree)
-        self._cache_store(tree)
 
     def _remove_tree_state(self, tree_id: str) -> None:
         """Remove derived local state while holding the tree transaction lock."""
 
-        with self._cache_lock:
-            self._cache.pop(tree_id, None)
         with suppress(NotFoundError):
             self.index_repo.delete(tree_id)
-
-    def _cache_store(self, tree: TreeDocument) -> None:
-        with self._cache_lock:
-            self._cache[tree.id] = tree
-            self._cache.move_to_end(tree.id)
-            if len(self._cache) > self._cache_maxsize:
-                self._cache.pop(next(iter(self._cache)))
-
-    def _cache_get(self, tree_id: str) -> TreeDocument | None:
-        with self._cache_lock:
-            cached = self._cache.get(tree_id)
-            if cached is None:
-                return None
-            # Maintain LRU ordering
-            self._cache.move_to_end(tree_id)
-            return cached
-
-    def _store_and_clone(self, tree: TreeDocument) -> TreeDocument:
-        """Store a tree document in the local cache and return a safe copy."""
-
-        self._cache_store(tree)
-        return tree.model_copy(deep=True)
 
     def _build_tree_document(
         self,

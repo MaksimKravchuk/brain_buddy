@@ -23,7 +23,7 @@ from app.repositories import (
 )
 from app.schemas.api import TreeCreateRequest, VersionCreateRequest
 from app.schemas.auth import Invite, Session, User
-from app.schemas.domain import ProviderConfig
+from app.schemas.domain import ProviderConfig, ProviderRegistryDocument
 
 
 def test_create_invite_cli_persists_and_prints_a_one_shot_code(
@@ -65,12 +65,16 @@ def test_provider_registry_round_trips_default_and_provider_config(data_dir) -> 
     repository = ProviderRepository(data_dir)
 
     assert repository.load().providers == {}
-    configured = repository.upsert_provider("local", ProviderConfig(model="test-model"))
-    defaulted = repository.set_default_provider("local")
+    repository.save(
+        ProviderRegistryDocument(
+            default_provider="local",
+            providers={"local": ProviderConfig(model="test-model")},
+        )
+    )
 
-    assert configured.providers["local"].model == "test-model"
-    assert defaulted.default_provider == "local"
-    assert repository.load().providers["local"].model == "test-model"
+    loaded = repository.load()
+    assert loaded.default_provider == "local"
+    assert loaded.providers["local"].model == "test-model"
 
 
 def test_invite_repository_rejects_duplicate_and_consumed_or_unknown_codes(
