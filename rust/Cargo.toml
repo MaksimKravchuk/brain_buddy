@@ -79,6 +79,15 @@ p256 = { version = "=0.14.0", default-features = false, features = ["ecdsa"] }
 aes-gcm = "=0.11.1"
 zip = { version = "=9.0.3", default-features = false, features = ["deflate"] }
 
+# The Rust core as it ships inside the iPhone and Mac apps (ios/scripts/build-rust-bridge.sh).
+# Size over peak speed: on the Linux build of bb-swift, `release` links to 12.6 MB stripped and
+# this profile to 7.1 MB. The server, the CLI and the tests keep plain `release`.
+[profile.bridge]
+inherits = "release"
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 
