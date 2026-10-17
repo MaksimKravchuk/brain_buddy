@@ -27,7 +27,7 @@
 
 ## Phase 5 — Account › Agents (PR-05)
 
-- [ ] T010 Agents section (I-06) in Settings, agent details (I-07), Add new agent (I-08), Replace credential and Delete (I-09)
+- [ ] T010 Agents section (I-06) in Account, agent details (I-07), Add new agent (I-08), Replace credential and Delete (I-09)
 
 ## Dependencies & Execution Order
 
@@ -204,7 +204,7 @@ parallel with PR-03 and PR-04.
         "ios/BrainBuddy/Screens/Agents/AgentDetailsScreen.swift",
         "ios/BrainBuddy/Screens/Agents/AddAgentScreen.swift",
         "ios/BrainBuddy/Screens/Agents/AgentCredentialSheets.swift",
-        "ios/BrainBuddy/Screens/Settings/SettingsScreen.swift"
+        "ios/BrainBuddy/Screens/Account/AccountScreen.swift"
       ],
       "depends_on": [
         "PR-02"

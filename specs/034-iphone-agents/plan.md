@@ -54,9 +54,8 @@ runs, the account lifecycle; port of `BrainBuddyModel`'s agent wiring) and
   (I-05), `AgentsAccountSection` (I-06), `AgentDetailsScreen` (I-07), `AddAgentScreen` (I-08),
   `AgentCredentialSheets` (I-09).
 - Edits: Waiting for (`Screens/Lists/TaskListScreen.swift`) gains the Agents group; the step's
-  card (`Screens/Detail/TaskDetailScreen.swift`) gains Hand off…; Settings
-  (`Screens/Settings/SettingsScreen.swift`) hosts the Agents section until 033's Account screen
-  does.
+  card (`Screens/Detail/TaskDetailScreen.swift`) gains Hand off…; 033's Account screen
+  (`Screens/Account/AccountScreen.swift`) hosts the Agents section between Profile and Sign in.
 
 ## Verification
 
