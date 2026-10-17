@@ -604,9 +604,11 @@ def _path_filter_errors(workflow_text: str) -> list[str]:
             errors.append(f"missing {label}: {snippet!r}")
     for job in (
         "backend",
+        "backend-results",
         "frontend",
         "ios-kit",
         "ios-app",
+        "ios-tests",
         "macos-app",
         "rust",
         "docker",
@@ -639,6 +641,148 @@ def _path_filter_errors(workflow_text: str) -> list[str]:
                 "job-level 'if'; path filtering must gate steps so the job "
                 "still reports success rather than skipped"
             )
+    return errors
+
+
+def _has_always_upload(block: str, artifact_name: str) -> bool:
+    return any(
+        (step.uses or "").startswith("actions/upload-artifact@")
+        and step.condition is not None
+        and "always()" in step.condition
+        and re.search(rf"^          name: {re.escape(artifact_name)}$", step.text, re.MULTILINE)
+        for step in _job_steps(block)
+    )
+
+
+def _has_always_artifact_transfer(block: str, action: str, label: str | None = None) -> bool:
+    return any(
+        (step.uses or "").startswith(f"actions/{action}-artifact@")
+        and step.condition is not None
+        and "always()" in step.condition
+        and (label is None or label in step.label.lower())
+        for step in _job_steps(block)
+    )
+
+
+def _step_by_id(block: str, step_id: str) -> _Step | None:
+    return next((step for step in _job_steps(block) if step.step_id == step_id), None)
+
+
+def _matrix_errors(workflow_text: str, job: str) -> list[str]:
+    block = _job_block(workflow_text, job)
+    if block is None:
+        return [f"missing {job} job"]
+    strategy = re.search(
+        r"^    strategy:\n(?P<body>.*?)(?=^    [A-Za-z][A-Za-z0-9_-]*:|\Z)",
+        block,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    body = strategy.group("body") if strategy else ""
+    errors: list[str] = []
+    if not re.search(r"^      fail-fast: false$", body, flags=re.MULTILINE):
+        errors.append(f"{job} matrix must set fail-fast: false")
+    if not re.search(r"^        shard: \[0, 1\]$", body, flags=re.MULTILINE):
+        errors.append(f"{job} matrix must include exactly shards [0, 1]")
+    return errors
+
+
+def _parallel_ci_errors(workflow_text: str) -> list[str]:
+    """Enforce the aggregate and native-lane contracts for parallel required CI."""
+    errors: list[str] = []
+    for job in ("backend-results", "ios-tests"):
+        if _job_block(workflow_text, job) is None:
+            errors.append(f"missing required parallel-CI job: {job}")
+
+    for job in ("backend-results", "mutation-gate"):
+        block = _job_block(workflow_text, job)
+        if block is not None and not re.search(
+            r"^    if: always\(\)$", block, flags=re.MULTILINE
+        ):
+            errors.append(f"{job} aggregation job must use job-level if: always()")
+
+    for job in ("backend", "mutation-base", "mutation-head"):
+        errors.extend(_matrix_errors(workflow_text, job))
+
+    for job in ("mutation-base", "mutation-head"):
+        block = _job_block(workflow_text, job) or ""
+        if "ci_shards.py mutation-select" not in block or "ci_shards.py mutation-record" not in block:
+            errors.append(f"{job} must select and record its mutation shard assignment")
+        if not _has_always_artifact_transfer(block, "upload", "mutation shard evidence"):
+            errors.append(f"{job} must always upload mutation shard evidence")
+
+    backend = _job_block(workflow_text, "backend") or ""
+    if "pytest -p scripts.ci_shards --collect-only" not in backend:
+        errors.append("backend shards must collect assignments with the scripts.ci_shards plugin")
+    if "--cov-fail-under=0" not in backend:
+        errors.append("backend shards must defer the coverage floor with --cov-fail-under=0")
+    if "validate_coverage_floor.py --stack backend" in backend:
+        errors.append("backend shards must not enforce the combined coverage floor")
+    if not _has_always_artifact_transfer(backend, "upload", "backend shard evidence"):
+        errors.append("backend shards must always upload shard evidence")
+    results = _job_block(workflow_text, "backend-results") or ""
+    if "ci_shards.py backend-merge" not in results:
+        errors.append("backend-results must combine shards with the ci_shards merge helper")
+    if not _has_always_artifact_transfer(results, "download", "download available backend diagnostics"):
+        errors.append("backend-results must always download available shard diagnostics")
+    if "validate_coverage_floor.py --stack backend" not in results:
+        errors.append("backend-results must enforce the combined backend coverage floor")
+    if not _has_always_upload(results, "backend-allure-results"):
+        errors.append("backend-results must always upload canonical backend Allure diagnostics")
+
+    mutation = _job_block(workflow_text, "mutation-gate") or ""
+    if "ci_shards.py mutation-merge" not in mutation:
+        errors.append("mutation-gate must combine mutation shards with the ci_shards merge helper")
+    if not _has_always_artifact_transfer(mutation, "download", "download available head measurements"):
+        errors.append("mutation-gate must always download available head diagnostics")
+    if not _has_always_artifact_transfer(mutation, "download", "download available base measurements"):
+        errors.append("mutation-gate must always download available base diagnostics")
+    if "mutation_gate.py check" not in mutation or "--base-stats" not in mutation:
+        errors.append("mutation-gate must run the existing aggregate score and base comparison")
+    if not _has_always_upload(mutation, "mutation-gate-allure-results"):
+        errors.append("mutation-gate must always upload blocking-gate Allure diagnostics")
+
+    app = _job_block(workflow_text, "ios-app") or ""
+    tests = _job_block(workflow_text, "ios-tests") or ""
+    for job, block in (("ios-app", app), ("ios-tests", tests)):
+        if "RUN: ${{ needs.changes.outputs.ios }}" not in block or not re.search(
+            r"^    runs-on: \$\{\{ needs\.changes\.outputs\.ios == 'true' && 'macos-26' \|\| 'ubuntu-latest' \}\}$",
+            block,
+            flags=re.MULTILINE,
+        ):
+            errors.append(f"{job} must retain the iOS path decision and no-op runner")
+    app_xcode = next((step for step in _job_steps(app) if step.label == "Select the newest Xcode 26"), None)
+    tests_xcode = next((step for step in _job_steps(tests) if step.label == "Select the newest Xcode 26"), None)
+    if app_xcode is None or tests_xcode is None or (app_xcode.run, app_xcode.condition) != (tests_xcode.run, tests_xcode.condition):
+        errors.append("ios-app and ios-tests must use the same pinned Xcode selection")
+    app_rust = next((step for step in _job_steps(app) if step.label == "Install pinned Rust"), None)
+    tests_rust = next((step for step in _job_steps(tests) if step.label == "Install pinned Rust"), None)
+    if (
+        app_rust is None
+        or tests_rust is None
+        or not (app_rust.uses or "").startswith("dtolnay/rust-toolchain@")
+        or "toolchain: 1.99.0" not in app_rust.text
+        or (app_rust.uses, app_rust.text) != (tests_rust.uses, tests_rust.text)
+    ):
+        errors.append("ios-app and ios-tests must install the same pinned Rust toolchain and targets")
+    app_key = _step_by_id(app, "bridge-key")
+    tests_key = _step_by_id(tests, "bridge-key")
+    if app_key is None or tests_key is None or app_key.run != tests_key.run:
+        errors.append("ios-app and ios-tests must use the same Apple bridge cache key")
+    app_cache = _step_by_id(app, "bridge-cache")
+    tests_cache = _step_by_id(tests, "bridge-cache")
+    if app_cache is None or tests_cache is None:
+        errors.append("ios-app and ios-tests must both restore the Apple bridge cache")
+    elif app_cache.text != tests_cache.text:
+        errors.append("ios-app and ios-tests must use identical Apple bridge cache key and paths")
+    if "Build app and widgets for the iOS Simulator" not in app:
+        errors.append("ios-app must retain the Simulator app and widget build")
+    if "swift test --parallel" in app:
+        errors.append("ios-app must leave package tests to ios-tests")
+    if "swift test --parallel" not in tests:
+        errors.append("ios-tests must run the complete parallel Swift package suite")
+    lint = _job_block(workflow_text, "workflow-lint") or ""
+    if "python3 -m unittest scripts/test_ci_shards.py -v" not in lint:
+        errors.append("workflow-lint must run the ci_shards contract tests")
     return errors
 
 
@@ -926,11 +1070,13 @@ LANE_DEPENDENCY_LIMITS = {
     # that drives their RUN gate. Nothing else may precede them -- they are the
     # cheap checks everything else is allowed to wait for.
     "backend": {"changes"},
+    "backend-results": {"changes", "backend"},
     "frontend": {"changes"},
     # The native iOS lanes are service lanes of the same kind: the package on
     # Linux and the app on macOS read only the changed-stack decision.
     "ios-kit": {"changes"},
     "ios-app": {"changes"},
+    "ios-tests": {"changes"},
     # The Mac app lane (021-mac-sync research R3) is the same kind of lane: it
     # reads only the changed-stack decision, and waiting on ios-app would
     # serialise two macOS runners for a result neither consumes.
@@ -1174,6 +1320,7 @@ def validate_workflow(
         errors.extend(_path_filter_errors(workflow_text))
         errors.extend(_step_gate_errors(workflow_text))
         errors.extend(_job_graph_errors(workflow_text))
+        errors.extend(_parallel_ci_errors(workflow_text))
         errors.extend(_mutation_gate_errors(workflow_text))
         errors.extend(_quality_gate_errors(workflow_text))
         errors.extend(_concurrency_errors(workflow_text))
