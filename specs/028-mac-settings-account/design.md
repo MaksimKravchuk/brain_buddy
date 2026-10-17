@@ -38,13 +38,17 @@ out…" and S-04 "Sign out…", on the main window), the macOS save panel.
 
 ## Layout (from M25)
 
-- **Window**: standard macOS Settings window, 820 pt wide; height follows the tab's
-  content (M25 draws 620 pt for Account). Background `bg-ground`. Title = the selected
-  tab's name ("Account", "Agents", "Sync").
+- **Window**: the authoritative M25/M29 PNG shows a standard macOS Settings window
+  opening at 820 × 620 pt outer size. The content retains its 420 pt minimum height;
+  native title/toolbar chrome adds to that minimum, and tabs scroll when shortened.
+  Background `bg-ground`. Title = the selected tab's name ("Account", "Agents", "Sync").
 - **Tab bar** (S-01): the window's toolbar, centred, three items of glyph (20 pt,
   stroke 1.8, round caps, from the board's SVGs: a person; a rounded robot head with an
   antenna; two circling arrows) over a 12 pt label. Selected item: label semibold and a
-  `control-quiet` rounded background; others `text-secondary`.
+  `control-quiet` rounded rectangle, 70 × 50 pt with the existing 8 pt radius; others
+  `text-secondary`. The small native title stays above the tabs. The shared glass
+  capsule is hidden; native regular material over `bg-ground` gives the warm header.
+  The toolbar remains native, with its existing keyboard and accessibility behavior.
 - **Content** (S-02): padding 22 pt top/bottom, 40 pt sides, 14 pt type. Each row is a
   three-column grid: a 150 pt right-aligned `text-secondary` label, the value in
   `text-primary`, and an optional trailing control. Row padding 6 pt; groups separated

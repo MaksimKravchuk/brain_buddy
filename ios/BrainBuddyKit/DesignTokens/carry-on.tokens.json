@@ -109,6 +109,7 @@
     "focus-ring": { "width": 2, "offset": 2 },
     "bottom-bar": { "side": 16, "bottom": 28, "height": 62 },
     "code-box": { "height": 58, "gap": 6, "radius": 12 },
+    "mac-settings": { "width": 820, "height": 620, "min-content-height": 420, "tab-width": 70, "tab-height": 50 },
     "mac-sidebar-row": { "height": 34 },
     "mac-agents": { "list-width": 220, "padding-x": 40, "padding-y": 22, "gap": 18, "detail-padding": 18, "label-width": 130, "row-height": 26, "icon": 16, "status-dot": 7, "action-size": 26 }
   }

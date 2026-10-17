@@ -244,6 +244,13 @@ public enum CarryOnLayout {
         public static let gap: Double = 6
         public static let radius: Double = 12
     }
+    public enum MacSettings {
+        public static let width: Double = 820
+        public static let height: Double = 620
+        public static let minContentHeight: Double = 420
+        public static let tabWidth: Double = 70
+        public static let tabHeight: Double = 50
+    }
     public enum MacSidebarRow {
         public static let height: Double = 34
     }
@@ -512,6 +519,11 @@ public enum CarryOnTokenTable {
         "layout.code-box.height": CarryOnLayout.CodeBox.height,
         "layout.code-box.gap": CarryOnLayout.CodeBox.gap,
         "layout.code-box.radius": CarryOnLayout.CodeBox.radius,
+        "layout.mac-settings.width": CarryOnLayout.MacSettings.width,
+        "layout.mac-settings.height": CarryOnLayout.MacSettings.height,
+        "layout.mac-settings.min-content-height": CarryOnLayout.MacSettings.minContentHeight,
+        "layout.mac-settings.tab-width": CarryOnLayout.MacSettings.tabWidth,
+        "layout.mac-settings.tab-height": CarryOnLayout.MacSettings.tabHeight,
         "layout.mac-sidebar-row.height": CarryOnLayout.MacSidebarRow.height,
         "layout.mac-agents.list-width": CarryOnLayout.MacAgents.listWidth,
         "layout.mac-agents.padding-x": CarryOnLayout.MacAgents.paddingX,
