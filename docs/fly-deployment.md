@@ -53,14 +53,14 @@ Deploy the Brain Buddy backend and frontend as separate Fly.io apps. The backend
    ```
    On startup the backend will create that account (or rotate its password to match the env var if it already exists). Rotate later by updating the secret and redeploying. See `docs/auth.md` for the full model.
 
-## Data storage, backups, and seeding
+## Data storage and backups
 The data directory (`BRAIN_BUDDY_DATA_DIR`, mounted at `/app/data` in production) holds multiple coordinated stores:
 
-- **Trees** — one JSON file per tree plus an index file. Tree version snapshots, export/import, and `scripts/load_dataset.py` operate on these JSON files only.
+- **Trees** — one JSON file per tree plus an index file. Tree version snapshots and export/import operate on these JSON files only.
 - **Tasks, projects, tags, and brain-dump operations** — a single SQLite database, `tasks.sqlite3`, managed by the task module (`backend/app/modules/tasks/repository.py`).
 - **CRT mutation receipts** — `crt_commands.sqlite3`, the 30-day Thinking/CRT replay/reconciliation store from ADR-0026. It must be restored with the tree JSON/index it coordinates.
 
-Neither SQLite database is covered by tree JSON snapshots, tree export/import, or `scripts/load_dataset.py`. Quiesce writers/checkpoint SQLite before a filesystem copy, and include database `-wal`/`-shm` sidecars when copying a live store. Prefer backing up the entire data directory — e.g. a Fly volume snapshot (`flyctl volumes snapshots create <volume-id> -a <backend-app>`) or copying the whole mount via `flyctl ssh sftp` — over cherry-picking individual files. A CRT restore is valid only after a disposable restore/boot proves tree/index state and command receipts are coherent or that ADR-0026 pending reconciliation completes deterministically before traffic.
+Neither SQLite database is covered by tree JSON snapshots or tree export/import. Quiesce writers/checkpoint SQLite before a filesystem copy, and include database `-wal`/`-shm` sidecars when copying a live store. Prefer backing up the entire data directory — e.g. a Fly volume snapshot (`flyctl volumes snapshots create <volume-id> -a <backend-app>`) or copying the whole mount via `flyctl ssh sftp` — over cherry-picking individual files. A CRT restore is valid only after a disposable restore/boot proves tree/index state and command receipts are coherent or that ADR-0026 pending reconciliation completes deterministically before traffic.
 
 ## Bootstrap/reference: deploy the backend
 Run the deployment from the repository root so the Dockerfile path resolves correctly. The resulting app has no public `fly.dev` hostname; it listens on `http://<backend-app>.flycast:8000` for in-organization callers such as the frontend.

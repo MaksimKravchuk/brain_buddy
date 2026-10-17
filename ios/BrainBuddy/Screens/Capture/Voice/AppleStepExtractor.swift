@@ -2,11 +2,13 @@ import BrainBuddyCore
 import BrainBuddyWorkspace
 import Foundation
 import FoundationModels
+import NaturalLanguage
 
 /// Reads steps from what was said with Apple's on-device model (Foundation Models).
 ///
-/// It throws when the model is not available or fails; the voice model then falls back to one
-/// step per sentence. Nothing heard is logged and nothing leaves the device.
+/// It throws when the model is not available, does not support the language spoken (Russian, for
+/// now), or fails; the voice model then falls back to one step per sentence. Nothing heard is
+/// logged and nothing leaves the device.
 struct AppleStepExtractor: StepExtracting {
     struct ModelUnavailable: Error {}
 
@@ -20,7 +22,13 @@ struct AppleStepExtractor: StepExtracting {
         """
 
     func steps(in text: String, projects: [String], today: CalendarDay) async throws -> [HeardStep] {
-        guard case .available = SystemLanguageModel.default.availability else { throw ModelUnavailable() }
+        let model = SystemLanguageModel.default
+        guard case .available = model.availability else { throw ModelUnavailable() }
+        if let spoken = NLLanguageRecognizer.dominantLanguage(for: text),
+            !model.supportsLocale(Locale(identifier: spoken.rawValue))
+        {
+            throw ModelUnavailable()
+        }
         let weekday = today.startDate().formatted(.dateTime.weekday(.wide).locale(Locale(identifier: "en_US")))
         let names = projects.isEmpty ? "none" : projects.joined(separator: "; ")
         let prompt = """

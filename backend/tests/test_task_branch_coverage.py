@@ -603,7 +603,8 @@ def test_reconcile_restores_pending_create_results(service: TaskService) -> None
     service.task_repo.subtask_path(OWNER, task.id, subtask.id).unlink()
     service.task_repo.comment_path(OWNER, task.id, comment.id).unlink()
 
-    service._reconcile_idempotent_results(owner_id=OWNER)
+    for record in service.task_repo.list_idempotency_for_owner(owner_id=OWNER):
+        service._reconcile_idempotent_result(owner_id=OWNER, key=record.key)
 
     assert service.get_project(project.id, owner_id=OWNER).name == project.name
     assert service.get_tag(tag.id, owner_id=OWNER).name == tag.name

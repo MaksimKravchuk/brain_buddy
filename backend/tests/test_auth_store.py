@@ -265,7 +265,7 @@ def test_022_fr002_existing_db_never_reads_or_writes_legacy_json(tmp_path):
     users = UserRepository(tmp_path)
     users.create(_user())
     users.users_dir.mkdir(exist_ok=True)
-    users._user_path("ghost").write_text(
+    (users.users_dir / "ghost.json").write_text(
         json.dumps(_user("ghost", "ghost@example.com").model_dump(mode="json"))
     )
     users.index_path.write_text("malformed legacy index")
@@ -274,7 +274,7 @@ def test_022_fr002_existing_db_never_reads_or_writes_legacy_json(tmp_path):
     users.update_email("owner", "changed@example.com")
     assert users.index_path.read_text() == "malformed legacy index"
     users.delete("owner")
-    assert users._user_path("ghost").exists()
+    assert (users.users_dir / "ghost.json").exists()
 
 
 def test_022_fr018_user_delete_cascades_sessions_and_owned_metadata(tmp_path):

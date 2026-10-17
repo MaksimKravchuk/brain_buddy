@@ -11,13 +11,10 @@ from pydantic import ValidationError
 
 from app.exceptions import ConflictError, RepositoryError
 from app.schemas.auth import Session
-from app.utils.file_ops import ensure_directory
 from app.utils.time import utcnow
 
 from .auth_store import AuthStore
 from .base import BaseRepository
-
-SESSIONS_DIRNAME = "sessions"
 
 
 class SessionRepository(BaseRepository):
@@ -26,10 +23,6 @@ class SessionRepository(BaseRepository):
     def __init__(self, root: Path, store: AuthStore | None = None) -> None:
         super().__init__(root)
         self.store = store if store is not None else AuthStore(self.root)
-        self.sessions_dir = ensure_directory(self.resolve(SESSIONS_DIRNAME))
-
-    def _session_path(self, token_hash: str) -> Path:
-        return self.sessions_dir / f"{token_hash}.json"
 
     @staticmethod
     def _decode(row: sqlite3.Row) -> tuple[Session, dict[str, Any]]:

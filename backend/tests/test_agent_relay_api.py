@@ -45,6 +45,7 @@ from .a2a_fakes import (
     FakeCardFetcher,
     card_summary,
     ready_discovery,
+    recover_interrupted_exchanges,
 )
 from .conftest import TEST_USER_EMAIL, TEST_USER_PASSWORD
 
@@ -2228,7 +2229,7 @@ class TestHandOffContractOverHttp:
         run = hand_off(client, created["id"], task_id, key="k-restart-dispatch")
         assert run["primary_state_label"] == "Queued"
 
-        container.agent_observer.recover_interrupted_exchanges()
+        recover_interrupted_exchanges(container.agent_observer)
 
         recovered = client.get(f"/api/agent-runs/{run['id']}").json()
         assert recovered["dispatch_state"] == "not_sent"

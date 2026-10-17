@@ -85,8 +85,8 @@ def test_022_fr002_caught_nested_failure_still_aborts_outer_authority(tmp_path):
     assert store.checkpoint()
 
 
-def test_022_fr018_metadata_erasure_is_owner_scoped_and_cascades_secrets(apple_fixture):
-    """Explicit metadata erasure preserves the user and another owner's authority."""
+def test_022_fr018_account_delete_is_owner_scoped_and_cascades_secrets(apple_fixture):
+    """Deleting an account erases its metadata and secrets, never another owner's."""
     store, users, lifecycle, _, _, _ = apple_fixture
     users.create(User(id="other", email="other@example.com", created_at=apple.NOW))
     metadata = AuthMetadataRepository(store.root, store)
@@ -110,14 +110,13 @@ def test_022_fr018_metadata_erasure_is_owner_scoped_and_cascades_secrets(apple_f
             "INSERT INTO auth_handoffs(digest,attempt_id,expires_at) VALUES('handoff','owner',?)",
             ((apple.NOW + timedelta(seconds=60)).isoformat(),),
         )
-    assert [row["id"] for row in metadata.list_bindings("owner")] == ["binding"]
-    assert metadata.list_bindings("other") == []
-    assert metadata.delete_for_user("owner") == 3
-    assert metadata.delete_for_user("owner") == 0
+    users.delete("owner")
     assert apple._rows(store, "auth_handoffs") == []
     assert apple._rows(store, "auth_apple_grants") == []
+    assert apple._rows(store, "auth_identity_bindings") == []
     assert [row["user_id"] for row in apple._rows(store, "auth_attempts")] == ["other"]
-    assert users.get_by_id("owner") is not None
+    assert users.get_by_id("owner") is None
+    assert users.get_by_id("other") is not None
     assert metadata.cleanup_expired(now=apple.NOW) == 0
 
 

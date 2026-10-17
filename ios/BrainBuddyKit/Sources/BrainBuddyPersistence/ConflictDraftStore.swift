@@ -68,26 +68,3 @@ public struct FileConflictDraftStore: ConflictDraftStore {
         }
     }
 }
-
-/// Drafts kept in memory only: previews and tests.
-public final class InMemoryConflictDraftStore: ConflictDraftStore, @unchecked Sendable {
-    // Every access is under `lock`.
-    private let lock = NSLock()
-    private var drafts: [String: ConflictDecisionDraft] = [:]
-
-    public init() {}
-
-    public func load(issueID: String) -> ConflictDecisionDraft? { lock.withLock { drafts[issueID] } }
-
-    @discardableResult
-    public func save(_ draft: ConflictDecisionDraft, issueID: String) -> Bool {
-        lock.withLock { drafts[issueID] = draft }
-        return true
-    }
-
-    public func clear(issueID: String) { lock.withLock { drafts[issueID] = nil } }
-
-    public func prune(keeping issueIDs: Set<String>) {
-        lock.withLock { drafts = drafts.filter { issueIDs.contains($0.key) } }
-    }
-}

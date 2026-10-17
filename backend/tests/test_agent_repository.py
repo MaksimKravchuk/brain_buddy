@@ -538,31 +538,6 @@ class TestRuns:
         assert repo.find_run_by_manifest_token("b" * 64, owner_id="user_a") is None
         assert repo.find_run_by_manifest_token("a" * 64, owner_id="user_b") is None
 
-    def test_ownerless_connection_lookup_fails_closed_when_id_is_ambiguous(
-        self, repo: AgentRepository
-    ) -> None:
-        """Inbound routing never chooses an arbitrary owner's signing secret."""
-
-        repo.create_connection(
-            make_connection(owner_id="user_a", connection_id="shared")
-        )
-        repo.create_connection(
-            make_connection(owner_id="user_b", connection_id="shared")
-        )
-
-        assert repo.find_connection_anywhere("shared") is None
-
-    def test_a_connection_is_resolvable_without_an_owner_for_inbound_events(
-        self, repo: AgentRepository
-    ) -> None:
-        """Inbound events identify their owner through the connection."""
-
-        repo.create_connection(make_connection())
-
-        found = repo.find_connection_anywhere("agentconn_1")
-        assert found is not None and found.owner_id == "user_a"
-        assert repo.find_connection_anywhere("agentconn_missing") is None
-
 
 class TestRunEventOrdering:
     def test_appended_events_come_back_in_chronological_order(
@@ -2049,69 +2024,6 @@ class TestA2AWireStorage:
         assert "idx_agent_runs_observation" in indices
         assert "a2a_wire_contract_v1" in migrations
 
-    def test_014_FR_008_a_conditional_update_is_a_no_op_on_a_stale_version(
-        self, repo: AgentRepository
-    ) -> None:
-        """Compare-and-set, because two observations can be in flight at once.
-
-        A worker reads a run's version *before* its network call and applies the
-        result after. Without the version in the WHERE clause, a slow
-        observation returning after a fast one would overwrite the newer state
-        with older truth — the run would appear to move backwards, which reads
-        to a user as the agent having un-completed their work.
-        """
-
-        run = make_run(run_version=4)
-        repo.create_run(run)
-
-        stale = run.model_copy(update={"run_version": 5, "reported_state": "completed"})
-        assert repo.update_run_if_version(stale, expected_version=3) is False
-        assert repo.get_run(run.id, owner_id=run.owner_id).reported_state is None
-
-        fresh = run.model_copy(update={"run_version": 5, "reported_state": "completed"})
-        assert repo.update_run_if_version(fresh, expected_version=4) is True
-        assert repo.get_run(run.id, owner_id=run.owner_id).reported_state == "completed"
-
-    def test_014_FR_008_a_conditional_update_never_resurrects_a_purged_run(
-        self, repo: AgentRepository
-    ) -> None:
-        """The property that makes the observer safe against account purge.
-
-        An UPSERT here would re-create a row the user asked to be erased,
-        minutes after the erasure, from a worker that started before it. The
-        update is therefore an UPDATE — it can only ever change a row that is
-        still there.
-        """
-
-        run = make_run(run_version=1)
-        repo.create_run(run)
-        repo.delete_all_for_owner(owner_id=run.owner_id)
-
-        applied = repo.update_run_if_version(
-            run.model_copy(update={"run_version": 2}), expected_version=1
-        )
-
-        assert applied is False
-        with pytest.raises(NotFoundError):
-            repo.get_run(run.id, owner_id=run.owner_id)
-        assert repo.list_runs_for_owner(owner_id=run.owner_id) == []
-
-    def test_014_FR_008_the_conditional_update_is_owner_scoped(
-        self, repo: AgentRepository
-    ) -> None:
-        """A run id alone must never address another owner's row."""
-
-        run = make_run(owner_id="user_a", run_id="shared-id", run_version=1)
-        repo.create_run(run)
-
-        applied = repo.update_run_if_version(
-            run.model_copy(update={"owner_id": "user_b", "run_version": 2}),
-            expected_version=1,
-        )
-
-        assert applied is False
-        assert repo.get_run("shared-id", owner_id="user_a").run_version == 1
-
     def test_014_FR_008_due_observations_span_owners_and_respect_the_clock(
         self, repo: AgentRepository
     ) -> None:
@@ -2542,7 +2454,7 @@ class TestRelayRetentionTiers:
         assert any("agentrun_broken" in message for message in messages)
         assert not any("Unreadable later" in message for message in messages)
 
-    def test_014_FR_016_expire_due_identifiers_nulls_the_reachable_ids(
+    def test_014_FR_016_expire_due_identifier_runs_nulls_the_reachable_ids(
         self, repo: AgentRepository
     ) -> None:
         """014-SC-007. Ninety days, and the run row itself stays."""
@@ -2581,7 +2493,7 @@ class TestRelayRetentionTiers:
             )
         )
 
-        assert repo.expire_due_identifiers(now=NOW) == 1
+        assert len(repo.expire_due_identifier_runs(now=NOW)) == 1
 
         run = repo.get_run("agentrun_1", owner_id="user_a")
         assert run.identifiers_expired is True
@@ -2607,7 +2519,7 @@ class TestRelayRetentionTiers:
             make_run(dispatched_at=NOW - timedelta(days=89), agent_task_id="task-a1")
         )
 
-        assert repo.expire_due_identifiers(now=NOW) == 0
+        assert len(repo.expire_due_identifier_runs(now=NOW)) == 0
 
         assert repo.get_run("agentrun_1", owner_id="user_a").agent_task_id == "task-a1"
         # Idempotent: a second pass over an already-expired run does nothing.
@@ -2616,8 +2528,8 @@ class TestRelayRetentionTiers:
                 update={"dispatched_at": NOW - timedelta(days=91)}
             )
         )
-        assert repo.expire_due_identifiers(now=NOW) == 1
-        assert repo.expire_due_identifiers(now=NOW) == 0
+        assert len(repo.expire_due_identifier_runs(now=NOW)) == 1
+        assert len(repo.expire_due_identifier_runs(now=NOW)) == 0
 
     def test_014_FR_016_the_identifier_sweep_skips_a_row_it_cannot_parse(
         self, repo: AgentRepository, caplog: pytest.LogCaptureFixture
@@ -2648,7 +2560,7 @@ class TestRelayRetentionTiers:
             )
 
         with caplog.at_level(logging.WARNING):
-            assert repo.expire_due_identifiers(now=NOW) == 1
+            assert len(repo.expire_due_identifier_runs(now=NOW)) == 1
 
         assert repo.get_run("agentrun_healthy", owner_id="user_b").agent_task_id is None
         assert any(

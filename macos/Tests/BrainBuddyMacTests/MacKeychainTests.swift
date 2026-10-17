@@ -58,6 +58,13 @@
             return try body()
         }
 
+        static func interactionAllowed() throws -> Bool {
+            var allowed = DarwinBoolean(false)
+            let status = SecKeychainGetUserInteractionAllowed(&allowed)
+            guard status == errSecSuccess else { throw KeychainFailure(step: "SecKeychainGetUserInteractionAllowed", status: status) }
+            return allowed.boolValue
+        }
+
         /// A service of its own per test, so nothing collides with a real item.
         static func service() -> String { "\(MacHostConfiguration.keychainService).test-\(UUID().uuidString)" }
 
@@ -155,16 +162,21 @@
             let temporary = try TemporaryKeychain()
             let service = Self.service()
             let store = KeychainSessionTokenStore(service: service, keychain: temporary.keychain)
-            try Self.withoutPrompts {
-                #expect(try store.token(for: Self.server) == nil)
-                try store.setToken("session-one", for: Self.server)
-                #expect(try store.token(for: Self.server) == "session-one")
-                try store.setToken("session-two", for: Self.server)
-                #expect(try store.token(for: Self.server) == "session-two")
-                #expect(!Self.defaultKeychainHas(service: service), "the login keychain is never touched")
-                try store.removeToken(for: Self.server)
-                #expect(try store.token(for: Self.server) == nil)
-            }
+            let previous = try Self.interactionAllowed()
+            let enabled = SecKeychainSetUserInteractionAllowed(true)
+            guard enabled == errSecSuccess else { throw KeychainFailure(step: "enable test interaction", status: enabled) }
+            defer { _ = SecKeychainSetUserInteractionAllowed(previous) }
+
+            #expect(try Self.interactionAllowed(), "the successful production read starts with interaction enabled")
+            #expect(try store.token(for: Self.server) == nil)
+            #expect(try Self.interactionAllowed(), "the successful production read restores the prior interaction state")
+            try store.setToken("session-one", for: Self.server)
+            #expect(try store.token(for: Self.server) == "session-one")
+            try store.setToken("session-two", for: Self.server)
+            #expect(try store.token(for: Self.server) == "session-two")
+            #expect(!Self.defaultKeychainHas(service: service), "the login keychain is never touched")
+            try store.removeToken(for: Self.server)
+            #expect(try store.token(for: Self.server) == nil)
         }
 
         @Test("021-FR-005 a pending logout is added, listed and removed")
@@ -217,8 +229,15 @@
             let store = KeychainSessionTokenStore(service: service, keychain: temporary.keychain)
             // The engine maps `accessDenied` to an ended session ("Sign in again to sync"); it is never
             // read as a token.
-            Self.withoutPrompts {
+            let previous = try Self.interactionAllowed()
+            let enabled = SecKeychainSetUserInteractionAllowed(true)
+            guard enabled == errSecSuccess else { throw KeychainFailure(step: "enable test interaction", status: enabled) }
+            defer { _ = SecKeychainSetUserInteractionAllowed(previous) }
+
+            #expect(try Self.interactionAllowed(), "the production read must start with interaction enabled")
+            do {
                 #expect(throws: TokenStoreError.accessDenied) { try store.token(for: Self.server) }
+                #expect(try Self.interactionAllowed(), "the production read restores the prior interaction state on error")
             }
         }
 

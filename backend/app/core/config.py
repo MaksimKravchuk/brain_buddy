@@ -73,9 +73,9 @@ class AppEnvironment(str, Enum):
 # review reads, the navigator and the sweep's exposure part, while writes that
 # finish work a client already queued stay accepted when it is off.
 #
-# ``rust_core_sync`` (spec 026) is reserved for the native sync core. It is
-# runtime-managed, defaults OFF, and nothing reads it yet: adding the row
-# changes no behaviour until a later slice wires a reader.
+# ``rust_core_sync`` (spec 026) gates the native sync core and the Rust task and
+# review facades per owner. It is runtime-managed, defaults OFF, and is exposure
+# control only: session authentication and owner checks stay mandatory.
 #
 # Runtime-manageable subset (spec 010, DD-1, DD-15, DD-16, superseded
 # 2026-08-15): ``voice_brain_dump`` and ``external_agent_relay`` (among
@@ -410,11 +410,6 @@ class DataSettings(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    @property
-    def schema_version_path(self) -> Path:
-        """Return the schema version file path."""
-        return self.root_dir / SCHEMA_VERSION_FILENAME
-
 
 class VoiceProviderSettings(BaseModel):
     """Bounded configuration for one voice-processing provider role."""
@@ -481,7 +476,6 @@ class VoiceAudioLimits(BaseModel):
 
 class VoiceSettings(BaseModel):
     accurate_stt: VoiceProviderSettings = Field(default_factory=VoiceProviderSettings)
-    fast_stt: VoiceProviderSettings = Field(default_factory=VoiceProviderSettings)
     reconciler: VoiceProviderSettings = Field(default_factory=VoiceProviderSettings)
     retention: VoiceRetentionSettings = Field(default_factory=VoiceRetentionSettings)
     audio_limits: VoiceAudioLimits = Field(default_factory=VoiceAudioLimits)
@@ -497,7 +491,6 @@ class TaskTitleAutocompleteSettings(BaseModel):
     model: str = "gpt-4o-mini"
     api_key_env: str = "OPENAI_API_KEY"
     timeout_seconds: float = Field(default=3.0, gt=0, le=3.0)
-    max_history_titles: int = Field(default=50, ge=1, le=50)
     max_output_tokens: int = Field(default=120, ge=1, le=120)
 
     model_config = ConfigDict(frozen=True)
@@ -978,10 +971,6 @@ class ModernAuthSettings(BaseModel):
         )
 
     @property
-    def apple_available(self) -> bool:
-        return self.apple_web_available or self.apple_native_available
-
-    @property
     def email_available(self) -> bool:
         return bool(
             self._ready
@@ -1338,7 +1327,6 @@ def _build_config() -> AppConfig:
     )
     voice = VoiceSettings(
         accurate_stt=accurate_stt,
-        fast_stt=VoiceProviderSettings(provider="disabled"),
         reconciler=VoiceProviderSettings(
             provider=os.getenv("BRAIN_BUDDY_VOICE_RECONCILER_PROVIDER", "disabled"),
             model=os.getenv("BRAIN_BUDDY_VOICE_RECONCILER_MODEL", "gpt-4o"),

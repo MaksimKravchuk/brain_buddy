@@ -40,6 +40,7 @@ from app.modules.agents.a2a.card import (
     card_fingerprint,
 )
 from app.modules.agents.a2a.client import A2AResult, A2ATarget
+from app.modules.agents.observer import AgentObserver
 
 EXTENSION_HEADER = "A2A-Extensions"
 
@@ -296,7 +297,6 @@ class FakeA2AAgent:
             "GetTask": self._get_task,
             "ListTasks": self._list_tasks,
             "CancelTask": self._cancel_task,
-            "CreateTaskPushNotificationConfig": self._register_push,
         }
         operation = handlers.get(method)
         if operation is None:
@@ -373,11 +373,6 @@ class FakeA2AAgent:
             return _rpc_error(request_id, -32001, "task not found")
         task["status"]["state"] = "TASK_STATE_CANCELED"
         return _rpc_result(request_id, {"task": task})
-
-    def _register_push(self, request_id: Any, params: dict[str, Any]) -> dict[str, Any]:
-        if not self.push_notifications:
-            return _rpc_error(request_id, -32003, "push not supported")
-        return _rpc_result(request_id, {"config": dict(params)})
 
     # --- assertions the suites share ---------------------------------------
 
@@ -677,11 +672,21 @@ class FakeA2AClient:
     def cancel_task(self, target: A2ATarget, **kwargs: Any) -> A2AResult:
         return self._answer("CancelTask", target, **kwargs)
 
-    def create_push_config(self, target: A2ATarget, **kwargs: Any) -> A2AResult:
-        return self._answer("CreateTaskPushNotificationConfig", target, **kwargs)
-
     def calls_to(self, method: str) -> list[tuple[str, A2ATarget, dict[str, Any]]]:
         return [call for call in self.calls if call[0] == method]
+
+
+def recover_interrupted_exchanges(observer: AgentObserver) -> int:
+    """Both halves of restart recovery, run synchronously for a test.
+
+    Boot runs the two halves separately (`main.py`); a test that wants the whole
+    thing to have happened by the time it returns calls this instead.
+    """
+
+    pending = observer.mark_interrupted_exchanges()
+    for owner_id, run_id in pending:
+        observer.service.resolve_interrupted_exchange(run_id, owner_id=owner_id)
+    return len(pending)
 
 
 __all__ = [
@@ -705,6 +710,7 @@ __all__ = [
     "helloworld_shaped_agent",
     "hermes_shaped_agent",
     "ready_discovery",
+    "recover_interrupted_exchanges",
     "recording_agent",
     "running",
 ]

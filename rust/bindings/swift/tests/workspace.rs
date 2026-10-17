@@ -845,7 +845,7 @@ fn imported_presentation_carriers_are_individually_readable_and_immutable() {
 
 #[test]
 fn workspace_026_fr_052_review_form_owned_ports_cancel_and_cross_connection_invalidation() {
-    use bb_swift::{BridgeReviewForm, BridgeSourceIdentityRequest};
+    use bb_swift::BridgeReviewForm;
     let (first, options) = open("review-form-owned");
     let second = workspace(&options);
     let watch = second.subscribe().unwrap();
@@ -898,16 +898,6 @@ fn workspace_026_fr_052_review_form_owned_ports_cancel_and_cross_connection_inva
     let owned = loaded.draft.unwrap();
     assert_eq!(owned.text, draft.text);
     assert_eq!(owned.saved_at, draft.saved_at);
-    assert_eq!(
-        second
-            .reverse_identities(vec![BridgeSourceIdentityRequest {
-                entity_type: "project".into(),
-                canonical_id: "project-owned".into()
-            }])
-            .unwrap()[0]
-            .source_id,
-        None
-    );
     first
         .save_review_form(
             "project:project-owned".into(),

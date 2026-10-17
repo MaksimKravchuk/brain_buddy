@@ -62,7 +62,6 @@ def test_version_mutation_does_not_snapshot_a_stale_command_marker(
         update={"last_command_id": "b" * 64}
     )
     tree_service.tree_repo.save(marked)
-    tree_service._cache.clear()
 
     version_service.create_version(tree.id, VersionCreateRequest())
 
@@ -75,7 +74,6 @@ def _mark_for_legacy_write(tree_service, tree_id: str):
     current = tree_service.get_tree(tree_id)
     marked = current.model_copy(update={"last_command_id": "c" * 64})
     tree_service.tree_repo.save(marked)
-    tree_service._cache.clear()
     return marked
 
 
@@ -169,7 +167,6 @@ def test_tree_and_account_exports_project_out_internal_command_markers(
         update={"last_command_id": "d" * 64}
     )
     container.tree_repo.save(marked)
-    container.tree_service._cache.clear()
     marked_version = version.model_copy(update={"tree": marked}, deep=True)
     container.version_repo.save(tree_id, marked_version)
 

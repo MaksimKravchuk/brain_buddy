@@ -34,9 +34,6 @@ class UserRepository(BaseRepository):
         self.index_path = self.users_dir / BY_EMAIL_INDEX_FILENAME
         self.transaction_path = self.users_dir / PROFILE_TRANSACTION_FILENAME
 
-    def _user_path(self, user_id: str) -> Path:
-        return self.users_dir / f"{user_id}.json"
-
     @staticmethod
     def normalize_email(email: str) -> str:
         return email.strip().lower()
