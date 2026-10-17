@@ -58,8 +58,10 @@ caches under each package's `.build`; full logs are retained locally under the p
 | Shared kit `swift test --filter 'BrainBuddyAPI\|BrainBuddyAgents'` | PASS: 197 tests in 22 suites, 0 failures |
 | Separate `BrainBuddyAgents` target | N/A: no such target exists; agents endpoint tests are in `BrainBuddyAPITests` and were included |
 | Opt-in Mac pilot rehearsal | SKIPPED by its existing opt-in condition; not a passing live rehearsal and outside this PR-12 host journey |
-| Snapshot replay on normal host | PASS: final 6 tests / 12 light-dark cases, 10.355 s; full-state limitations are listed below |
+| Snapshot replay on normal host (before explicit profiles) | PASS: final 6 tests / 12 light-dark cases, 10.355 s; full-state limitations are listed below |
 | Full Mac suite with final normal-host baselines (`84913c60` in the isolated worktree) | PASS: 452 Swift Testing tests in 47 suites, plus 8 XCTest tests, 0 failures, 44.395 s |
+| Explicit native-profile replay | PASS: 6 tests / 12 appearance cases, 10.307 s, observed `native2x-24h` |
+| Full Mac suite after response-time/profile correction | PASS: 452 Swift Testing tests in 47 suites, plus 8 XCTest tests, 0 failures, 44.983 s |
 | Spec Kit / whitespace | PASS: `python3 scripts/check_spec_kit_specs.py` and `git diff --check` |
 
 The default SwiftPM `Executed 0 tests`/XCTest summary alone is not the Swift Testing
@@ -73,11 +75,14 @@ The evidence/test PR was rebased onto that main. The manual results above remain
 to the original product/app SHA, not relabelled as a manual pass for the new build.
 The backend sources did not change between those bases. Rebased Mac/package tests are
 separate integration evidence; the new BrainBuddyAgents test target is now applicable.
+The final integration base `1ec82646848581ddcbd9d62f5a121ade13644aeb` adds only iPhone
+screen/spec changes since `8f8adc82`; Mac/package/backend trees are unchanged.
 
 Independent review found a locale-specific `Today 10:21` assertion in the new tests.
 It now derives the expected time using the same Foundation format as the shipped view;
 no locale preference is changed. This fixes the assertion, but does not make the captured
-manager date strings locale-independent. Final CI must verify the baselines on its host.
+manager date strings locale-independent. Hosted baselines now declare the observed native
+backing-scale/hour-cycle profile, as described below.
 
 ## Real app setup
 
@@ -176,7 +181,10 @@ Tested ready. This supersedes the earlier stop-only failure on the older install
 
 ## Snapshot inventory and remaining acceptance
 
-Six parameterized tests record **12 PNGs** (Light and Dark for each test). Recording
+Six parameterized tests exercise **12 appearance cases**. There are **20 PNGs**:
+four shared component images and eight hosted images for each of two observed host
+profiles (`native2x-24h` local and `native1x-12h` CI). These are rendering variants,
+not additional state coverage. Initial local recording
 used `CARRY_ON_SNAPSHOT_RECORD=1 swift test --filter AgentsSnapshotTests` with the same
 sandbox/cache flags; the helper deliberately reports issues while writing new baselines,
 so recording exits nonzero. Replay without that variable passed **6 tests / 12 appearance
@@ -189,14 +197,28 @@ A normal-host full run first failed all 12 new appearance comparisons against ba
 recorded in a restricted process, while the existing tests passed. A normal-host filtered
 run reproduced the same differences, isolating the recording environment rather than
 suite ordering. The same worker binary/cache also reproduced those differences when
-run outside the process sandbox. Restricted rendering produced a different text raster;
-final baselines must therefore be recorded and replayed on the normal macOS graphics
-host. No channel tolerance or pixel-comparison gate was relaxed.
+run outside the process sandbox. Restricted rendering produced a different text raster. Later, CI run
+[39018608066](https://github.com/maxk-lab/brain_buddy/actions/runs/39018608066)
+failed eight hosted comparisons, while the four component comparisons and the other
+440 Swift Testing tests passed. Its emitted images have the same native layout, but
+a 1x native text raster and a 12-hour last-contact date, versus the local Retina/24-hour
+profile. Seven synthetic CI output images were imported as explicit profile baselines.
+The light All runs image retains the earlier actual 1x capture from `f6e49a41`: CI
+had aged its fake from 4 min to 5 min during setup. The old dark capture is pixel-identical
+to CI; the light difference is confined to the elapsed-minute text. The fake now stamps
+responses inside `agentRun(id:)`, after setup awaits, avoiding that observed setup aging.
+This still does not freeze time between response and capture. The eight local images
+were retained unchanged under their profile names. The test
+selects from the actual window backing scale and `Locale.current.hourCycle`, logs those
+values, and fails on a missing profile without trying another baseline. This is not
+universal locale normalization: other regions/date orders can require separate recording.
+No system preference, capture method, channel tolerance or pixel-comparison gate was changed.
+Exact-head CI must verify the new profile selection before it is called passing.
 
 | Required state | Evidence | Acceptance result |
 | --- | --- | --- |
 | G-01.03 sidebar | `mac-agents-sidebar-components-{light,dark}.png` | PARTIAL: shipped row-component composition, with names/counts/Stale. It does not capture the full sidebar/canvas or its Add new agent toolbar button. |
-| G-02.01 All runs | `mac-agents-all-runs-{light,dark}.png` | Real shipped canvas: title, 5 runs, five groups in required order and populated rows. Clipped subtitles and colour issue below prevent claiming full visual acceptance. |
+| G-02.01 All runs | `mac-agents-all-runs-{light,dark}-native{1x-12h,2x-24h}.png` | Real shipped canvas: title, 5 runs, five groups in required order and populated rows. Clipped subtitles and colour issue below prevent claiming full visual acceptance. |
 | G-03.01 Waiting for | `mac-agents-waiting-components-{light,dark}.png` | PARTIAL: shipped component composition with 2 people, 4 agents and Agents before People; not a full WorkspaceView scene. |
 | G-04.02 ready hand-off | No baseline | BLOCKED: initializer constructs live client/system token store and owns private flow state. |
 | G-04.03 password hand-off | No baseline | BLOCKED: same private flow boundary. |
@@ -204,9 +226,9 @@ host. No channel tolerance or pixel-comparison gate was relaxed.
 | G-05.06 completed run | No baseline | BLOCKED: same private section boundary. |
 | G-05.08 Failed run | No baseline | BLOCKED: same private section boundary. |
 | G-05.09 stopped reporting | No baseline | BLOCKED: same private section boundary. |
-| G-06.01 loaded Agents | `mac-agents-settings-ready-{light,dark}.png` | Real manager, all three agent rows and details visible. Wrapping is a product layout FAIL; last-contact wording differs for the fixed-date fixture. |
-| G-06.04 passwordless | `mac-agents-settings-passwordless-{light,dark}.png` | Real read-only manager with the required set-password notice; board approval pending. |
-| G-07.01 empty Add | `mac-agents-add-empty-{light,dark}.png` | Real editor fields, types, helpers and disabled Add and test; board approval pending. |
+| G-06.01 loaded Agents | `mac-agents-settings-ready-{light,dark}-native{1x-12h,2x-24h}.png` | Real manager, all three agent rows and details visible. Wrapping is a product layout FAIL; last-contact wording differs for the fixed-date fixture. |
+| G-06.04 passwordless | `mac-agents-settings-passwordless-{light,dark}-native{1x-12h,2x-24h}.png` | Real read-only manager with the required set-password notice; board approval pending. |
+| G-07.01 empty Add | `mac-agents-add-empty-{light,dark}-native{1x-12h,2x-24h}.png` | Real editor fields, types, helpers and disabled Add and test; board approval pending. |
 
 The missing-state boundary is concrete: `HandoffSheet.swift` creates
 `BrainBuddyAPIClient(... WorkspaceHost.systemTokenStore())` and private `@State HandoffFlow`

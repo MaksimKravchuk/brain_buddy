@@ -78,8 +78,8 @@
 
         /// ImageRenderer omits ScrollView document views and native text fields. Host the real
         /// view offscreen, then use the shared assertion for the resulting unmodified bitmap.
-        /// Record with normal macOS host access: a restricted process sandbox changes
-        /// CoreText rasterization and cannot reproduce the graphics context of the full CI run.
+        /// Native text follows the window's backing scale; Foundation dates use the host's
+        /// hour cycle. Keep explicit observed host profiles, never a best-matching fallback.
         private func assertHostedSnapshot(
             _ view: some View, named name: String, scheme: ColorScheme, width: CGFloat,
             height: CGFloat? = nil, sourceLocation: SourceLocation = #_sourceLocation
@@ -95,6 +95,21 @@
             window.isReleasedWhenClosed = false
             window.contentView = host
             defer { window.close() }
+            let scale = window.backingScaleFactor
+            guard scale == 1 || scale == 2 else {
+                Issue.record("Unsupported native snapshot backing scale: \(scale)", sourceLocation: sourceLocation)
+                return
+            }
+            let clock: String
+            switch Locale.current.hourCycle {
+            case .zeroToEleven, .oneToTwelve: clock = "12h"
+            case .zeroToTwentyThree, .oneToTwentyFour: clock = "24h"
+            @unknown default:
+                Issue.record("Unsupported native snapshot hour cycle", sourceLocation: sourceLocation)
+                return
+            }
+            let profile = "native\(Int(scale))x-\(clock)"
+            print("Agent snapshot \(name): \(profile), locale \(Locale.current.identifier)")
             host.layoutSubtreeIfNeeded()
             guard let bitmap = NSBitmapImageRep(
                 bitmapDataPlanes: nil, pixelsWide: Int(size.width * 2), pixelsHigh: Int(size.height * 2),
@@ -111,7 +126,7 @@
             }
             assertMacSnapshot(
                 Image(decorative: image, scale: CGFloat(image.width) / width).frame(width: width, height: size.height),
-                named: name, scheme: scheme, width: width, sourceLocation: sourceLocation)
+                named: "\(name)-\(profile)", scheme: scheme, width: width, sourceLocation: sourceLocation)
         }
 
         /// The real All runs view has a model seam, but its rows still call Date() directly.
@@ -144,7 +159,6 @@
 
         private struct SnapshotRunsRemote: AgentRunsRemote {
             let labels: [String]
-            private let wallClock = Date()
 
             func agentRunSummaries(taskIDs: [String]) async throws(APIError) -> [String: AgentRunSummaryDTO] {
                 var result: [String: AgentRunSummaryDTO] = [:]
@@ -159,6 +173,8 @@
             func agentRun(id: String) async throws(APIError) -> AgentRunDTO {
                 let index = Int(id.dropFirst(4))!
                 let label = labels[index]
+                // Stamp the fake response after setup awaits, so other UI tests do not age it.
+                let wallClock = Date()
                 let created = wallClock.addingTimeInterval(-240).formatted(.iso8601)
                 let contact = wallClock.addingTimeInterval(index == 4 ? -172_800 : 0).formatted(.iso8601)
                 let json = #"""
