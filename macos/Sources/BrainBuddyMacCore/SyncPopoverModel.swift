@@ -19,37 +19,11 @@ package enum SyncPopoverControl: Hashable, Sendable {
     /// The offline notice's last-failure "Copy".
     case offlineCopy
     case signOut
-    case backupShowInFinder, reportShowInFinder, laterFileShowInFinder
     /// A runtime issue's "Review" (opens the conflict detail) and its reference "Copy" (spec 026, D-01/D-02).
     case openConflict(String)
     case runtimeCopy(String)
     /// D-03's recovery actions.
     case recovery(SyncRecoveryAction)
-}
-
-/// The pre-upgrade files X-02 has a line for (data-model E8, FR-021, FR-033).
-package struct MacUpgradeFiles: Equatable, Sendable {
-    /// The pre-upgrade backup: its file and the date the rule may delete it.
-    package var backup: URL?
-    package var backupKeptUntil: Date?
-    /// Some records could not be carried over, so the backup is kept past its date.
-    package var notCarried: Bool
-    /// The import report (`popoverImportAdjusted`).
-    package var report: URL?
-    /// A previous-version file kept as found (`popoverLaterFile`).
-    package var laterFile: URL?
-
-    package init(
-        backup: URL? = nil, backupKeptUntil: Date? = nil, notCarried: Bool = false, report: URL? = nil, laterFile: URL? = nil
-    ) {
-        self.backup = backup
-        self.backupKeptUntil = backupKeptUntil
-        self.notCarried = notCarried
-        self.report = report
-        self.laterFile = laterFile
-    }
-
-    package static let none = MacUpgradeFiles()
 }
 
 /// One sync issue as X-02 lists it.
@@ -92,9 +66,6 @@ package struct SyncPopoverContent: Equatable, Sendable {
     package var syncNowShown: Bool
     package var syncNowEnabled: Bool
     package var email: String?
-    package var backupLine: String?
-    package var reportLine: String?
-    package var laterFileLine: String?
     /// Typed Rust-runtime issues (D-01 "Open sync issues"), listed after the legacy ones.
     package var runtimeIssues: [SyncPopoverRuntimeIssue] = []
     /// D-03: update needed, rebuilding, interrupted or uncertain migration; nil when nothing to recover.
@@ -132,9 +103,6 @@ package struct SyncPopoverContent: Equatable, Sendable {
         if syncNowShown, syncNowEnabled { order.append(.syncNow) }
         if case .offline(_, let reference)? = notice, reference != nil { order.append(.offlineCopy) }
         if email != nil { order.append(.signOut) }
-        if backupLine != nil { order.append(.backupShowInFinder) }
-        if reportLine != nil { order.append(.reportShowInFinder) }
-        if laterFileLine != nil { order.append(.laterFileShowInFinder) }
         return order
     }
 
@@ -180,14 +148,14 @@ package enum SyncPopoverModel {
     package static let titleLimit = 60
 
     package static func content(
-        snapshot: SyncSnapshot, issues: [SyncIssue], state: GTDState, files: MacUpgradeFiles,
+        snapshot: SyncSnapshot, issues: [SyncIssue], state: GTDState,
         discarded: Set<SyncIssue.ID> = [], runtimeIssues: [SyncRuntimeIssue] = [],
         recovery: SyncRecoveryCondition? = nil, now: Date, device: DeviceKind = .mac, calendar: Calendar = .current
     ) -> SyncPopoverContent {
         let line = SyncStatusDescriber.describe(snapshot, now: now, device: device, calendar: calendar)
         var content = SyncPopoverContent(
             notice: nil, lastSynced: nil, queue: nil, issuesHeading: nil, issues: [], syncNowShown: false,
-            syncNowEnabled: false, email: nil, backupLine: nil, reportLine: nil, laterFileLine: nil
+            syncNowEnabled: false, email: nil
         )
         switch snapshot.account {
         case .none:
@@ -218,11 +186,6 @@ package enum SyncPopoverModel {
             if open > 0 { content.issuesHeading = "\(SyncCopy.changes(open)) couldn't sync" }
         }
         content.recovery = recovery.map { SyncRecoveryContent($0, pendingCount: snapshot.pendingCount) }
-        if files.backup != nil, let until = files.backupKeptUntil {
-            content.backupLine = SyncCopy.popoverBackup(until: until, notCarried: files.notCarried, now: now, calendar: calendar)
-        }
-        if files.report != nil { content.reportLine = SyncCopy.popoverImportAdjusted }
-        if files.laterFile != nil { content.laterFileLine = SyncCopy.popoverLaterFile }
         return content
     }
 
@@ -292,24 +255,6 @@ package enum SyncPopoverModel {
     private static func nonEmpty(_ text: String?) -> String? {
         guard let text, !text.isEmpty else { return nil }
         return text
-    }
-}
-
-extension LegacyImportCoordinator {
-    /// The files X-02 has a quiet line for, as they are on disk now.
-    package func upgradeFiles() -> MacUpgradeFiles {
-        var files = MacUpgradeFiles()
-        let record = localState.load()?.legacyImport
-        if let backup = backup() {
-            files.backup = backup.file
-            files.backupKeptUntil = backup.keptUntil
-            files.notCarried = (record?.report?.notCarriedCount ?? 0) > 0
-        }
-        if let record, record.backupDeletedAt == nil, let name = record.report?.fileName, MacFiles.exists(folder.file(name)) {
-            files.report = folder.file(name)
-        }
-        if record?.laterFile != nil, MacFiles.exists(folder.legacy) { files.laterFile = folder.legacy }
-        return files
     }
 }
 

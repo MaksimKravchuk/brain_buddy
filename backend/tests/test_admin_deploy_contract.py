@@ -86,7 +86,6 @@ ROLLBACK_TARGET_IMAGE = (
 ROLLBACK_KNOWN_FEATURE_FLAGS = frozenset(
     {
         "delivery_canary",
-        "mobile_task_classification",
         "voice_brain_dump",
         "external_agent_relay",
     }
@@ -96,7 +95,7 @@ ROLLBACK_KNOWN_FEATURE_FLAGS = frozenset(
 #: dropped name, an added name or a downgraded state all fail here.
 #:
 #: ADR-0019 (2026-08-15): `admin_portal` is deleted outright and
-#: `voice_brain_dump`/`mobile_task_classification`/`external_agent_relay` are
+#: `voice_brain_dump`/`external_agent_relay` are
 #: now managed live through the admin portal's SQLite store, so none of them
 #: is staged any more — `delivery_canary` is the only entry left (DD-14, DD-15).
 AUTHORIZED_STAGED_FEATURE_FLAGS = "delivery_canary=internal"

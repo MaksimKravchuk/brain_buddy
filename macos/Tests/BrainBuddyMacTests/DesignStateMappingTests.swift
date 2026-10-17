@@ -29,7 +29,7 @@ struct DesignStateMappingTests {
         _ snapshot: SyncSnapshot, issues: [SyncRuntimeIssue] = [], recovery: SyncRecoveryCondition? = nil
     ) -> SyncPopoverContent {
         SyncPopoverModel.content(
-            snapshot: snapshot, issues: [], state: .empty, files: .none, runtimeIssues: issues, recovery: recovery,
+            snapshot: snapshot, issues: [], state: .empty, runtimeIssues: issues, recovery: recovery,
             now: now)
     }
 

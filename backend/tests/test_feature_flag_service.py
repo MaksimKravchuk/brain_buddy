@@ -267,10 +267,7 @@ def test_010_FR_003_effective_flags_never_blend_sqlite_with_the_environment(
     config = _config(
         monkeypatch,
         tmp_path,
-        flags=(
-            "voice_brain_dump=on,mobile_task_classification=on,"
-            "external_agent_relay=on"
-        ),
+        flags=("voice_brain_dump=on,weekly_review=on," "external_agent_relay=on"),
     )
     service = _service(config, tmp_path, relay_capability_available=True)
     user = _user("user_env_only", OUTSIDER_EMAIL)
@@ -606,7 +603,7 @@ def test_010_FR_006_describe_emits_exactly_one_aggregate_record(
     assert len(records) == 1
     message = records[0].getMessage()
     assert "operator=user_op" in message
-    assert "flags=8" in message
+    assert "flags=7" in message
     assert "resolved_accounts=1" in message
     assert "chosen@example.com" not in message
 

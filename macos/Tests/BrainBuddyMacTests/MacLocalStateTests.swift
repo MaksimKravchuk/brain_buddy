@@ -103,7 +103,8 @@ struct MacLocalStateTests {
     }
 
     @Test("021-FR-023 marks older than 30 days go at launch; after a full pull, marks of records that no longer exist go")
-    func pruning() throws {
+    @MainActor
+    func pruning() async throws {
         let folder = TemporaryFolder()
         let state = sampleState()
         let task = try #require(state.tasks["w1"])
@@ -113,8 +114,15 @@ struct MacLocalStateTests {
             local.somedayReviews["c:gone"] = TaskReviewMark(reviewedAt: now, stamp: "x")
             local.projectReviews["s:project_gone"] = ProjectReviewMark(reviewedAt: now, decision: .keep, taskSignature: "y")
         }
-        // A launch prunes the old mark (the import step runs first at every launch).
-        _ = try LegacyImportCoordinator.forTest(folder).run()
+        // A launch prunes the old mark.
+        let launch = MacLaunch(
+            environment: MacLaunchEnvironment(
+                configuration: MacHostConfiguration(directory: folder.url, isDryRun: false), tokenStore: SpyTokenStore(),
+                transport: CountingTransport(), now: TestClock().provider, log: CapturingMacLog()
+            )
+        )
+        await launch.run()
+        #expect(launch.host != nil)
         let afterLaunch = try #require(store.load())
         #expect(afterLaunch.waitingReviews.isEmpty)
         #expect(afterLaunch.somedayReviews.count == 1 && afterLaunch.projectReviews.count == 1)
@@ -156,9 +164,9 @@ struct MacLocalStateTests {
     func unreadableSidecarIsSetAside() throws {
         let folder = TemporaryFolder()
         try Data("not json".utf8).write(to: folder.sidecar)
-        try MacLocalStateStore(directory: folder.url).update { $0.legacyCleanupDoneAt = now }
+        try MacLocalStateStore(directory: folder.url).update { $0.workspaceFirstWrittenAt = now }
         #expect(folder.names.contains { $0.hasPrefix("mac-local.unreadable-") })
-        #expect(MacLocalStateStore(directory: folder.url).load()?.legacyCleanupDoneAt == now)
+        #expect(MacLocalStateStore(directory: folder.url).load()?.workspaceFirstWrittenAt == now)
     }
 
     @Test("029-FR-001 029-FR-015 a file from before the first run reads with no record, and a record round-trips with dates and an outcome only")

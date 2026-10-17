@@ -1,0 +1,9 @@
+{
+  "approved_by": "Max (current chat)",
+  "approved_on": "2026-10-17",
+  "run_id": "036-parallel-20261017-r2",
+  "artifacts_digest": "db225201f968b2483c58d3c6d6ef57939455ddaa19721f90eefa4719b330ac07",
+  "rationale": "Max explicitly accepted the fresh one-task ordinary merge-queue exception after disclosure that the live queue lacks a final-merge-SHA independent-review hold and normative restrict_updates. Frozen PR-head independent review may precede full required queue CI and final tested/landed SHA verification. This waives only the bounded ADR-0008 ASK intervention and final-SHA review mechanics; all technical findings are corrected, full checks and protections remain unchanged, and global governance is not amended.",
+  "status": "founder-accepted",
+  "reviewed_campaign_digest": "3103d4009d8d6f5da0aedc398c49c15e014eaab94ab19fcb449f039012705bfa"
+}

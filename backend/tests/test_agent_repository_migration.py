@@ -238,6 +238,16 @@ def ledger_names(db_path: Path) -> set[str]:
     return {str(row[0]) for row in rows}
 
 
+def rewrite_count(repo: AgentRepository, name: str) -> int | None:
+    """Rows a ledgered migration rewrote, or ``None`` if it never ran."""
+    with closing(sqlite3.connect(repo.db_path)) as conn:
+        row = conn.execute(
+            "SELECT rewritten_rows FROM agent_schema_migrations WHERE name = ?",
+            (name,),
+        ).fetchone()
+    return None if row is None else row[0]
+
+
 def run_columns(db_path: Path) -> set[str]:
     with closing(sqlite3.connect(db_path)) as conn:
         return {row[1] for row in conn.execute("PRAGMA table_info(agent_runs)")}
@@ -309,9 +319,8 @@ def build_service(repo: AgentRepository) -> AgentRelayService:
 class InterruptedMigrationRepository(AgentRepository):
     """A startup that dies after superseding its first connection.
 
-    The seam is `_migration_boundary`, the failure-injection hook the 007
-    quarantine migration already uses, so both migrations are proven atomic the
-    same way rather than one of them being trusted.
+    The seam is `_migration_boundary`, the failure-injection hook for the
+    atomicity proof.
     """
 
     def _migration_boundary(self, stage: str) -> None:
@@ -429,7 +438,7 @@ class TestBespokeConnectionsAreSuperseded:
 
         repo = AgentRepository(tmp_path)
 
-        assert repo.migration_rewrite_count(A2A_WIRE_MIGRATION) == 2
+        assert rewrite_count(repo, A2A_WIRE_MIGRATION) == 2
 
     def test_014_SC_010_a_database_with_no_bespoke_rows_records_a_zero(
         self, tmp_path: Path
@@ -443,8 +452,8 @@ class TestBespokeConnectionsAreSuperseded:
 
         repo = AgentRepository(tmp_path)
 
-        assert repo.migration_rewrite_count(A2A_WIRE_MIGRATION) == 0
-        assert repo.migration_rewrite_count("never_ran") is None
+        assert rewrite_count(repo, A2A_WIRE_MIGRATION) == 0
+        assert rewrite_count(repo, "never_ran") is None
 
     def test_014_SC_010_each_rewritten_connection_gets_one_wire_superseded_row(
         self, tmp_path: Path
@@ -502,7 +511,7 @@ class TestBespokeConnectionsAreSuperseded:
 
         assert stored_connection(db_path) == after_first
         assert audit_actions(db_path).count("wire_superseded") == 1
-        assert repo.migration_rewrite_count(A2A_WIRE_MIGRATION) == 1
+        assert rewrite_count(repo, A2A_WIRE_MIGRATION) == 1
 
     def test_014_FR_012_wire_less_rows_are_rewritten_on_every_startup(
         self, tmp_path: Path
@@ -513,8 +522,7 @@ class TestBespokeConnectionsAreSuperseded:
         two 014 startups, and the ledger row is already there by then. If the
         rewrite lived only under the ledger, that row would sit unreadable by
         the 014 `AgentConnectionDocument` until somebody noticed — so it runs
-        every time, exactly as `_migrate_legacy_invalid_connections` already
-        does.
+        every time.
         """
 
         db_path = pre_014_database(tmp_path)
@@ -529,7 +537,7 @@ class TestBespokeConnectionsAreSuperseded:
         # Outside the ledger means outside the count: the ledger row records
         # what the *first* pass found, and rewriting it later would destroy the
         # pre-deploy evidence it exists to hold.
-        assert repo.migration_rewrite_count(A2A_WIRE_MIGRATION) == 0
+        assert rewrite_count(repo, A2A_WIRE_MIGRATION) == 0
         # It is still readable through the model, which is the whole point.
         assert repo.get_connection("agentconn_late", owner_id=OWNER).wire == "a2a"
 
@@ -726,7 +734,7 @@ class TestTheMigrationIsAtomicAndRepeatable:
 
         # The next healthy startup finishes the job it left.
         repo = AgentRepository(tmp_path)
-        assert repo.migration_rewrite_count(A2A_WIRE_MIGRATION) == 2
+        assert rewrite_count(repo, A2A_WIRE_MIGRATION) == 2
 
     def test_014_SC_010_an_interrupted_later_pass_changes_nothing(
         self, tmp_path: Path
@@ -765,19 +773,15 @@ class TestTheMigrationIsAtomicAndRepeatable:
 
         repo = AgentRepository(tmp_path)
 
-        assert repo.migration_rewrite_count(A2A_WIRE_MIGRATION) == 1
+        assert rewrite_count(repo, A2A_WIRE_MIGRATION) == 1
         assert stored_connection(db_path)["status"] == "disconnected"
         assert run_columns(db_path) >= set(A2A_RUN_COLUMNS)
 
-    def test_014_SC_010_an_unreadable_connection_row_is_left_to_quarantine(
+    def test_014_SC_010_an_unreadable_connection_row_is_left_untouched(
         self, tmp_path: Path
     ) -> None:
-        """Two migrations, one row, and only one of them may claim it.
-
-        Superseding an unparseable row would destroy a credential *and* hand it
-        to the quarantine migration in the same startup, and afterwards nobody
-        could tell which of the two had actually happened to it. So this pass
-        skips it and the quarantine record is the single explanation.
+        """Superseding an unparseable row would destroy a credential nobody can
+        read back, so the pass skips it and leaves its bytes exactly as found.
         """
 
         db_path = pre_014_database(tmp_path)
@@ -786,13 +790,13 @@ class TestTheMigrationIsAtomicAndRepeatable:
 
         repo = AgentRepository(tmp_path)
 
-        assert repo.migration_rewrite_count(A2A_WIRE_MIGRATION) == 1
+        assert rewrite_count(repo, A2A_WIRE_MIGRATION) == 1
         assert stored_connection(db_path)["status"] == "disconnected"
-        quarantined = repo.get_connection("corrupt", owner_id=OWNER)
-        assert (
-            quarantined.last_test_error_code
-            == "legacy_invalid_connection_requires_reconfiguration"
-        )
+        with closing(sqlite3.connect(db_path)) as conn:
+            raw = conn.execute(
+                "SELECT payload FROM agent_connections WHERE id = ?", ("corrupt",)
+            ).fetchone()[0]
+        assert raw == "{not json"
         assert audit_actions(db_path).count("wire_superseded") == 1
 
 

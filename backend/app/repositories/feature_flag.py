@@ -14,19 +14,14 @@ Three properties this module exists to hold:
   a row whose `mode` is outside its vocabulary. Every flag resolves to
   ineffective while degraded, every mutation is refused, and the transition
   into that state emits exactly one coarse WARNING.
-* **Migration is one-time, transactional, and restart-idempotent** (DD-15).
+* **Seeding is one-time, transactional, and restart-idempotent** (DD-15).
   A `migration_ledger` row, committed in the same transaction as the seeded
-  flag rows, guards every construction after the first — mirroring
-  `TaskRepository._migrate_legacy_json_once`. Per flag, the pre-correction
-  JSON overlay's entry wins when it is present, well-formed, and for a flag
-  the overlay ever wrote (`voice_brain_dump`/`mobile_task_classification`
-  only); otherwise the deploy-staged environment baseline supplies it,
-  resolving `internal` to `selected_users` by resolving each configured
-  internal-user email to its current account id and skipping one that does
-  not resolve. `external_agent_relay` always comes from the environment
-  baseline, never the legacy JSON. A failure before the migration transaction
-  commits leaves neither a ledger row nor partial flag rows, and never
-  mutates the legacy JSON file or the environment.
+  flag rows, guards every construction after the first. Per flag, the
+  deploy-staged environment baseline supplies the first value, resolving
+  `internal` to `selected_users` by resolving each configured internal-user
+  email to its current account id and skipping one that does not resolve. A
+  failure before the transaction commits leaves neither a ledger row nor
+  partial flag rows, and never mutates the environment.
 * **Erasure reaches every managed flag's cohort** (DD-9, DD-13).
   :meth:`scrub_user` removes a purged account ID from each managed flag's
   `selected_users` set and raises rather than pretending to have scrubbed a
@@ -45,9 +40,13 @@ from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import ClassVar
 
-from app.core.config import FeatureFlagState, ManagedFlagMigrationSeed
+from app.core.config import (
+    RETIRED_FEATURE_FLAGS,
+    FeatureFlagState,
+    ManagedFlagMigrationSeed,
+)
 from app.core.logging import get_correlation_id
 from app.exceptions import RepositoryError, StorageUnavailableError
 from app.utils.file_ops import atomic_write
@@ -58,23 +57,25 @@ from .base import BaseRepository
 logger = logging.getLogger(__name__)
 
 DB_FILENAME = "feature_flags.sqlite3"
-_LEGACY_DOCUMENT_PARTS: tuple[str, ...] = ("feature-flags", "runtime.json")
+_ORPHANED_JSON_PARTS: tuple[str, ...] = ("feature-flags", "runtime.json")
+"""The pre-ADR-0019 JSON overlay. No code reads or writes it any more; boot
+deletes a leftover copy because it can still name account IDs (GDPR)."""
 _MIGRATION_LEDGER_ID = "adr-0019-sqlite-v1"
 
 MIGRATION_COMPLETE_MARKER_PARTS: tuple[str, ...] = (
     "feature-flags",
     "sqlite-migration-complete.json",
 )
-"""Where the durable migration-complete marker lives, beside the legacy
-document and **outside** `feature_flags.sqlite3`.
+"""Where the durable migration-complete marker lives, **outside**
+`feature_flags.sqlite3`.
 
 The migration ledger is a row inside the database file, so deleting or
 recreating that file used to be indistinguishable from a first start:
-migration re-ran and the legacy JSON overlay re-seeded cohorts that GDPR
-erasure had already scrubbed. This marker is the durable answer to "has the
-one-time migration already happened on this volume?", and once it exists the
-legacy document and the deploy-staged environment are never read again — a
-database missing its rows initializes fail-closed OFF instead (DD-9, DD-15).
+migration re-ran and re-seeded cohorts that GDPR erasure had already
+scrubbed. This marker is the durable answer to "has the one-time migration
+already happened on this volume?", and once it exists the deploy-staged
+environment is never read again — a database missing its rows initializes
+fail-closed OFF instead (DD-9, DD-15).
 
 It carries no account ID, no email and no environment value: only the
 migration id and when it completed (010-SC-007).
@@ -82,7 +83,6 @@ migration id and when it completed (010-SC-007).
 
 MANAGED_FLAGS: tuple[str, ...] = (
     "voice_brain_dump",
-    "mobile_task_classification",
     "external_agent_relay",
     "task_title_autocomplete",
     "crt_canvas",
@@ -98,8 +98,14 @@ OPTIONAL_MANAGED_FLAGS: tuple[str, ...] = ("cli_auth",)
 """
 
 _ADR_0019_MANAGED_FLAGS: frozenset[str] = frozenset(
-    {"voice_brain_dump", "mobile_task_classification", "external_agent_relay"}
+    {"voice_brain_dump", "external_agent_relay"}
 )
+"""The ADR-0019 rows an older store must still hold to be upgraded.
+
+`mobile_task_classification` was the third until it was retired; a store that
+still carries its row is recognized by ignoring `RETIRED_FEATURE_FLAGS` rather
+than by requiring the name, so an old store and a post-retirement store both
+upgrade."""
 
 _POST_ADR_0019_DEFAULT_OFF_FLAGS: tuple[str, ...] = (
     "task_title_autocomplete",
@@ -108,13 +114,6 @@ _POST_ADR_0019_DEFAULT_OFF_FLAGS: tuple[str, ...] = (
     "weekly_review",
     "rust_core_sync",
 )
-
-_LEGACY_JSON_MANAGED_FLAGS: frozenset[str] = frozenset(
-    {"voice_brain_dump", "mobile_task_classification"}
-)
-"""Flags the pre-correction JSON overlay ever wrote. `external_agent_relay`
-did not exist as a managed flag before ADR-0019, so a same-named key in a
-legacy document must never be read by migration (DD-15)."""
 
 _MODE_FIELD = "mode"
 _SELECTED_USERS_FIELD = "selected_users"
@@ -221,34 +220,6 @@ class RuntimeOverlay:
 MutationFn = Callable[[dict[str, FlagOverride]], Mapping[str, FlagOverride]]
 
 
-def _parse_legacy_entry(payload: Any) -> FlagOverride | None:
-    """Parse one legacy JSON entry, returning `None` on anything malformed.
-
-    DD-15 requires the legacy entry to be well-formed, not merely present,
-    before it beats the environment baseline. A single cohort member outside
-    the account-ID grammar — an email, most sensitively — invalidates the
-    *whole* entry rather than being dropped in isolation: partially trusting
-    a malformed legacy record is itself a privacy risk (010-SC-007). Valid
-    duplicates canonicalize to one ID each, in sorted order.
-    """
-
-    if not isinstance(payload, dict):
-        return None
-    raw_mode = payload.get(_MODE_FIELD)
-    if not isinstance(raw_mode, str):
-        return None
-    try:
-        mode = FlagMode(raw_mode)
-    except ValueError:
-        return None
-    raw_cohort = payload.get(_SELECTED_USERS_FIELD, [])
-    if not isinstance(raw_cohort, list) or not all(
-        isinstance(item, str) and _is_valid_account_id(item) for item in raw_cohort
-    ):
-        return None
-    return FlagOverride(mode=mode, selected_users=tuple(sorted(set(raw_cohort))))
-
-
 class FeatureFlagOverrideRepository(BaseRepository):
     """SQLite-backed store for the three managed flags (ADR-0019, DD-15)."""
 
@@ -266,7 +237,7 @@ class FeatureFlagOverrideRepository(BaseRepository):
         super().__init__(root)
         self.db_path = self.resolve(DB_FILENAME)
         self.migration_marker_path = self.resolve(*MIGRATION_COMPLETE_MARKER_PARTS)
-        self._legacy_document_path = self.resolve(*_LEGACY_DOCUMENT_PARTS)
+        self._orphaned_json_path = self.resolve(*_ORPHANED_JSON_PARTS)
         # A callback, not a value: the deploy-staged baseline is parsed only
         # inside the first-migration transaction, after the ledger and marker
         # checks have both come back empty (DD-15). `legacy_states` /
@@ -305,9 +276,29 @@ class FeatureFlagOverrideRepository(BaseRepository):
     # ------------------------------------------------------------------
 
     def _prepare(self) -> None:
+        self._remove_orphaned_json()
         self._initialize_database()
         self._migrate_once()
         self._ready = True
+
+    def _remove_orphaned_json(self) -> None:
+        """Delete a leftover pre-ADR-0019 `runtime.json`; it is never read.
+
+        Older images kept it on the volume and account erasure used to scrub
+        it. Nothing reads it now, so the scrub is gone and the file goes with
+        it rather than lingering with account IDs that a purge cannot reach.
+        Best effort: a file that cannot be removed is retried on the next
+        preparation and must not degrade the store.
+        """
+
+        try:
+            self._orphaned_json_path.unlink(missing_ok=True)
+        except OSError:
+            logger.warning(
+                "Could not remove the orphaned runtime feature-flag JSON "
+                "(correlation=%s)",
+                get_correlation_id(),
+            )
 
     def _ensure_ready(self) -> bool:
         """Whether the store is initialized, retrying a failed preparation.
@@ -419,12 +410,11 @@ class FeatureFlagOverrideRepository(BaseRepository):
                 self._upsert_row(conn, flag, FlagOverride(mode=FlagMode.OFF))
             return
         seed = self._load_seed()
-        legacy_document = self._read_legacy_document()
         for flag in MANAGED_FLAGS:
             entry = (
                 FlagOverride(mode=FlagMode.OFF)
                 if flag in _POST_ADR_0019_DEFAULT_OFF_FLAGS
-                else self._seed_entry(flag, legacy_document, seed)
+                else self._environment_baseline_entry(flag, seed)
             )
             self._upsert_row(conn, flag, entry)
 
@@ -439,6 +429,7 @@ class FeatureFlagOverrideRepository(BaseRepository):
         rows = conn.execute(
             "SELECT flag, mode, selected_users FROM feature_flags"
         ).fetchall()
+        rows = [row for row in rows if row["flag"] not in RETIRED_FEATURE_FLAGS]
         present = frozenset(row["flag"] for row in rows)
         if (
             not _ADR_0019_MANAGED_FLAGS
@@ -492,33 +483,6 @@ class FeatureFlagOverrideRepository(BaseRepository):
             + "\n",
         )
 
-    def _read_legacy_document(self) -> dict[str, Any]:
-        """Best-effort, one-time-only read of the pre-correction JSON overlay.
-
-        Never deletes, renames or mutates the file. A missing or unparseable
-        document simply supplies no legacy entries; every flag falls back to
-        the environment baseline (DD-15).
-        """
-
-        try:
-            text = self._legacy_document_path.read_text(encoding="utf-8")
-            payload = json.loads(text)
-        except OSError, ValueError:
-            return {}
-        return payload if isinstance(payload, dict) else {}
-
-    def _seed_entry(
-        self,
-        flag: str,
-        legacy_document: dict[str, Any],
-        seed: ManagedFlagMigrationSeed,
-    ) -> FlagOverride:
-        if flag in _LEGACY_JSON_MANAGED_FLAGS:
-            parsed = _parse_legacy_entry(legacy_document.get(flag))
-            if parsed is not None:
-                return parsed
-        return self._environment_baseline_entry(flag, seed)
-
     def _environment_baseline_entry(
         self, flag: str, seed: ManagedFlagMigrationSeed
     ) -> FlagOverride:
@@ -535,6 +499,38 @@ class FeatureFlagOverrideRepository(BaseRepository):
         return FlagOverride(
             mode=FlagMode.SELECTED_USERS, selected_users=tuple(sorted(resolved))
         )
+
+    @staticmethod
+    def _scrub_retired_rows(conn: sqlite3.Connection, account_id: str) -> None:
+        """Erase an account from the cohort of any leftover retired-flag row.
+
+        A retired row is ignored by `_load`, but it may still name account IDs,
+        so GDPR erasure must reach it. An unparseable cohort is cleared: the
+        flag no longer exists, so there is nothing to preserve.
+        """
+
+        for retired in sorted(RETIRED_FEATURE_FLAGS):
+            row = conn.execute(
+                "SELECT selected_users FROM feature_flags WHERE flag = ?",
+                (retired,),
+            ).fetchone()
+            if row is None:
+                continue
+            try:
+                cohort = json.loads(row["selected_users"])
+            except TypeError, ValueError:
+                cohort = None
+            if isinstance(cohort, list) and account_id not in cohort:
+                continue
+            kept = (
+                [member for member in cohort if member != account_id]
+                if isinstance(cohort, list)
+                else []
+            )
+            conn.execute(
+                "UPDATE feature_flags SET selected_users = ? WHERE flag = ?",
+                (json.dumps(kept), retired),
+            )
 
     @staticmethod
     def _upsert_row(conn: sqlite3.Connection, flag: str, entry: FlagOverride) -> None:
@@ -577,7 +573,12 @@ class FeatureFlagOverrideRepository(BaseRepository):
         rows = conn.execute(
             "SELECT flag, mode, selected_users FROM feature_flags"
         ).fetchall()
-        present = {row["flag"]: row for row in rows}
+        # A retired flag's leftover row is ignored, never an error: it is not
+        # loaded, not resolved and not written back (`scrub_user` still erases
+        # an account from its cohort).
+        present = {
+            row["flag"]: row for row in rows if row["flag"] not in RETIRED_FEATURE_FLAGS
+        }
         if not set(MANAGED_FLAGS).issubset(present) or not set(present).issubset(
             set(MANAGED_FLAGS + OPTIONAL_MANAGED_FLAGS)
         ):
@@ -690,12 +691,8 @@ class FeatureFlagOverrideRepository(BaseRepository):
         `AccountService.purge_account` halts before deleting the account
         record and the maintenance sweep retries.
 
-        Erasure reaches the retained legacy JSON artifact too. That file is no
-        longer a migration or runtime source once the marker exists, but it is
-        kept on the volume so an old image can still be rolled back onto it —
-        and a rollback artifact that still names a purged account is a privacy
-        leak, not a compatibility feature. The returned count stays the number
-        of *managed flags* whose SQLite cohort changed.
+        The returned count is the number of *managed flags* whose SQLite
+        cohort changed.
         """
 
         if not self._ensure_ready():
@@ -730,6 +727,7 @@ class FeatureFlagOverrideRepository(BaseRepository):
                                 ),
                             )
                             self._upsert_row(conn, flag, trimmed)
+                        self._scrub_retired_rows(conn, account_id)
                         conn.commit()
                     except BaseException:
                         conn.rollback()
@@ -741,83 +739,8 @@ class FeatureFlagOverrideRepository(BaseRepository):
                     ) from exc
             finally:
                 conn.close()
-            try:
-                self._scrub_legacy_document(account_id)
-            except OSError as exc:
-                # Fail closed like every other erasure step: the caller must
-                # not go on to delete the account while a retained artifact
-                # may still name it (DD-13).
-                raise StorageUnavailableError(
-                    "The legacy runtime feature-flag artifact could not be "
-                    "scrubbed; retry the purge."
-                ) from exc
         self._note_healthy()
         return removed
-
-    def _scrub_legacy_document(self, account_id: str) -> None:
-        """Remove one purged account ID from the retained legacy artifact.
-
-        Serialized by the caller's `_process_lock` and committed with the same
-        atomic temp-file replace every other document write on this volume
-        uses, so a reader never observes a half-rewritten file.
-
-        A legacy document that cannot be parsed cannot be surgically rewritten
-        — and it is no longer authoritative for anything, so there is nothing
-        to preserve in it. If such a document still names the purged account
-        it is removed outright rather than left on the volume; if it does not,
-        it is left untouched.
-        """
-
-        try:
-            text = self._legacy_document_path.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            return
-        try:
-            payload = json.loads(text)
-        except ValueError:
-            payload = None
-        if not isinstance(payload, dict):
-            self._discard_leaking_legacy_document(text, account_id)
-            return
-
-        scrubbed = {
-            flag: _without_cohort_member(entry, account_id)
-            for flag, entry in payload.items()
-        }
-        if scrubbed == payload:
-            return
-        rewritten = json.dumps(scrubbed, indent=2) + "\n"
-        # Belt and braces: a purged ID parked somewhere the structured scrub
-        # above does not reach must still not survive on the volume.
-        if self._discard_leaking_legacy_document(rewritten, account_id):
-            return
-        atomic_write(self._legacy_document_path, rewritten)
-
-    def _discard_leaking_legacy_document(self, text: str, account_id: str) -> bool:
-        if account_id not in text:
-            return False
-        logger.warning(
-            "Discarding the legacy runtime feature-flag artifact: it still "
-            "names a purged account and cannot be scrubbed in place "
-            "(correlation=%s)",
-            get_correlation_id(),
-        )
-        self._legacy_document_path.unlink(missing_ok=True)
-        return True
-
-
-def _without_cohort_member(entry: Any, account_id: str) -> Any:
-    """One legacy entry with `account_id` dropped from its cohort, if any."""
-
-    if not isinstance(entry, dict):
-        return entry
-    cohort = entry.get(_SELECTED_USERS_FIELD)
-    if not isinstance(cohort, list):
-        return entry
-    return {
-        **entry,
-        _SELECTED_USERS_FIELD: [member for member in cohort if member != account_id],
-    }
 
 
 __all__ = [

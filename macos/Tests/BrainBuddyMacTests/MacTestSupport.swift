@@ -25,45 +25,10 @@ final class TemporaryFolder {
     deinit { try? FileManager.default.removeItem(at: root) }
 
     func file(_ name: String) -> URL { url.appendingPathComponent(name) }
-    var legacy: URL { file(LegacyFileNames.legacy) }
-    var store: URL { file(LegacyFileNames.store) }
+    var store: URL { file(MacFileNames.store) }
     var sidecar: URL { file(MacLocalStateStore.fileName) }
     var names: [String] { MacFiles.names(in: url) }
     func bytes(_ name: String) -> Data? { try? Data(contentsOf: file(name)) }
-}
-
-/// The synthetic fixtures (design example data only; constitution I).
-enum Fixture {
-    static func data(_ name: String) throws -> Data {
-        guard let url = Bundle.module.url(forResource: name, withExtension: "json", subdirectory: "Resources") else {
-            throw CocoaError(.fileNoSuchFile)
-        }
-        return try Data(contentsOf: url)
-    }
-
-    static func snapshot(_ name: String) throws -> LegacySnapshot { try LegacySnapshot.read(data(name)) }
-
-    /// Puts a fixture where the previous version kept its store.
-    @discardableResult
-    static func install(_ name: String, in folder: TemporaryFolder) throws -> Data {
-        let data = try data(name)
-        try data.write(to: folder.legacy)
-        return data
-    }
-}
-
-/// The repository checkout, for the golden artifact the kit's tests read.
-enum Repository {
-    static func root(file: String = #filePath) -> URL {
-        if let root = ProcessInfo.processInfo.environment["BRAINBUDDY_REPO_ROOT"] { return URL(fileURLWithPath: root) }
-        // macos/Tests/BrainBuddyMacTests/<file>.swift
-        return URL(fileURLWithPath: file).deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-    }
-
-    static var goldenImport: URL {
-        root().appendingPathComponent("ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/Resources/legacy-import-golden.json")
-    }
 }
 
 /// Deterministic ids: 00000000-0000-0000-<namespace>-<n>.
@@ -399,69 +364,4 @@ final class SpyTokenStore: SessionTokenStore {
         record("removePendingLogout")
         state.withLock { $0.pending.removeAll { $0.id == logout.id } }
     }
-}
-
-/// The pre-021 app's cookie storage, in memory.
-final class FakeCookieJar: LegacyCookieJar {
-    private(set) var cookies: [HTTPCookie]
-
-    init(_ cookies: [HTTPCookie] = []) { self.cookies = cookies }
-
-    var allCookies: [HTTPCookie] { cookies }
-    func delete(_ cookie: HTTPCookie) { cookies.removeAll { $0 === cookie || ($0.name == cookie.name && $0.domain == cookie.domain) } }
-
-    static func session(_ value: String, domain: String, secure: Bool = true, name: String = "brainbuddy_session") -> HTTPCookie {
-        var properties: [HTTPCookiePropertyKey: Any] = [.name: name, .value: value, .domain: domain, .path: "/"]
-        if secure { properties[.secure] = "TRUE" }
-        return HTTPCookie(properties: properties)!
-    }
-}
-
-final class FakeResponseCache: LegacyResponseCache {
-    private(set) var cleared = 0
-    var entries = 1
-
-    func removeAllCachedResponses() {
-        cleared += 1
-        entries = 0
-    }
-}
-
-/// A legacy lock that a test holds and releases: the import must wait for it.
-final class GateLegacyLocking: LegacyStoreLocking {
-    private let gate = Mutex(false)
-    private let acquiredFlag = Mutex(false)
-
-    func open() { gate.withLock { $0 = true } }
-    var acquired: Bool { acquiredFlag.withLock { $0 } }
-
-    func acquire(_ lockURL: URL) throws -> any LegacyStoreLockHold {
-        while !gate.withLock({ $0 }) { usleep(1_000) }
-        acquiredFlag.withLock { $0 = true }
-        return Hold()
-    }
-
-    private struct Hold: LegacyStoreLockHold {
-        func release() {}
-    }
-}
-
-extension LegacyImportCoordinator {
-    /// A coordinator for a test folder with the fixed clock and seeded ids.
-    static func forTest(
-        _ folder: TemporaryFolder, clock: TestClock = TestClock(), ids: SequentialIDs = SequentialIDs(),
-        log: any MacLogSink = CapturingMacLog(), hooks: LegacyImportTestHooks = LegacyImportTestHooks(),
-        locking: any LegacyStoreLocking = LockfLegacyStoreLocking(), importerVersion: Int = LegacyStoreImporter.version
-    ) -> LegacyImportCoordinator {
-        LegacyImportCoordinator(
-            directory: folder.url, now: clock.provider, makeID: ids.provider, log: log, legacyLocking: locking, hooks: hooks,
-            importerVersion: importerVersion
-        )
-    }
-}
-
-/// The document the folder's `store.json` holds, replayed as the workspace shows it.
-func storedState(_ folder: TemporaryFolder) throws -> GTDState {
-    guard let data = folder.bytes(LegacyFileNames.store) else { throw CocoaError(.fileNoSuchFile) }
-    return try StoreDocumentCoding.decode(data).replayed().state
 }

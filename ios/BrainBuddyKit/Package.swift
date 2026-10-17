@@ -57,6 +57,7 @@ let package = Package(
         .library(name: "BrainBuddyAPI", targets: ["BrainBuddyAPI"]),
         .library(name: "BrainBuddySync", targets: ["BrainBuddySync"]),
         .library(name: "BrainBuddyWorkspace", targets: ["BrainBuddyWorkspace"]),
+        .library(name: "BrainBuddyAgents", targets: ["BrainBuddyAgents"]),
         .library(name: "BrainBuddyDiagnostics", targets: ["BrainBuddyDiagnostics"]),
         .library(name: "BrainBuddyDesign", targets: ["BrainBuddyDesign"]),
         .library(name: "BrainBuddyDesignTestSupport", targets: ["BrainBuddyDesignTestSupport"]),
@@ -84,6 +85,9 @@ let package = Package(
             name: "BrainBuddyWorkspace",
             dependencies: ["BrainBuddyCore", "BrainBuddyPersistence", "BrainBuddyAPI", "BrainBuddySync"]
         ),
+        // The external-agent surfaces' state for the iPhone and Mac apps (specs 030, 034): availability,
+        // the listed runs, hand-off, run actions and the agent settings. Memory only; no SwiftUI.
+        .target(name: "BrainBuddyAgents", dependencies: ["BrainBuddyCore", "BrainBuddyAPI", "BrainBuddyWorkspace"]),
         // An in-memory Brain Buddy server behind `HTTPTransport`, for tests
         // (sync, workspace) that need realistic server semantics offline.
         .target(name: "BrainBuddyFakeServer", dependencies: ["BrainBuddyCore", "BrainBuddyAPI"]),
@@ -111,13 +115,13 @@ let package = Package(
             name: "BrainBuddySyncTests", dependencies: ["BrainBuddySync", "BrainBuddyFakeServer"],
             resources: [.copy("Resources")]
         ),
-        // `Resources/legacy-import-golden.json` is the Mac importer's real output over its populated
-        // fixture (spec 021, `macos/Tests/BrainBuddyMacTests/LegacyStoreImporterTests.swift` keeps
-        // the two byte-identical); `.copy` keeps its bytes.
+        // `Resources/legacy-import-golden.json` is a frozen sample of the retired Mac importer's
+        // output over its populated fixture (spec 021); `.copy` keeps its bytes.
         .testTarget(
             name: "BrainBuddyWorkspaceTests", dependencies: ["BrainBuddyWorkspace", "BrainBuddyFakeServer"],
             resources: [.copy("Resources")]
         ),
+        .testTarget(name: "BrainBuddyAgentsTests", dependencies: ["BrainBuddyAgents"]),
         .testTarget(name: "BrainBuddyDiagnosticsTests", dependencies: ["BrainBuddyDiagnostics"]),
         // The token test reads `DesignTokens/carry-on.tokens.json` from the checkout; the
         // component snapshots (macOS only) compare against `__Snapshots__/*.png`, which are

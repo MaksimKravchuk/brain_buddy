@@ -23,7 +23,6 @@ import typer
 from app.container import Container, build_container
 from app.core import get_config
 from app.core.config import AppConfig, AppEnvironment
-from app.exceptions import BrainBuddyError
 from app.modules.tasks.review_flow import ReviewMetrics
 from app.modules.tasks.sync.control_ledger import LedgerIncomplete
 from app.modules.tasks.sync.restore import (
@@ -34,8 +33,6 @@ from app.modules.tasks.sync.restore import (
 from app.schemas.auth import Invite
 from app.schemas.review import ExplainerAcknowledgeRequest
 from app.schemas.tasks import TaskCreateRequest
-from app.services.auth_migration import AuthMigration
-from app.services.auth_secret_box import AuthSecretBox, AuthSecretError
 from app.utils.time import utcnow
 
 app = typer.Typer(help="Brain Buddy operational commands.")
@@ -79,29 +76,6 @@ def purge_due_accounts() -> None:
 
     purged = container.account_service.purge_due_accounts()
     typer.echo(f"Purged {purged} account(s).")
-
-
-@app.command("migrate-auth")
-def migrate_auth(
-    writers_stopped: bool = typer.Option(
-        False,
-        "--writers-stopped",
-        help="Acknowledge every legacy authentication writer is stopped.",
-    ),
-) -> None:
-    """Validate and import legacy accounts/sessions; resume committed cleanup."""
-    config = get_config()
-    try:
-        secret_box = AuthSecretBox.from_settings(config.modern_auth)
-    except AuthSecretError:
-        secret_box = None
-    migration = AuthMigration(config.data_dir, secret_box)
-    try:
-        result = migration.migrate(writers_stopped=writers_stopped)
-    except BrainBuddyError as error:
-        typer.echo(str(error), err=True)
-        raise typer.Exit(1) from None
-    typer.echo(json.dumps(asdict(result), sort_keys=True))
 
 
 class _ContainerRestoreEffects:

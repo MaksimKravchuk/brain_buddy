@@ -1,3 +1,4 @@
+import BrainBuddyAgents
 import BrainBuddyCore
 import BrainBuddyPersistence
 import BrainBuddyWorkspace

@@ -44,9 +44,11 @@ ALL = "all"
 #: Workflow job -> the stack output that gates it.
 JOB_LANES = {
     "backend": "backend",
+    "backend-results": "backend",
     "frontend": "frontend",
     "ios-kit": "ios_kit",
     "ios-app": "ios",
+    "ios-tests": "ios",
     "macos-app": "macos",
     "rust": "rust",
     "cli-native": "cli",

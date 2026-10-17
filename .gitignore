@@ -60,6 +60,9 @@ data/
 /backend/*.sqlite3
 /backend/*.sqlite3-wal
 /backend/*.sqlite3-shm
+# Runtime feature-flag state (sqlite-migration-complete.json) a backend run
+# writes here when its data dir resolves to backend/; never tracked.
+/backend/feature-flags/
 
 # Hermes Kanban worktrees
 .worktrees/

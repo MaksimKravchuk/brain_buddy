@@ -28,7 +28,6 @@ from app.exceptions import (
 from app.repositories.base import BaseRepository
 from app.repositories.sqlite import SQLiteRepositorySupport
 from app.utils.idempotency import idempotency_key_digest
-from app.utils.time import utcnow
 
 from .domain import (
     BrainDumpOperationDocument,
@@ -53,7 +52,6 @@ class OperationRepository(SQLiteRepositorySupport, BaseRepository):
         super().__init__(root)
         self.db_path = self.resolve("voice_operations.sqlite3")
         self._initialize_database()
-        self._migrate_legacy_json_once()
 
     @contextmanager
     def command_lock(self, owner_id: str) -> Iterator[None]:
@@ -104,45 +102,11 @@ class OperationRepository(SQLiteRepositorySupport, BaseRepository):
                     created_at TEXT NOT NULL,
                     PRIMARY KEY (owner_id, key_hash)
                 );
-                CREATE TABLE IF NOT EXISTS migration_ledger (
-                    id TEXT PRIMARY KEY,
-                    migrated_at TEXT NOT NULL,
-                    payload TEXT NOT NULL
-                );
                 CREATE INDEX IF NOT EXISTS idx_brain_dump_operations_owner_status
                     ON brain_dump_operations(owner_id, status, updated_at, id);
                 CREATE INDEX IF NOT EXISTS idx_idempotency_owner_created
                     ON idempotency_records(owner_id, created_at);
                 """)
-
-    def _migrate_legacy_json_once(self) -> None:
-        with self._owned_connection() as conn:
-            seen = conn.execute(
-                "SELECT 1 FROM migration_ledger WHERE id = ?", ("legacy-json-v1",)
-            ).fetchone()
-            if seen is not None:
-                return
-            conn.execute("BEGIN IMMEDIATE")
-            try:
-                counts = {"brain_dump_operations": 0}
-                for path in self.resolve("brain-dump-operations").glob("*/*.json"):
-                    operation, _ = self._decode_brain_dump_operation(
-                        json.loads(path.read_text(encoding="utf-8"))
-                    )
-                    self._upsert_brain_dump_operation(conn, operation)
-                    counts["brain_dump_operations"] += 1
-                conn.execute(
-                    "INSERT INTO migration_ledger (id, migrated_at, payload) VALUES (?, ?, ?)",
-                    (
-                        "legacy-json-v1",
-                        utcnow().isoformat(),
-                        json.dumps(counts, sort_keys=True),
-                    ),
-                )
-                conn.commit()
-            except BaseException:
-                conn.rollback()
-                raise
 
     # Compatibility path helpers retained for focused legacy tests.
     def brain_dump_operation_path(self, owner_id: str, operation_id: str) -> Path:

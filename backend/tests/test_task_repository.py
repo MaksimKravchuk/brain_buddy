@@ -632,3 +632,26 @@ def test_purge_expired_working_artifacts_does_not_mutate_terminal_schema_v1_reco
             ).fetchone()[0]
         )
     assert stored == payload
+
+
+def test_task_documents_written_with_context_ids_still_load_as_tag_ids() -> None:
+    """The stored task shape that predates tags (``context_ids``) is read as
+    ``tag_ids`` and never dropped."""
+
+    now = utcnow().isoformat().replace("+00:00", "Z")
+    task = TaskDocument.model_validate(
+        {
+            "id": "task_legacy",
+            "owner_id": OWNER,
+            "title": "Legacy task",
+            "state": "inbox",
+            "context_ids": ["context_legacy"],
+            "order_key": 0,
+            "created_at": now,
+            "updated_at": now,
+            "revision": 1,
+            "schema_version": 1,
+        }
+    )
+
+    assert task.tag_ids == ["context_legacy"]
