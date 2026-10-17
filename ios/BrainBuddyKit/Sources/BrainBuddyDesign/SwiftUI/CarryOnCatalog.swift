@@ -82,6 +82,12 @@
                     }
                 }
                 CatalogCell {
+                    HStack(spacing: CarryOnSpace.xs) {
+                        CarryOnChip("+ Date", variant: .outlined)
+                        CarryOnChip("+ Note", variant: .outlined)
+                    }
+                }
+                CatalogCell {
                     HStack(spacing: 6) {
                         ForEach(CarryOnProjectColor.all, id: \.name) { CarryOnProjectDot($0.color, size: 14) }
                     }

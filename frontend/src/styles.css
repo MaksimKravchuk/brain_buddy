@@ -1,5 +1,3 @@
-@import "./styles/tokens.css" layer(base);
-
 @import "tailwindcss";
 @import "./styles/carryOn.css";
 
@@ -8,7 +6,7 @@
 @custom-variant hover (&:hover);
 
 /* Design tokens, formerly `theme.extend` in tailwind.config.ts (Tailwind v4
- * CSS-first theme). Mirror any change here in styles/tokens.css. */
+ * CSS-first theme). Role colours live in styles/carryOn.css. */
 @theme {
   /* Type scale (size, line-height, letter-spacing) */
   --text-display: 1.75rem;
@@ -21,53 +19,6 @@
   --text-subtitle--line-height: 1.4;
   --text-subtitle--letter-spacing: -0.005em;
 
-  --color-surface-base: #f8fafc;
-  --color-surface-sunken: #f1f5f9;
-  --color-surface-raised: #ffffff;
-
-  --color-brand-primary: #0ea5e9;
-  --color-brand-primary-hover: #38bdf8;
-  --color-brand-secondary: #6366f1;
-
-  --color-info: #0ea5e9;
-  --color-info-bg: #f0f9ff;
-  --color-info-border: #bae6fd;
-  --color-info-fg: #0369a1;
-
-  /* AI & task-state aliases (post-pivot). emerald = AI executing a task
-   * (Sparkles); sky = thinking canvas (Network). Never mix the two meanings. */
-  --color-ai: #10b981;
-  --color-ai-bg: #ecfdf5;
-  --color-ai-border: #a7f3d0;
-  --color-ai-fg: #047857;
-
-  --color-agent-avatar-bg: #ecfdf5;
-  --color-agent-avatar-fg: #047857;
-
-  --color-needs-you: #d97706;
-  --color-needs-you-bg: #fffbeb;
-  --color-needs-you-border: #fde68a;
-  --color-needs-you-fg: #92400e;
-
-  --color-thinking: #0ea5e9;
-  --color-thinking-bg: #f0f9ff;
-  --color-thinking-border: #bae6fd;
-  --color-thinking-fg: #0369a1;
-
-  --color-due-bg: #fff1f2;
-  --color-due-border: #fecdd3;
-  --color-due-fg: #be123c;
-
-  --color-recording: #e11d48;
-
-  --color-context-bg: #f1f5f9;
-  --color-context-fg: #475569;
-
-  --shadow-inset: inset 0 1px 0 0 rgba(15, 23, 42, 0.08);
-  --shadow-soft: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 1px rgba(15, 23, 42, 0.03);
-  --shadow-raised: 0 1px 2px rgba(15, 23, 42, 0.05), 0 8px 24px -12px rgba(15, 23, 42, 0.12);
-  --shadow-floating: 0 1px 2px rgba(15, 23, 42, 0.04), 0 12px 32px -16px rgba(15, 23, 42, 0.18);
-  --shadow-glow: 0 16px 32px rgba(14, 165, 233, 0.18);
   --shadow-ring-focus: 0 0 0 2px var(--role-ground), 0 0 0 4px var(--role-focus);
 
   --radius-xl: 1.25rem;
@@ -181,6 +132,14 @@
   ::file-selector-button {
     border-color: var(--color-gray-200, currentcolor);
   }
+
+  :root[data-theme="dark"] *,
+  :root[data-theme="dark"] ::after,
+  :root[data-theme="dark"] ::before,
+  :root[data-theme="dark"] ::backdrop,
+  :root[data-theme="dark"] ::file-selector-button {
+    border-color: var(--role-quiet);
+  }
 }
 
 /* Two more v3 preflight defaults that v4 dropped: placeholders were gray-400
@@ -199,7 +158,11 @@
 
 :root {
   color-scheme: light;
-  background-color: var(--bb-surface-base);
+  background-color: var(--role-ground);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
 }
 
 html {

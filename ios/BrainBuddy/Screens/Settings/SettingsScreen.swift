@@ -1,32 +1,19 @@
-import BrainBuddyAPI
 import BrainBuddyCore
+import BrainBuddyDesign
 import BrainBuddyWorkspace
 import SwiftUI
 import UIKit
 
 /// Account, sync, the weekly review's threshold and about. Everything here
-/// reads the workspace; the only network actions are signing in and out and
+/// reads the workspace; the only network actions are signing in and
 /// "Sync now".
 struct SettingsScreen: View {
     @Environment(Workspace.self) private var workspace
-    @Environment(ToastCenter.self) private var toasts
-    @Environment(\.openURL) private var openURL
+    @Environment(\.colorScheme) private var scheme
     /// Nil unless the build records performance diagnostics (beta builds).
     @Environment(PerformanceDiagnostics.self) private var diagnostics: PerformanceDiagnostics?
 
     @State private var signInRequest: SignInRequest?
-    @State private var isConfirmingSignOut = false
-    @State private var unsyncedCount = 0
-    /// Open sync issues the confirmation names on their own (FR-018): they are removed too.
-    @State private var unsyncedIssueCount = 0
-    /// Unsaved weekly-review drafts the confirmation names (FR-018): sign-out removes them too, but
-    /// they neither change the buttons nor count as unsent changes.
-    @State private var unsavedDraftCount = 0
-    /// The unsent changes the confirmation names: "Sign out and remove" removes these and no others.
-    @State private var unsyncedChanges: Set<PendingChange> = []
-    @State private var isSigningOut = false
-    @State private var accountOrigin: String?
-    @State private var accountLinkFailed = false
 
     init() {}
 
@@ -37,35 +24,28 @@ struct SettingsScreen: View {
                 syncSection
             } else if issueCount > 0 {
                 Section { syncIssuesLink }
+                .listRowBackground(cardBackground)
             }
             // Weekly review (spec 020, M-23); shown only while it is exposed.
             ReviewSettingsSection()
-            if diagnostics != nil { RustRuntimePilotRow() }
+                .listRowBackground(cardBackground)
+            if diagnostics != nil {
+                RustRuntimePilotRow()
+                    .listRowBackground(cardBackground)
+            }
             aboutSection
-            deleteAccountSection
         }
         .labelStyle(.bbRow)
         .bbDenseList()
+        // Carry On board 25: inset grouped sections of surface-card rows on bg-ground.
+        .listStyle(.insetGrouped)
+        .carryOnFont(CarryOnTypeScale.body)
+        .listRowSeparatorTint(groundColor)
+        .scrollContentBackground(.hidden)
+        .background(.coBgGround)
         .bbScreenTitle("Settings")
-        .task(id: workspace.account?.serverURL) { await loadAccountOrigin() }
         .sheet(item: $signInRequest) { request in
             SignInSheet(email: request.email, serverURL: request.serverURL)
-        }
-        // Signing out removes the account's tasks from this device, so it is
-        // always confirmed; with unsynced changes the dialog says they'd be lost.
-        .confirmationDialog(
-            signOutTitle,
-            isPresented: $isConfirmingSignOut,
-            titleVisibility: .visible
-        ) {
-            if unsyncedCount > 0 || unsyncedIssueCount > 0 {
-                Button("Sign out and remove", role: .destructive) { signOut(removing: unsyncedChanges) }
-            } else {
-                Button("Sign out", role: .destructive) { signOut(removing: []) }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(signOutMessage)
         }
     }
 
@@ -74,27 +54,10 @@ struct SettingsScreen: View {
     @ViewBuilder private var accountSection: some View {
         if let account = workspace.account {
             Section {
-                AccountIdentityRow(
-                    name: account.displayName, email: account.email,
-                    host: Self.hostDescription(account.serverURL))
-                Button {
-                    openAccount(account, deleting: false)
-                } label: {
-                    Label("Manage account", systemImage: "person.crop.circle")
-                }
-                if accountLinkFailed {
-                    Label {
-                        Text("Couldn't open account settings. Use the account linked to this iPhone.")
-                            .font(BBFont.secondary)
-                    } icon: {
-                        Image(systemName: "exclamationmark.circle")
-                            .foregroundStyle(BBColor.warningText)
-                    }
-                    Button {
-                        Task { await loadAccountOrigin() }
-                    } label: {
-                        Label("Retry account links", systemImage: "arrow.clockwise")
-                    }
+                NavigationLink(value: AppRoute.account) {
+                    AccountIdentityRow(
+                        name: account.displayName, email: account.email,
+                        host: Self.hostDescription(account.serverURL))
                 }
                 if workspace.syncStatus == .needsSignIn {
                     Button {
@@ -103,12 +66,10 @@ struct SettingsScreen: View {
                         Label("Sign in again", systemImage: "person.crop.circle.badge.exclamationmark")
                     }
                 }
-                signOutButton
             } header: {
-                Text("Account")
-            } footer: {
-                Text(signedInFooter)
+                SettingsSectionHeader("Account")
             }
+            .listRowBackground(cardBackground)
         } else {
             Section {
                 Button {
@@ -117,82 +78,26 @@ struct SettingsScreen: View {
                     Label("Sign in", systemImage: "person.crop.circle.badge.plus")
                 }
             } header: {
-                Text("Account")
+                SettingsSectionHeader("Account")
             } footer: {
                 Text(localOnlyExplanation)
+                    .carryOnFont(CarryOnTypeScale.meta)
+                    .foregroundStyle(.coTextSecondary)
             }
+            .listRowBackground(cardBackground)
         }
     }
 
-    /// Deleting the account is always available when signed in (GDPR), in a
-    /// section of its own at the bottom so it is never next to a routine row.
-    @ViewBuilder private var deleteAccountSection: some View {
-        if let account = workspace.account {
-            Section {
-                Button(role: .destructive) {
-                    openAccount(account, deleting: true)
-                } label: {
-                    destructiveLabel("Delete account", systemImage: "trash")
-                }
-            }
-        }
+    private var groundColor: Color {
+        CarryOnColorStyle(CarryOnRole.bgGround).color(in: scheme)
     }
 
-    /// A row label whose icon is red like its text, not the brand colour that
-    /// `.bbRow` gives every other icon.
-    private func destructiveLabel(_ title: String, systemImage: String) -> some View {
-        Label {
-            Text(title)
-        } icon: {
-            Image(systemName: systemImage)
-                .foregroundStyle(Color.red)
-        }
-    }
-
-    private var signOutButton: some View {
-        Button(role: .destructive) {
-            requestSignOut()
-        } label: {
-            HStack {
-                destructiveLabel("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
-                if isSigningOut {
-                    Spacer()
-                    ProgressView()
-                }
-            }
-        }
-        .disabled(isSigningOut)
+    private var cardBackground: some View {
+        Rectangle().fill(.coSurfaceCard)
     }
 
     private var localOnlyExplanation: String {
         "Your tasks are stored on this \(ThisDevice.name). Sign in to sync with Brain Buddy on the web."
-    }
-
-    private var signedInFooter: String {
-        "Signing out removes your tasks from this \(ThisDevice.name). They stay in your account."
-    }
-
-    private var signOutTitle: String {
-        unsyncedCount > 0 ? WorkspaceError.unsyncedChanges(count: unsyncedCount).message : "Sign out?"
-    }
-
-    private var signOutMessage: String {
-        var sentences: [String]
-        if unsyncedCount > 0 {
-            let pronoun = unsyncedCount == 1 ? "it" : "them"
-            sentences = ["Sign out and remove \(pronoun) from this \(ThisDevice.name)?"]
-        } else {
-            sentences = ["Your tasks are removed from this \(ThisDevice.name). They stay in your account."]
-        }
-        if unsyncedIssueCount > 0 {
-            sentences.append(
-                "\(SyncCopy.changes(unsyncedIssueCount)) that couldn't sync will also be removed from this \(ThisDevice.name).")
-        }
-        if unsavedDraftCount > 0 {
-            sentences.append(
-                "\(SyncCopy.reviewDrafts(unsavedDraftCount)) will also be removed from this \(ThisDevice.name).")
-        }
-        return sentences.joined(separator: " ")
     }
 
     // MARK: Sync
@@ -225,8 +130,9 @@ struct SettingsScreen: View {
                 syncIssuesLink
             }
         } header: {
-            Text("Sync")
+            SettingsSectionHeader("Sync")
         }
+        .listRowBackground(cardBackground)
     }
 
     /// "Status" with the sync state in words trailing ("Synced 2 minutes
@@ -237,7 +143,8 @@ struct SettingsScreen: View {
             LabeledContent {
                 VStack(alignment: .trailing, spacing: 2) {
                     Text(description.text)
-                        .foregroundStyle(description.needsAttention ? BBColor.warningText : BBColor.textTertiary)
+                        .carryOnFont(CarryOnTypeScale.meta)
+                        .foregroundStyle(description.needsAttention ? BBColor.warningText : BBColor.textSecondary)
                     if let detail = description.detail {
                         Text(detail)
                             .font(BBFont.caption)
@@ -270,6 +177,8 @@ struct SettingsScreen: View {
     private func valueRow(_ title: String, systemImage: String, value: String) -> some View {
         LabeledContent {
             Text(value)
+                .carryOnFont(CarryOnTypeScale.meta)
+                .foregroundStyle(.coTextSecondary)
         } label: {
             Label(title, systemImage: systemImage)
         }
@@ -335,10 +244,13 @@ struct SettingsScreen: View {
                 }
             }
         } header: {
-            Text("About")
+            SettingsSectionHeader("About")
         } footer: {
             Text(offlineExplanation)
+                .carryOnFont(CarryOnTypeScale.meta)
+                .foregroundStyle(.coTextSecondary)
         }
+        .listRowBackground(cardBackground)
     }
 
     private var offlineExplanation: String {
@@ -346,77 +258,6 @@ struct SettingsScreen: View {
     }
 
     // MARK: Actions
-
-    private func loadAccountOrigin() async {
-        accountOrigin = nil
-        guard let account = workspace.account else { return }
-        let ownerID = account.id
-        let api = BrainBuddyAPIClient(baseURL: account.serverURL, tokenStore: InMemorySessionTokenStore())
-        do {
-            let methods = try await api.authMethods()
-            guard workspace.account?.id == ownerID, workspace.account?.serverURL == account.serverURL,
-                !Task.isCancelled else { return }
-            accountOrigin = methods.webAccountOrigin
-            accountLinkFailed = methods.webAccountOrigin.flatMap {
-                NativeAccountDestination.url(origin: $0, ownerID: ownerID, deleting: false)
-            } == nil
-        } catch {
-            if workspace.account?.id == ownerID, !Task.isCancelled { accountLinkFailed = true }
-        }
-    }
-
-    private func openAccount(_ account: LinkedAccount, deleting: Bool) {
-        guard workspace.account?.id == account.id, workspace.account?.serverURL == account.serverURL,
-            let origin = accountOrigin,
-            let url = NativeAccountDestination.url(origin: origin, ownerID: account.id, deleting: deleting)
-        else { accountLinkFailed = true; return }
-        // Browser authentication stays separate. No native session is copied,
-        // and opening/cancelling this destination changes no local records.
-        openURL(url) { accepted in accountLinkFailed = !accepted }
-    }
-
-    /// Always asks first. Without unsynced changes (or sync issues, which
-    /// would be removed too) a plain sign-out is confirmed; if changes arrive
-    /// meanwhile, `signOut` asks again with the real count.
-    private func requestSignOut() {
-        captureUnsynced()
-        isConfirmingSignOut = true
-    }
-
-    /// What the confirmation names: unsent changes and open sync issues, counted apart (FR-018),
-    /// and the exact set "Sign out and remove" may remove.
-    private func captureUnsynced() {
-        unsyncedChanges = workspace.pendingChanges
-        unsyncedCount = workspace.pendingChangeCount
-        unsyncedIssueCount = workspace.issues.count
-        unsavedDraftCount = workspace.unsavedReviewDraftCount
-    }
-
-    private func signOut(removing changes: Set<PendingChange>) {
-        guard !isSigningOut else { return }
-        isSigningOut = true
-        Task {
-            do {
-                try await workspace.signOut(removing: changes)
-                isSigningOut = false
-                // Recent searches can hold words from the account's tasks.
-                UserDefaults.standard.removeObject(forKey: RecentSearches.storageKey)
-                toasts.show("Signed out", actionTitle: nil, action: nil)
-            } catch let error as WorkspaceError {
-                isSigningOut = false
-                if case .unsyncedChanges = error {
-                    // Changes or issues arrived after the check; ask again with the real counts.
-                    captureUnsynced()
-                    isConfirmingSignOut = true
-                } else {
-                    toasts.show("\(error.message)", actionTitle: nil, action: nil)
-                }
-            } catch {
-                isSigningOut = false
-                toasts.show("Couldn't sign out. Try again.", actionTitle: nil, action: nil)
-            }
-        }
-    }
 
     // MARK: Formatting
 
@@ -480,20 +321,37 @@ private struct AccountIdentityRow: View {
     var body: some View {
         HStack(spacing: BBSpacing.s3) {
             Text(initials)
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(BBColor.brandText)
+                .carryOnFont(CarryOnTypeScale.bodyStrong)
+                .foregroundStyle(.coTextPrimary)
                 .frame(width: avatar, height: avatar)
-                .background(BBColor.brandSoft, in: Circle())
+                .background(.coControlQuiet, in: Circle())
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.body.weight(.medium))
+                    .carryOnFont(CarryOnTypeScale.bodyStrong)
+                    .foregroundStyle(.coTextPrimary)
                 Text(subtitle)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .carryOnFont(CarryOnTypeScale.meta)
+                    .foregroundStyle(.coTextSecondary)
             }
         }
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// A Carry On section header (board 25): meta-strong, secondary text, sentence case.
+struct SettingsSectionHeader: View {
+    let title: String
+
+    init(_ title: String) {
+        self.title = title
+    }
+
+    var body: some View {
+        Text(title)
+            .carryOnFont(CarryOnTypeScale.metaStrong)
+            .foregroundStyle(.coTextSecondary)
+            .textCase(nil)
     }
 }
 

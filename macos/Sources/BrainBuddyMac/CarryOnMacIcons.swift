@@ -23,6 +23,13 @@ enum MacBoardIcon: Hashable, Sendable {
     /// `<path d="M4 12a8 8 0 108-8 8 8 0 00-6 2.7"/><path d="M4 4v4h4M12 8v4l3 2"/>`
     /// The board uses this one history icon for Done and Cancelled.
     case history
+    /// Settings tabs (spec 028): a person, a robot head with an antenna, two circling arrows.
+    case account, agents, sync
+    /// Agents on the board (M22–M24, DSAgents): All runs, each agent row and a run's mark in Waiting for.
+    /// `<rect x="4" y="6" width="16" height="12" rx="4"/><circle cx="9.5" cy="12" r="1.2"/><circle cx="14.5" cy="12" r="1.2"/><path d="M12 3v3"/>`
+    case agentRun
+    /// `<path d="M12 5v14M5 12h14"/>`: the board's plus, on "New step" and "Add new agent".
+    case plus
 }
 
 /// A board icon as a `Shape`; stroke it with `MacBoardIconView` (or `.stroke(style:)`).
@@ -120,6 +127,39 @@ struct MacBoardIconShape: Shape {
             path.addPath(polyline([(4, 4), (4, 8), (8, 8)]))
             // M12 8 v4 l3 2
             path.addPath(polyline([(12, 8), (12, 12), (15, 14)]))
+        case .account:
+            path.addEllipse(in: CGRect(origin: point(8.5, 4.5), size: CGSize(width: 7 * scale, height: 7 * scale)))
+            path.move(to: point(5, 20))
+            addCircleArc(into: &path, centerX: 12, centerY: 20, radius: 7, from: Double.pi, to: 2 * Double.pi)
+        case .agents:
+            path.addPath(
+                RoundedRectangle(cornerRadius: 4 * scale, style: .circular)
+                    .path(in: CGRect(origin: point(5, 8), size: CGSize(width: 14 * scale, height: 11 * scale)))
+            )
+            path.addPath(polyline([(12, 8), (12, 4.5)]))
+            path.addPath(polyline([(9.5, 13), (9.5, 14)]))
+            path.addPath(polyline([(14.5, 13), (14.5, 14)]))
+        case .agentRun:
+            path.addPath(
+                RoundedRectangle(cornerRadius: 4 * scale, style: .circular)
+                    .path(in: CGRect(origin: point(4, 6), size: CGSize(width: 16 * scale, height: 12 * scale)))
+            )
+            for x in [9.5, 14.5] {
+                path.addEllipse(in: CGRect(origin: point(x - 1.2, 10.8), size: CGSize(width: 2.4 * scale, height: 2.4 * scale)))
+            }
+            path.addPath(polyline([(12, 3), (12, 6)]))
+        case .plus:
+            path.addPath(polyline([(12, 5), (12, 19)]))
+            path.addPath(polyline([(5, 12), (19, 12)]))
+        case .sync:
+            path.move(to: point(19, 12))
+            addCircleArc(into: &path, centerX: 12, centerY: 12, radius: 7, from: 0, to: -3 * Double.pi / 4)
+            path.addLine(to: point(5, 9))
+            path.addPath(polyline([(5, 5), (5, 9), (9, 9)]))
+            path.move(to: point(5, 12))
+            addCircleArc(into: &path, centerX: 12, centerY: 12, radius: 7, from: Double.pi, to: Double.pi / 4)
+            path.addLine(to: point(19, 15))
+            path.addPath(polyline([(19, 19), (19, 15), (15, 15)]))
         }
         return path
     }
@@ -149,6 +189,7 @@ extension MacBoardIcon {
         case .list(.someday): self = .somedayMaybe
         case .date: self = .calendar
         case .history: self = .history
+        case .agentRuns: self = .agentRun
         case .project, .tag: return nil
         }
     }

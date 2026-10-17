@@ -161,62 +161,62 @@ export function AutoParkExplainer({
   const floor = formatReviewDate(new Date(now.getTime() + 7 * DAY_MS).toISOString());
 
   return (
-    <div className="fixed inset-0 z-[150] flex items-stretch justify-center bg-slate-50/80 backdrop-blur-xs sm:items-center sm:p-6">
+    <div className="fixed inset-0 z-[150] flex items-stretch justify-center bg-ink/30 sm:items-center sm:p-6 motion-safe:animate-fade-in">
       <section
         ref={sectionRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={headingId}
         onKeyDown={onKeyDown}
-        className="relative flex h-full w-full flex-col overflow-y-auto bg-white shadow-floating sm:h-auto sm:max-h-[calc(100vh-48px)] sm:w-[480px] sm:rounded-[20px] sm:border sm:border-slate-200"
+        className="relative flex h-full w-full flex-col overflow-y-auto co-glass-dense sm:h-auto sm:max-h-[calc(100vh-48px)] sm:w-[480px] sm:rounded-sheet"
       >
         <div className="flex items-start gap-3 px-5 pb-2 pt-5">
-          <h2 id={headingId} ref={headingRef} tabIndex={-1} className="m-0 flex-1 text-[20px] font-semibold leading-[1.3] text-slate-900 outline-hidden">
+          <h2 id={headingId} ref={headingRef} tabIndex={-1} className="m-0 flex-1 font-voice text-co-step text-ink outline-hidden focus-visible:shadow-ring-focus">
             How Next stays fresh
           </h2>
           <button
             type="button"
             aria-label="Close"
             disabled={pending}
-            className="-mr-1.5 -mt-1 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-surface-sunken hover:text-slate-900"
+            className="-mr-1.5 -mt-1 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-card text-ink-muted hover:bg-quiet-pressed hover:text-ink"
             onClick={dismiss}
           >
             <X className="h-4 w-4" aria-hidden />
           </button>
         </div>
-        <div className="flex flex-col gap-3 px-5 pb-5 text-sm leading-relaxed text-slate-700">
+        <div className="flex flex-col gap-3 px-5 pb-5 text-co-meta leading-relaxed text-ink-muted">
           <p className="m-0">
-            <strong className="font-semibold text-slate-900">When a task stalls.</strong>{" "}
+            <strong className="font-semibold text-ink">When a task stalls.</strong>{" "}
             {`If a next action keeps the same wording for ${threshold} days, it asks for a decision.`}
           </p>
           <p className="m-0">
-            <strong className="font-semibold text-slate-900">If it stays undecided.</strong>{" "}
+            <strong className="font-semibold text-ink">If it stays undecided.</strong>{" "}
             7 days later it moves to Someday / maybe. Nothing is deleted, and you can bring it back in one click. It&apos;s the only thing the app moves on its own.
           </p>
           <p className="m-0">
-            <strong className="font-semibold text-slate-900">Your tasks get time.</strong>{" "}
+            <strong className="font-semibold text-ink">Your tasks get time.</strong>{" "}
             {`Tasks already in Next won't move before ${formatReviewDate(graceUntil)}.`}
           </p>
           {changing ? (
-            <div className="flex flex-col gap-2 rounded-xl border border-slate-200 p-3">
+            <div className="flex flex-col gap-2 rounded-card p-3">
               <ThresholdControl
                 value={threshold}
                 disabled={pending}
                 onChange={setThreshold}
               />
               {threshold !== state.settings.threshold_days ? (
-                <p className="m-0 text-xs text-slate-600">
+                <p className="m-0 text-co-meta text-ink-muted">
                   {`Markers in Next update now. Because of this change, nothing moves to Someday before ${floor}.`}
                 </p>
               ) : null}
             </div>
           ) : null}
-          {!online ? <p role="status" className="m-0 rounded-lg bg-slate-50 px-3 py-2 text-slate-700">You&apos;re offline. Try again when you&apos;re back online.</p> : null}
+          {!online ? <p role="status" className="m-0 rounded-card bg-quiet px-3 py-2 text-ink-muted">You&apos;re offline. Try again when you&apos;re back online.</p> : null}
           {failure ? (
-            <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
+            <div role="alert" className="flex flex-wrap items-center gap-2 rounded-card bg-quiet px-3 py-2 text-warning">
               <span>Couldn&apos;t save that you&apos;ve seen this. Try again.</span>
-              {failure.referenceId ? <span className="text-xs">Ref {failure.referenceId}</span> : null}
-              <button type="button" className="min-h-11 rounded-lg px-3 font-semibold hover:bg-amber-100" onClick={() => void record()}>
+              {failure.referenceId ? <span className="text-co-meta">Ref {failure.referenceId}</span> : null}
+              <button type="button" className="min-h-11 rounded-control px-3 font-semibold hover:bg-quiet-pressed" onClick={() => void record()}>
                 Retry
               </button>
             </div>
@@ -225,7 +225,7 @@ export function AutoParkExplainer({
             {changing ? null : (
               <button
                 type="button"
-                className="min-h-11 rounded-lg border border-slate-200 px-4 font-medium text-slate-700 hover:border-slate-300"
+                className="min-h-11 rounded-control bg-quiet hover:bg-quiet-pressed px-4 font-medium text-ink"
                 onClick={() => setChanging(true)}
               >
                 Change the number of days
@@ -234,7 +234,7 @@ export function AutoParkExplainer({
             <button
               type="button"
               disabled={!online || pending}
-              className="min-h-11 rounded-lg bg-sky-700 px-5 font-semibold text-white hover:bg-sky-800 disabled:opacity-50"
+              className="min-h-11 rounded-control bg-ink px-5 font-semibold text-ground hover:bg-ink/85 disabled:opacity-50"
               onClick={() => void record()}
             >
               Got it

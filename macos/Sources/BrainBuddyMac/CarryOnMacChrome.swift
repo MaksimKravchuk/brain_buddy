@@ -1,4 +1,5 @@
 import BrainBuddyDesign
+import BrainBuddyMacCore
 import SwiftUI
 
 // The Mac window's chrome in the Carry On design system (board "07 Inbox · Mac"): the brand
@@ -132,6 +133,8 @@ struct MacSidebarRowLabel: View {
     let selected: Bool
     /// A deferred row is shown in the secondary colour.
     var muted = false
+    /// An agent row with a Needs-you run: the accent dot comes before the count (board M22, DSAgents).
+    var attention = false
 
     var body: some View {
         HStack(spacing: 10) {
@@ -144,6 +147,10 @@ struct MacSidebarRowLabel: View {
                 .lineLimit(1)
                 .layoutPriority(1)
             Spacer(minLength: 0)
+            if attention {
+                Circle().fill(CarryOnColorStyle.coStepDotCurrent).frame(width: 7, height: 7)
+                    .accessibilityHidden(true)
+            }
             if let trailing {
                 Text(trailing)
                     .font(MacChromeFont.rowCount)
@@ -161,6 +168,14 @@ struct MacSidebarRowLabel: View {
             }
         }
         .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(title)
+        .accessibilityValue(Self.accessibilityValue(trailing: trailing, attention: attention))
+    }
+
+    /// The count (or status word) the row shows, with the Needs-you dot spoken, so VoiceOver hears what is drawn (030-FR-004).
+    static func accessibilityValue(trailing: String?, attention: Bool) -> String {
+        [attention ? "Needs you" : nil, trailing].compactMap { $0 }.joined(separator: ", ")
     }
 
     private var titleStyle: CarryOnColorStyle { muted ? .coTextSecondary : .coTextPrimary }
@@ -180,6 +195,31 @@ struct MacSidebarRowLabel: View {
             MacBoardIconView(icon: icon, size: 16)
                 .foregroundStyle(symbolStyle)
         }
+    }
+}
+
+/// One agent under Agents in the sidebar (030-FR-004, DSAgents): the listed-run count with the accent dot
+/// when a run needs you, or, for an agent with no listed runs, its status word unless it is Tested ready.
+struct AgentSidebarRow: Equatable, Identifiable {
+    let id: String
+    var name: String
+    var trailing: String?
+    var needsYou = false
+
+    private static let testedReady = "Tested ready"
+
+    static func rows(runs: [AgentRunItem], counts: [String: Int], connections: [AgentListRow]) -> [AgentSidebarRow] {
+        var byID: [String: AgentSidebarRow] = [:]
+        for connection in connections {
+            let word = connection.status == testedReady ? nil : connection.status
+            byID[connection.id] = AgentSidebarRow(id: connection.id, name: connection.name, trailing: word)
+        }
+        for id in Set(runs.compactMap(\.connectionID)) {
+            let mine = runs.filter { $0.connectionID == id }
+            byID[id] = AgentSidebarRow(
+                id: id, name: mine[0].agentName, trailing: "\(counts[id] ?? 0)", needsYou: mine.contains { $0.state == .needsYou })
+        }
+        return byID.values.sorted { ($0.name, $0.id) < ($1.name, $1.id) }
     }
 }
 

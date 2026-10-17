@@ -15,6 +15,8 @@ import SwiftUI
 struct BrainBuddyMacApp: App {
     @NSApplicationDelegateAdaptor(MacAppDelegate.self) private var appDelegate
     @State private var launch: MacLaunch
+    /// The Settings tab last chosen, kept while the app runs (028 S-01.02).
+    @State private var settingsTab = MacSettingsTab.account
     /// Held for the life of the process; the kernel releases it when the process ends.
     private let instance: SingleInstanceGuard
 
@@ -46,14 +48,20 @@ struct BrainBuddyMacApp: App {
         Window("Brain Buddy", id: "main") {
             ContentView(launch: launch)
                 .tint(CarryOnColorStyle.coTextPrimary)
+                .environment(\.carryOnPlatform, .mac)
                 .frame(minWidth: 720, minHeight: 480)
         }
         .defaultSize(width: 960, height: 640)
         .commands {
-            SyncMenuCommands()
+            SyncMenuCommands(launch: launch)
             ProjectMenuCommands()
             TaskDetailsCommands()
         }
+        Settings {
+            MacSettingsView(launch: launch, selection: $settingsTab)
+                .environment(\.carryOnPlatform, .mac)
+        }
+        .windowResizability(.contentMinSize)
     }
 
     /// X-08 "default": the running copy comes to the front. The lock names its process; when that

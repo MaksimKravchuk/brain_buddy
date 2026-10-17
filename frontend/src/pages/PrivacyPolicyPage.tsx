@@ -1,4 +1,4 @@
-import { Sprout } from "lucide-react";
+import { CarryOnMark } from "../components/brand/CarryOnMark";
 import { Link } from "react-router-dom";
 
 // Update these two constants when the policy text changes or the contact moves.
@@ -8,30 +8,30 @@ const LAST_UPDATED = "October 8, 2026";
 function Section({ title, children }: { title: string; children: React.ReactNode }): React.JSX.Element {
   return (
     <section className="mt-8">
-      <h2 className="text-subtitle font-semibold text-slate-900">{title}</h2>
-      <div className="mt-2 space-y-3 text-sm leading-relaxed text-slate-600">{children}</div>
+      <h2 className="text-co-body font-semibold text-ink">{title}</h2>
+      <div className="mt-2 space-y-3 text-co-meta leading-relaxed text-ink-muted">{children}</div>
     </section>
   );
 }
 
 export default function PrivacyPolicyPage(): React.JSX.Element {
   return (
-    <main className="min-h-screen bg-surface-base px-4 py-10">
-      <article className="mx-auto max-w-[720px] rounded-2xl border border-slate-200 bg-surface-raised p-8 shadow-raised">
+    <main className="min-h-screen bg-ground px-4 py-10">
+      <article className="mx-auto max-w-[720px] rounded-sheet bg-card p-8">
         <header>
-          <Link to="/" className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-            <Sprout className="h-5 w-5 text-brand-primary" aria-hidden="true" />
-            <span>Brain Buddy</span>
+          <Link to="/" className="flex items-center gap-2 text-co-meta font-semibold text-ink">
+            <CarryOnMark className="h-6 w-6 text-ink" />
+            <span>Carry On</span>
           </Link>
-          <h1 className="mt-4 text-title font-semibold text-slate-900">Privacy policy</h1>
-          <p className="mt-1 text-xs text-slate-500">Last updated: {LAST_UPDATED}</p>
+          <h1 className="mt-4 font-voice text-co-title text-ink">Privacy policy</h1>
+          <p className="mt-1 text-co-meta text-ink-muted">Last updated: {LAST_UPDATED}</p>
         </header>
 
         <Section title="Who we are">
           <p>
-            Brain Buddy is a personal thinking and task assistant operated by its maintainer
+            Carry On is a personal thinking and task assistant operated by its maintainer
             (the &ldquo;controller&rdquo; in GDPR terms). For anything in this policy, contact{" "}
-            <a href={`mailto:${CONTACT_EMAIL}`} className="text-brand-primary underline">
+            <a href={`mailto:${CONTACT_EMAIL}`} className="text-ink-accent underline">
               {CONTACT_EMAIL}
             </a>
             .
@@ -127,7 +127,7 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
             the credential is then erased even if Apple is unavailable. Verified Apple
             notification replay records contain fingerprints, not the original notification,
             and expire within 8 days. Notifications can end an affected sign-in method without
-            deleting your Brain Buddy content.
+            deleting your Carry On content.
           </p>
           <p>Raw voice audio is deleted within 24 hours of processing.</p>
           <p>Uncommitted voice working artifacts (draft transcripts) are deleted within 7 days.</p>
@@ -137,7 +137,7 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
             is permanently erased.
           </p>
           <p>
-            The Brain Buddy apps for Mac and iPhone keep a working copy of your tasks on the
+            The Carry On apps for Mac and iPhone keep a working copy of your tasks on the
             device until you sign out there, including after a session ends or your account is
             deleted. On a Mac, deleting the app does not remove that copy. The copy of your tasks
             from before the Mac update is kept for at least 30 days and until you sign out on that
@@ -196,9 +196,9 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
             It is never sent to our server and is not included in your data export. The
             preference is eligible for 30 days after a confirmed hand-off. It is removed
             when you sign out or your account changes, when the connection is no longer
-            eligible, and by cleanup when Brain Buddy starts, regains focus, or reaches its
-            cleanup interval after expiry. If you never open Brain Buddy again, clear Brain
-            Buddy site data in your browser to remove any residual local bytes.
+            eligible, and by cleanup when Carry On starts, regains focus, or reaches its
+            cleanup interval after expiry. If you never open Carry On again, clear Carry On
+            site data in your browser to remove any residual local bytes.
           </p>
           <p>
             The web app may also keep an unsynchronized Current Reality Tree (CRT) draft in
@@ -216,8 +216,8 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
             After pending-work decisions, logout/sign-out, account-switch, and account-deletion
             cleanup removes all departing-owner CRT keys on the active origin. The server cannot
             purge bytes on another browser/device or origin. Browser storage is unencrypted at
-            rest, and device backups may retain residual copies; if you never open Brain Buddy
-            again, clear Brain Buddy site data in each browser or device.
+            rest, and device backups may retain residual copies; if you never open Carry On
+            again, clear Carry On site data in each browser or device.
           </p>
           <p>
             CRT operational log lines are content-free and contain only a correlation id, opaque
@@ -233,7 +233,7 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
         <Section title="Weekly review suggestions">
           <p>
             When you ask for a suggestion while deciding on a task in the weekly review (a first
-            step, a new wording, or a first next action for a project), Brain Buddy can ask a cloud
+            step, a new wording, or a first next action for a project), Carry On can ask a cloud
             AI provider, OpenAI, to propose 1 to 3 next steps. Nothing is written to your tasks
             until you confirm a suggestion, after editing it if you like.
           </p>
@@ -266,7 +266,7 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
           </p>
           <p>
             OpenAI keeps what it received under its own policy (up to 30 days for API data, for
-            abuse monitoring, and not used to train its models). Deleting your Brain Buddy account
+            abuse monitoring, and not used to train its models). Deleting your Carry On account
             cannot erase that copy.
           </p>
         </Section>
@@ -286,12 +286,12 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
             methods, they process the identity request and supply an identifier and email
             address. Google requests only the openid and email scopes; Apple may also supply
             an optional first-sign-in name. We do not request access to your contacts or mailbox,
-            or send your Brain Buddy task content to these identity providers.
+            or send your Carry On task content to these identity providers.
           </p>
           <p>
             Our configured email delivery provider receives the recipient address and code
             through SMTP to deliver sign-in, recovery, address-verification, or account-confirmation
-            messages. Brain Buddy sends these directly, with no separate authentication SaaS.
+            messages. Carry On sends these directly, with no separate authentication SaaS.
             Availability depends on the sign-in and email methods configured for this deployment.
           </p>
           <p>
@@ -330,7 +330,7 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
           </p>
           <p>
             <strong>Restriction, objection, complaint:</strong> email{" "}
-            <a href={`mailto:${CONTACT_EMAIL}`} className="text-brand-primary underline">
+            <a href={`mailto:${CONTACT_EMAIL}`} className="text-ink-accent underline">
               {CONTACT_EMAIL}
             </a>{" "}
             for anything not covered by the self-serve controls — we respond within one month.
@@ -341,7 +341,7 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
 
         <Section title="Cookies">
           <p>
-            Brain Buddy uses <code>brainbuddy_session</code>, a strictly
+            Carry On uses <code>brainbuddy_session</code>, a strictly
             necessary, HttpOnly session cookie that keeps you signed in for up to 30 days. It is
             accompanied during web provider sign-in by a separate Secure, HttpOnly attempt
             cookie, scoped to provider routes and lasting at most 10 minutes. These necessary
@@ -356,7 +356,7 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
           </p>
         </Section>
 
-        <p className="mt-10 text-center text-xs text-slate-400">
+        <p className="mt-10 text-center text-co-meta text-ink-muted">
           <Link to="/login" className="underline">
             Back to sign in
           </Link>

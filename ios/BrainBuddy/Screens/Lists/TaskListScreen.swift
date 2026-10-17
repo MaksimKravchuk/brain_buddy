@@ -15,6 +15,8 @@ struct TaskListScreen: View {
 
     @Environment(Workspace.self) private var workspace
     @Environment(AppRouter.self) private var router
+    /// Nil only in previews; the app always provides it.
+    @Environment(PhoneFirstRunFlow.self) private var firstRun: PhoneFirstRunFlow?
     @Environment(\.appTab) private var tab
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Read so date views and due chips redraw on a new day.
@@ -125,6 +127,11 @@ struct TaskListScreen: View {
             }
             if let nextStep {
                 NextStepRows(task: nextStep.task)
+                // Board 04: the first run's one tip, under the step it made.
+                if case .list(.next) = destination, let firstRun, firstRun.showsLandingTip {
+                    LandingTip { firstRun.dismissTip() }
+                        .bbBareRow()
+                }
             }
             ForEach(result.sections) { section in
                 taskSection(

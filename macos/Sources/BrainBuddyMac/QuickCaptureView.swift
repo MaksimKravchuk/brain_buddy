@@ -1,5 +1,6 @@
 import AppKit
 import BrainBuddyCore
+import BrainBuddyDesign
 import BrainBuddyMacCore
 import Carbon.HIToolbox
 import SwiftUI
@@ -42,6 +43,9 @@ final class QuickCaptureController: ObservableObject {
     private var hotKey: EventHotKeyRef?
     private var panel: NSPanel?
     private var previousApplication: NSRunningApplication?
+
+    /// 029-FR-004: whether ⌃⌥⇧B is registered, for the first run's hint and tip.
+    var hotkeyRegistered: Bool { hotKey != nil && registrationError == nil }
 
     func start(model: BrainBuddyModel) {
         self.model = model
@@ -104,9 +108,11 @@ final class QuickCaptureController: ObservableObject {
         panel.isMovableByWindowBackground = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         let shortcut = registrationError == nil ? "⌃⌥⇧B" : nil
-        panel.contentView = NSHostingView(rootView: QuickCaptureView(model: model, shortcut: shortcut) { [weak self] in
-            self?.close()
-        })
+        panel.contentView = NSHostingView(
+            rootView: QuickCaptureView(model: model, shortcut: shortcut) { [weak self] in
+                self?.close()
+            }
+            .environment(\.carryOnPlatform, .mac))
         panel.center()
         self.panel = panel
         panel.makeKeyAndOrderFront(nil)

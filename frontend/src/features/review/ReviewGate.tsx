@@ -25,15 +25,15 @@ function ReviewRoute(): React.JSX.Element {
         <main className="flex justify-center px-5 py-6 md:px-10">
           <div className="flex w-full max-w-[600px] flex-col gap-3.5">
             {query.isError && !query.isFetching ? (
-              <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              <div role="alert" className="flex flex-wrap items-center gap-2 rounded-card bg-quiet px-3 py-2 text-co-meta text-warning">
                 <span>We couldn&apos;t load your review. Your progress is safe.</span>
                 <Ref id={referenceId} />
-                <button type="button" className="min-h-11 rounded-lg px-3 font-semibold hover:bg-amber-100" onClick={() => void query.refetch()}>
+                <button type="button" className="min-h-11 rounded-control px-3 font-semibold hover:bg-quiet-pressed" onClick={() => void query.refetch()}>
                   Retry
                 </button>
               </div>
             ) : (
-              <p role="status" aria-label="Checking for a review in progress…" aria-busy="true" className="m-0 text-sm text-slate-500">
+              <p role="status" aria-label="Checking for a review in progress…" aria-busy="true" className="m-0 text-co-meta text-ink-muted">
                 Checking for a review in progress…
               </p>
             )}

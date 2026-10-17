@@ -173,7 +173,7 @@ package final class WorkspaceHost {
     }
 
     /// The login-keychain store of the Mac (data-model E9).
-    nonisolated static func systemTokenStore() -> any SessionTokenStore {
+    package nonisolated static func systemTokenStore() -> any SessionTokenStore {
         #if canImport(Security)
             KeychainSessionTokenStore(service: MacHostConfiguration.keychainService)
         #else
@@ -438,6 +438,7 @@ package final class MacLaunch {
         let model = BrainBuddyModel(workspace: host.workspace, localStateStore: host.localState, now: environment.now)
         let sync = MacSyncController(host: host, now: environment.now, log: environment.log)
         sync.signOut.didSignOut = { [weak model] in model?.didSignOut() }
+        sync.didSync = { [weak model] in await model?.refreshAgentsAfterSync() }
         self.model = model
         self.sync = sync
         phase = .ready(host)

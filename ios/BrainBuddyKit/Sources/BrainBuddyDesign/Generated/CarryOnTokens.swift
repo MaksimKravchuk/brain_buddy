@@ -174,10 +174,40 @@ public enum CarryOnLayout {
         public static let dot: Double = 10
         public static let macHeight: Double = 26
         public static let macFontSize: Double = 13
+        public static let outlineWidth: Double = 1.5
     }
     public enum QuickChip {
         public static let height: Double = 38
         public static let paddingX: Double = 14
+    }
+    public enum FirstRun {
+        public static let mark: Double = 132
+        public static let brandSize: Double = 56
+        public static let brandGap: Double = 28
+        public static let largeTextSize: Double = 19
+        public static let largeTextLineHeight: Double = 1.4
+        public static let ledeGap: Double = 12
+        public static let noteGap: Double = 38
+        public static let top: Double = 36
+        public static let side: Double = 24
+        public static let subtitleGap: Double = 10
+        public static let fieldGap: Double = 28
+        public static let fieldPadding: Double = 16
+        public static let fieldRadius: Double = 14
+        public static let fieldMinHeight: Double = 96
+        public static let hintGap: Double = 12
+        public static let sourceGap: Double = 6
+        public static let questionSize: Double = 30
+        public static let questionGap: Double = 26
+        public static let stepFieldGap: Double = 20
+        public static let stepSize: Double = 22
+        public static let stepLineHeight: Double = 1.25
+    }
+    public enum LandingTip {
+        public static let paddingY: Double = 16
+        public static let paddingX: Double = 18
+        public static let radius: Double = 14
+        public static let actionGap: Double = 10
     }
     public enum Row {
         public static let paddingY: Double = 14
@@ -208,6 +238,11 @@ public enum CarryOnLayout {
         public static let side: Double = 16
         public static let bottom: Double = 28
         public static let height: Double = 62
+    }
+    public enum CodeBox {
+        public static let height: Double = 58
+        public static let gap: Double = 6
+        public static let radius: Double = 12
     }
     public enum MacSidebarRow {
         public static let height: Double = 34
@@ -414,8 +449,34 @@ public enum CarryOnTokenTable {
         "layout.chip.dot": CarryOnLayout.Chip.dot,
         "layout.chip.mac-height": CarryOnLayout.Chip.macHeight,
         "layout.chip.mac-font-size": CarryOnLayout.Chip.macFontSize,
+        "layout.chip.outline-width": CarryOnLayout.Chip.outlineWidth,
         "layout.quick-chip.height": CarryOnLayout.QuickChip.height,
         "layout.quick-chip.padding-x": CarryOnLayout.QuickChip.paddingX,
+        "layout.first-run.mark": CarryOnLayout.FirstRun.mark,
+        "layout.first-run.brand-size": CarryOnLayout.FirstRun.brandSize,
+        "layout.first-run.brand-gap": CarryOnLayout.FirstRun.brandGap,
+        "layout.first-run.large-text-size": CarryOnLayout.FirstRun.largeTextSize,
+        "layout.first-run.large-text-line-height": CarryOnLayout.FirstRun.largeTextLineHeight,
+        "layout.first-run.lede-gap": CarryOnLayout.FirstRun.ledeGap,
+        "layout.first-run.note-gap": CarryOnLayout.FirstRun.noteGap,
+        "layout.first-run.top": CarryOnLayout.FirstRun.top,
+        "layout.first-run.side": CarryOnLayout.FirstRun.side,
+        "layout.first-run.subtitle-gap": CarryOnLayout.FirstRun.subtitleGap,
+        "layout.first-run.field-gap": CarryOnLayout.FirstRun.fieldGap,
+        "layout.first-run.field-padding": CarryOnLayout.FirstRun.fieldPadding,
+        "layout.first-run.field-radius": CarryOnLayout.FirstRun.fieldRadius,
+        "layout.first-run.field-min-height": CarryOnLayout.FirstRun.fieldMinHeight,
+        "layout.first-run.hint-gap": CarryOnLayout.FirstRun.hintGap,
+        "layout.first-run.source-gap": CarryOnLayout.FirstRun.sourceGap,
+        "layout.first-run.question-size": CarryOnLayout.FirstRun.questionSize,
+        "layout.first-run.question-gap": CarryOnLayout.FirstRun.questionGap,
+        "layout.first-run.step-field-gap": CarryOnLayout.FirstRun.stepFieldGap,
+        "layout.first-run.step-size": CarryOnLayout.FirstRun.stepSize,
+        "layout.first-run.step-line-height": CarryOnLayout.FirstRun.stepLineHeight,
+        "layout.landing-tip.padding-y": CarryOnLayout.LandingTip.paddingY,
+        "layout.landing-tip.padding-x": CarryOnLayout.LandingTip.paddingX,
+        "layout.landing-tip.radius": CarryOnLayout.LandingTip.radius,
+        "layout.landing-tip.action-gap": CarryOnLayout.LandingTip.actionGap,
         "layout.row.padding-y": CarryOnLayout.Row.paddingY,
         "layout.row.padding-x": CarryOnLayout.Row.paddingX,
         "layout.row.radius": CarryOnLayout.Row.radius,
@@ -436,6 +497,9 @@ public enum CarryOnTokenTable {
         "layout.bottom-bar.side": CarryOnLayout.BottomBar.side,
         "layout.bottom-bar.bottom": CarryOnLayout.BottomBar.bottom,
         "layout.bottom-bar.height": CarryOnLayout.BottomBar.height,
+        "layout.code-box.height": CarryOnLayout.CodeBox.height,
+        "layout.code-box.gap": CarryOnLayout.CodeBox.gap,
+        "layout.code-box.radius": CarryOnLayout.CodeBox.radius,
         "layout.mac-sidebar-row.height": CarryOnLayout.MacSidebarRow.height,
     ]
     public static let strings: [String: String] = [

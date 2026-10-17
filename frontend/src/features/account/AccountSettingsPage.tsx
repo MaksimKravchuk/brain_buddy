@@ -42,7 +42,6 @@ export function AccountSettingsPage({ directDelete = false }: { directDelete?: b
       counts={countsQuery.data?.counts_by_state ?? emptyCounts}
       projects={projectsQuery.data ?? []}
       tags={tagsQuery.data ?? []}
-      ground
     >
       <div className="mx-auto flex max-w-[760px] flex-col gap-5 pb-12">
         <header className="flex flex-col gap-4">

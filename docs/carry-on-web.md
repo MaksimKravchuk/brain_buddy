@@ -62,7 +62,15 @@ Type: `font-voice` (Instrument Serif) for titles and empty states;
 
 ## Dark mode
 
-Dark role values exist under `:root[data-theme="dark"]`, but nothing sets that
-attribute yet: a dark ground under screens that still hard-code white cards
-would be unreadable. Turn it on after the last screen migrates, together with
-removing `styles/tokens.css` and the old theme values in `styles.css`.
+Dark mode is on and follows the operating system. `src/theme.ts` keeps
+`data-theme` on `<html>` in step with `prefers-color-scheme` (there is no in-app
+setting), and `styles/carryOn.css` switches the role values under
+`:root[data-theme="dark"]`. Screens that use roles (`bg-ground`, `text-ink`,
+`bg-card`, `bg-quiet`…) need nothing more.
+
+Every screen uses roles, so every screen follows the OS in dark mode; the legacy
+palette (`--color-surface-*`, `--color-brand-primary`, `--color-ai-*`,
+`--color-needs-you-*`, the old shadows and `styles/tokens.css`) is gone. Overlays
+are `co-glass-dense` panels on a `bg-ink/30` scrim, with no shadow utilities.
+Avoid chips on selected rows: in dark, quiet and selected are the same
+stone.

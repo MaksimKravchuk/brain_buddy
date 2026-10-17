@@ -9,7 +9,7 @@ import { Spinner } from "../../components/ui/Spinner";
 export const INVITE_INVALID = "That invite code isn't valid or has already been used. Check it and try again.";
 export const INVITE_EXPIRED = "This sign-in has expired. Start again to create your account.";
 export const INVITE_RATE_LIMITED = "Too many requests. Try again in a few minutes.";
-const UPDATE_REQUIRED = "Brain Buddy has been updated. Reload this page to continue. Nothing in your account was changed.";
+const UPDATE_REQUIRED = "Carry On has been updated. Reload this page to continue. Nothing in your account was changed.";
 const SPINNER_DELAY_MS = 300;
 const withReference = (text: string, id?: string) => id ? `${text} Reference: ${id}` : text;
 
@@ -17,7 +17,7 @@ interface Props { pending: string; onSignedIn: (result: Completion) => Promise<v
 type Failure = { invalid: boolean; text: string } | null;
 
 function describe(caught: unknown): { expired: boolean; failure: Failure; blockMs?: number } {
-  if (!(caught instanceof ApiError)) return { expired: false, failure: { invalid: false, text: "Couldn't reach Brain Buddy. Check your connection and try again." } };
+  if (!(caught instanceof ApiError)) return { expired: false, failure: { invalid: false, text: "Couldn't reach Carry On. Check your connection and try again." } };
   if (caught.status === 410) return { expired: true, failure: null };
   if (caught.status === 400) return { expired: false, failure: { invalid: true, text: withReference(INVITE_INVALID, caught.correlationId) } };
   if (caught.status === 429) return { expired: false, failure: { invalid: false, text: INVITE_RATE_LIMITED }, blockMs: caught.retryAfterMs ?? Infinity };
@@ -67,7 +67,7 @@ export function InviteStep({ pending, onSignedIn, onRestart, onCancel }: Props):
   if (expired) return <div><p role="alert">{INVITE_EXPIRED}</p><Button ref={restart} variant="primary" className="mt-4 min-h-11 w-full" onClick={onRestart}>Back to sign in</Button></div>;
   return <form className="flex flex-col gap-3" onSubmit={submit} aria-labelledby="invite-step-title">
     <h2 id="invite-step-title" className="font-voice text-2xl text-ink">Enter your invite code</h2>
-    <p id="invite-step-help" className="text-co-meta text-ink-muted">Brain Buddy is invite-only. No account uses this sign-in yet. Enter your invite code to create one.</p>
+    <p id="invite-step-help" className="text-co-meta text-ink-muted">Carry On is invite-only. No account uses this sign-in yet. Enter your invite code to create one.</p>
     <label className="flex flex-col gap-1 text-co-meta">
       <span className="font-medium text-ink">Invite code</span>
       <input ref={field} type="text" value={code} readOnly={busy} autoComplete="off" autoCapitalize="off" spellCheck={false}

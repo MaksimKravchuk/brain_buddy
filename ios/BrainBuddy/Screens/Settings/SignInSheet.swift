@@ -1,6 +1,7 @@
 import AuthenticationServices
 import BrainBuddyAPI
 import BrainBuddyCore
+import BrainBuddyDesign
 import BrainBuddySync
 import BrainBuddyWorkspace
 import Foundation
@@ -72,39 +73,57 @@ struct SignInSheet: View {
 
     var body: some View {
         NavigationStack {
+            Group {
+            if step == .invite {
+                inviteStep
+            } else {
             Form {
                 Section {
                     Text(workspace.account == nil ? "Sign in or create an account" : "Sign in again")
-                        .font(.headline)
+                        .carryOnFont(CarryOnTypeScale.title)
+                        .foregroundStyle(.coTextPrimary)
                     Text("Your local tasks are kept if sign-in fails. Signing in merges them with your account.")
-                        .font(BBFont.secondary).foregroundStyle(BBColor.textSecondary)
+                        .carryOnFont(CarryOnTypeScale.meta).foregroundStyle(.coTextSecondary)
                     if let account = workspace.account {
                         Text("Use the account linked to this iPhone. Sign out first to use another account.")
-                            .font(BBFont.secondary)
+                            .carryOnFont(CarryOnTypeScale.meta).foregroundStyle(.coTextSecondary)
                         LabeledContent("Server", value: SettingsScreen.hostDescription(account.serverURL))
                     }
                     if !isOnline { Text("Your local tasks are kept. Connect to the internet to sign in.") }
                     if let notice { Text(notice).accessibilityAddTraits(.updatesFrequently) }
                 }
+                .signInRows()
                 if let failureMessage {
                     Section {
                         EditorValidationMessage(text: failureMessage)
                         if let failureReferenceID { Text("Reference ID: \(failureReferenceID)").font(.footnote.monospaced()).textSelection(.enabled) }
                     }
+                    .signInRows()
                 }
-                entrySection
+                entrySection.signInRows()
                 if workspace.account == nil, step == .choice || step == .password || step == .recovery {
                     Section {
                         DisclosureGroup("Advanced", isExpanded: $showsAdvanced) {
                             TextField("Server address", text: $serverAddress)
                                 .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
-                                .focused($focused, equals: .server).frame(minHeight: 44)
-                            Text("Use an https address. http works only for localhost, during development.").font(BBFont.meta)
-                            Button("Use the default server") { serverAddress = SignInServerAddress.defaultString }.frame(minHeight: 44)
+                                .focused($focused, equals: .server).carryOnField()
+                            Text("Use an https address. http works only for localhost, during development.").carryOnFont(CarryOnTypeScale.meta).foregroundStyle(.coTextSecondary)
+                            Button("Use the default server") { serverAddress = SignInServerAddress.defaultString }.signInLink()
                         }
-                    }.disabled(isBusy)
+                    }.disabled(isBusy).signInRows()
                 }
-                if let privacyURL { Section { Link("Privacy policy", destination: privacyURL).frame(minHeight: 44) } }
+                if let privacyURL {
+                    Section {
+                        Link("Privacy policy", destination: privacyURL)
+                            .carryOnFont(CarryOnTypeScale.meta).foregroundStyle(.coTextSecondary)
+                            .frame(minHeight: 44)
+                    }.signInRows()
+                }
+            }
+            .carryOnFont(CarryOnTypeScale.body)
+            .scrollContentBackground(.hidden)
+            .background(.coBgGround)
+            }
             }
             .navigationTitle(step == .recovery || step == .newPassword ? "Reset your password" : "Sign in")
             .navigationBarTitleDisplayMode(.inline)
@@ -129,57 +148,58 @@ struct SignInSheet: View {
         switch step {
         case .choice:
             Section {
-                if methods?.google == true {
-                    GoogleSignInButton(isBusy: isBusy) { startProvider(.google) }
-                        .disabled(isBusy || !isOnline)
-                }
                 if methods?.apple == true {
                     AppleSignInButton { startProvider(.apple) }
                         .frame(maxWidth: .infinity)
                         .frame(height: 44)
                         .disabled(isBusy || !isOnline)
                 }
+                if methods?.google == true {
+                    GoogleSignInButton(isBusy: isBusy) { startProvider(.google) }
+                        .disabled(isBusy || !isOnline)
+                }
                 if methods == nil {
                     Text(availabilityFailed ? "Couldn't load sign-in methods. Try again or use your password." : "Loading sign-in methods…")
-                    Button("Retry") { Task { await loadMethods() } }.frame(minHeight: 44).disabled(isBusy || !isOnline)
+                    Button("Retry") { Task { await loadMethods() } }.signInLink().disabled(isBusy || !isOnline)
                 }
                 if methods?.email == true {
+                    if methods?.apple == true || methods?.google == true { orDivider }
                     emailField
                     action("Continue with email", enabled: !email.isEmpty) { requestCode(recovering: false) }
                 }
-                Button("Use your password") { step = .password; focused = .email }.frame(minHeight: 44).disabled(isBusy)
+                Button("Use your password") { step = .password; focused = .email }.signInLink().disabled(isBusy)
             }
         case .password:
             Section {
                 emailField
                 SecureField("Password", text: $password).textContentType(.password).focused($focused, equals: .password)
-                    .frame(minHeight: 44).onSubmit { passwordSignIn() }
+                    .carryOnField().onSubmit { passwordSignIn() }
                 action("Sign in", enabled: !email.isEmpty && !password.isEmpty) { passwordSignIn() }
-                Button("Forgot password?") { password = ""; step = .recovery; focused = .email }.frame(minHeight: 44).disabled(isBusy)
+                Button("Forgot password?") { password = ""; step = .recovery; focused = .email }.signInLink().disabled(isBusy)
                 backButton
             }.disabled(isBusy)
         case .recovery:
             Section {
                 emailField
                 Text("If this address can be used, you'll receive a code. For an older unverified account, use its existing password and verify your email in account settings.")
-                    .font(BBFont.secondary)
+                    .carryOnFont(CarryOnTypeScale.meta).foregroundStyle(.coTextSecondary)
                 action("Send recovery code", enabled: !email.isEmpty && methods?.email == true) { requestCode(recovering: true) }
                 backButton
             }.disabled(isBusy)
         case .code:
             Section {
-                Text(recovery ? "Confirm your recovery code" : "Check your email").font(.headline)
-                Text("If this address can be used, you will receive a code. Use another email or method if it doesn't arrive.").font(BBFont.secondary)
+                Text(recovery ? "Confirm your recovery code" : "Check your email").carryOnFont(CarryOnTypeScale.title)
+                Text("If this address can be used, you will receive a code. Use another email or method if it doesn't arrive.").carryOnFont(CarryOnTypeScale.meta).foregroundStyle(.coTextSecondary)
                 TextField("Email code", text: $code).textContentType(.oneTimeCode).keyboardType(.numberPad)
-                    .focused($focused, equals: .code).frame(minHeight: 44)
+                    .focused($focused, equals: .code).carryOnField()
                     .onChange(of: code) { _, new in code = String(new.filter { $0.isASCII && $0.isNumber }.prefix(6)) }
                 action("Verify code", enabled: code.count == 6) { verifyCode() }
                 if let challenge {
-                    Text("Expires \(challenge.expiresAt.formatted(date: .omitted, time: .shortened))").font(BBFont.meta)
+                    Text("Expires \(challenge.expiresAt.formatted(date: .omitted, time: .shortened))").carryOnFont(CarryOnTypeScale.meta).foregroundStyle(.coTextSecondary)
                     TimelineView(.periodic(from: .now, by: 1)) { context in
                         let seconds = max(0, Int(challenge.resendAt.timeIntervalSince(context.date).rounded(.up)))
                         Button(seconds > 0 ? "Resend in \(seconds)s" : "Resend code") { resendCode() }
-                            .frame(minHeight: 44).disabled(seconds > 0 || isBusy || !isOnline || context.date >= challenge.expiresAt)
+                            .signInLink().disabled(seconds > 0 || isBusy || !isOnline || context.date >= challenge.expiresAt)
                     }
                 }
                 backButton
@@ -187,39 +207,101 @@ struct SignInSheet: View {
         case .newPassword:
             Section {
                 Text("At least 12 characters. Longer is better.")
-                SecureField("New password", text: $password).textContentType(.newPassword).focused($focused, equals: .newPassword).frame(minHeight: 44)
-                SecureField("Repeat password", text: $repeatedPassword).textContentType(.newPassword).focused($focused, equals: .repeatPassword).frame(minHeight: 44)
-                Text("Your other sessions will end after the reset.").font(BBFont.secondary)
+                SecureField("New password", text: $password).textContentType(.newPassword).focused($focused, equals: .newPassword).carryOnField()
+                SecureField("Repeat password", text: $repeatedPassword).textContentType(.newPassword).focused($focused, equals: .repeatPassword).carryOnField()
+                Text("Your other sessions will end after the reset.").carryOnFont(CarryOnTypeScale.meta).foregroundStyle(.coTextSecondary)
                 action("Save password", enabled: password.count >= 12 && password == repeatedPassword) { savePassword() }
                 backButton
             }.disabled(isBusy)
         case .collision:
             Section {
-                Text("Connect to your existing account").font(.headline)
+                Text("Connect to your existing account").carryOnFont(CarryOnTypeScale.title)
                 Text("Sign in to your existing account, then explicitly connect this method in account settings. Matching email doesn't merge accounts.")
-                Button("Sign in to existing account") { returnToChoice() }.frame(minHeight: 44)
+                Button("Sign in to existing account") { returnToChoice() }.signInLink()
                 backButton
             }
         case .invite:
-            // Design M-03: .01 default, .02 busy (disabled), .03/.07 inline errors, .04 expired.
-            Section {
-                if inviteExpired {
-                    Text(InviteStepCopy.expired).font(.headline)
-                    Button("Back to sign in") { returnToChoice() }.frame(minHeight: 44)
-                } else {
-                    Text("Enter your invite code").font(.headline).accessibilityAddTraits(.isHeader)
-                    Text("Brain Buddy is invite-only. No account uses this sign-in yet. Enter your invite code to create one.")
-                        .font(BBFont.secondary)
+            EmptyView() // Drawn by `inviteStep`, outside the Form.
+        }
+    }
+
+    /// Board 06: the invite step on a flat page with the glass action bar. One field, not the
+    /// board's six boxes, because real invite codes are long tokens.
+    private var inviteStep: some View {
+        let typed = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        return ScrollView {
+            VStack(alignment: .leading, spacing: CGFloat(CarryOnSpace.md)) {
+                if !inviteExpired {
+                    Text(typed.isEmpty ? "New account" : "New account · \(typed)")
+                        .carryOnFont(CarryOnTypeScale.meta)
+                        .foregroundStyle(.coTextSecondary)
+                }
+                Text(inviteExpired ? InviteStepCopy.expired : "Enter your invite code")
+                    .carryOnFont(CarryOnTypeScale.title)
+                    .foregroundStyle(.coTextPrimary)
+                    .accessibilityAddTraits(.isHeader)
+                if !inviteExpired {
+                    Text("Carry On is invite-only for now. No account uses this sign-in yet, so a code creates one.")
+                        .carryOnFont(CarryOnTypeScale.meta)
+                        .foregroundStyle(.coTextSecondary)
                     TextField("Invite code", text: $inviteCode)
                         .font(.body.monospaced())
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .submitLabel(.continue)
-                        .focused($focused, equals: .invite).frame(minHeight: 44)
+                        .focused($focused, equals: .invite)
                         .onSubmit { if canSubmitInvite { submitInvite() } }
-                    action("Continue", enabled: canSubmitInvite) { submitInvite() }
+                        .carryOnField()
+                        .disabled(isBusy)
+                    Text("No code? You can keep using Carry On on this iPhone; nothing is lost.")
+                        .carryOnFont(CarryOnTypeScale.meta)
+                        .foregroundStyle(.coTextSecondary)
+                    if !isOnline {
+                        Text("Your local tasks are kept. Connect to the internet to sign in.")
+                            .carryOnFont(CarryOnTypeScale.meta)
+                            .foregroundStyle(.coTextSecondary)
+                    }
                 }
-            }.disabled(isBusy)
+                if let failureMessage, !inviteExpired {
+                    EditorValidationMessage(text: failureMessage)
+                    if let failureReferenceID {
+                        Text("Reference ID: \(failureReferenceID)")
+                            .font(.footnote.monospaced())
+                            .foregroundStyle(.coTextSecondary)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, CGFloat(CarryOnSpace.lg))
+            .padding(.top, CGFloat(CarryOnSpace.lg))
+            .padding(.bottom, CGFloat(CarryOnSpace.md))
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            BBGlassActionBar {
+                if !inviteExpired {
+                    Button {
+                        submitInvite()
+                    } label: {
+                        HStack(spacing: CGFloat(CarryOnSpace.xs)) {
+                            if isBusy { ProgressView() }
+                            Text("Create account")
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.carryOnStrong)
+                    .disabled(!canSubmitInvite || isBusy || !isOnline)
+                }
+                Button {
+                    returnToChoice()
+                } label: {
+                    Text(inviteExpired ? "Back to sign in" : "Back")
+                        .frame(maxWidth: inviteExpired ? .infinity : nil)
+                }
+                .buttonStyle(.carryOnQuiet)
+                .disabled(isBusy)
+            }
+        }
+        .background(.coBgGround)
     }
 
     private var canSubmitInvite: Bool {
@@ -228,15 +310,27 @@ struct SignInSheet: View {
 
     private var emailField: some View {
         TextField("Email", text: $email).textContentType(.username).keyboardType(.emailAddress)
-            .textInputAutocapitalization(.never).autocorrectionDisabled().focused($focused, equals: .email).frame(minHeight: 44)
+            .textInputAutocapitalization(.never).autocorrectionDisabled().focused($focused, equals: .email).carryOnField()
+    }
+
+    /// Board 05: "or" between the providers and email, with hairlines.
+    private var orDivider: some View {
+        HStack(spacing: CGFloat(CarryOnSpace.sm)) {
+            Rectangle().fill(.coControlQuietPressed).frame(height: 1)
+            Text("or")
+            Rectangle().fill(.coControlQuietPressed).frame(height: 1)
+        }
+        .carryOnFont(CarryOnTypeScale.meta)
+        .foregroundStyle(.coTextSecondary)
+        .accessibilityHidden(true)
     }
     private var backButton: some View {
-        Button("Use another method") { returnToChoice() }.frame(minHeight: 44).disabled(isBusy)
+        Button("Use another method") { returnToChoice() }.signInLink().disabled(isBusy)
     }
     private func action(_ title: String, enabled: Bool = true, body: @escaping () -> Void) -> some View {
         Button(action: body) {
-            HStack { if isBusy { ProgressView() }; Text(isBusy ? "Please wait…" : title) }.frame(maxWidth: .infinity, minHeight: 44)
-        }.buttonStyle(.glassProminent).tint(BBColor.brandFill).disabled(!enabled || isBusy || !isOnline)
+            HStack { if isBusy { ProgressView() }; Text(isBusy ? "Please wait…" : title) }.frame(maxWidth: .infinity)
+        }.buttonStyle(.carryOnSecondary).disabled(!enabled || isBusy || !isOnline)
     }
 
     private func loadMethods() async {
@@ -496,5 +590,30 @@ enum SignInServerAddress {
     /// `localhost`, so that is the one development host accepted.
     static func isLocalHost(_ host: String) -> Bool {
         host == "localhost"
+    }
+}
+
+// MARK: - Carry On styling (board 05)
+
+private extension View {
+    /// Rows sit straight on the sheet: no row fill, no separators.
+    func signInRows() -> some View {
+        listRowBackground(Color.clear).listRowSeparator(.hidden)
+    }
+
+    /// A text field on a surface-card with the board's 14 pt radius.
+    func carryOnField() -> some View {
+        padding(.horizontal, CGFloat(CarryOnSpace.md))
+            .frame(minHeight: 44)
+            .background(.coSurfaceCard, in: RoundedRectangle(cornerRadius: CGFloat(CarryOnRadius.md), style: .continuous))
+    }
+
+    /// The small text links: meta, secondary, left aligned, still a 44 pt target.
+    func signInLink() -> some View {
+        buttonStyle(.plain)
+            .carryOnFont(CarryOnTypeScale.meta)
+            .foregroundStyle(.coTextSecondary)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
     }
 }

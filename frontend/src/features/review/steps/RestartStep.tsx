@@ -88,17 +88,17 @@ export function RestartStep({
 
   return (
     <>
-      <h1 ref={headingRef} tabIndex={-1} className="m-0 text-2xl font-semibold text-slate-900 outline-hidden">
+      <h1 ref={headingRef} tabIndex={-1} className="m-0 font-voice text-co-title text-ink outline-hidden focus-visible:shadow-ring-focus">
         {neverReviewed ? "Your first review" : "Welcome back"}
       </h1>
-      <p className="m-0 text-sm text-slate-600">
+      <p className="m-0 text-co-meta text-ink-muted">
         {neverReviewed
           ? "Let's make Next fit the week ahead."
           : `Your last review was ${daysInNext(state.last_counted_review_at as string, now)} days ago. Gaps happen. Let's make Next fit the week ahead.`}
       </p>
       {bulk.undone ? (
         <>
-          <p role="status" className="m-0 text-sm text-slate-700">
+          <p role="status" className="m-0 text-co-meta text-ink-muted">
             {bulk.undone.skipped.length === 0
               ? `Undone. All ${bulk.undone.restored.length} are back in Next as they were.`
               : `${bulk.undone.restored.length} are back in Next. ${bulk.undone.skipped.length} changed on another device and stayed in Someday / maybe.`}
@@ -107,13 +107,13 @@ export function RestartStep({
         </>
       ) : released ? (
         <>
-          <p role="status" className="m-0 text-sm text-slate-700">
+          <p role="status" className="m-0 text-co-meta text-ink-muted">
             {released.resumed
               ? `${plural(released.released, "task was", "tasks were")} released to Someday / maybe.`
               : `${plural(released.released, "task")} released to Someday / maybe. Next now holds ${(next.data ?? []).length - released.released} tasks.`}
           </p>
           {released.skipped > 0 ? (
-            <p className="m-0 text-sm text-slate-600">{`${plural(released.skipped, "task changed", "tasks changed")} on another device in the meantime, so ${pick(released.skipped, "it", "they")} stayed in Next.`}</p>
+            <p className="m-0 text-co-meta text-ink-muted">{`${plural(released.skipped, "task changed", "tasks changed")} on another device in the meantime, so ${pick(released.skipped, "it", "they")} stayed in Next.`}</p>
           ) : null}
           {bulk.undoAction.failure ? <FailureBanner failure={bulk.undoAction.failure} online={bulk.undoAction.online} /> : null}
           <div className="flex flex-wrap gap-2">
@@ -124,34 +124,34 @@ export function RestartStep({
           </div>
         </>
       ) : next.isError && !next.isFetching ? (
-        <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+        <div role="alert" className="flex flex-wrap items-center gap-2 rounded-card bg-quiet px-3 py-2 text-co-meta text-warning">
           <span>We couldn&apos;t check your Next actions.</span>
           <Ref id={describeReviewError(next.error).referenceId} />
-          <button type="button" className="min-h-11 rounded-lg px-3 font-semibold hover:bg-amber-100" onClick={() => void next.refetch()}>
+          <button type="button" className="min-h-11 rounded-control px-3 font-semibold hover:bg-quiet-pressed" onClick={() => void next.refetch()}>
             Retry
           </button>
-          <button type="button" className="min-h-11 rounded-lg px-3 font-semibold hover:bg-amber-100" onClick={start}>
+          <button type="button" className="min-h-11 rounded-control px-3 font-semibold hover:bg-quiet-pressed" onClick={start}>
             Start the review
           </button>
         </div>
       ) : next.data === undefined ? (
-        <p role="status" aria-busy="true" className="m-0 text-sm text-slate-500">Checking your Next actions…</p>
+        <p role="status" aria-busy="true" className="m-0 text-co-meta text-ink-muted">Checking your Next actions…</p>
       ) : eligible.length === 0 ? (
         <>
-          <p className="m-0 text-sm text-slate-600">Nothing in Next is older than 4 weeks, so let&apos;s go straight in.</p>
+          <p className="m-0 text-co-meta text-ink-muted">Nothing in Next is older than 4 weeks, so let&apos;s go straight in.</p>
           <div>{startButton}</div>
         </>
       ) : (
-        <div className="flex flex-col gap-3 rounded-[14px] border border-slate-200 bg-white p-4 shadow-soft">
-          <p className="m-0 text-base font-semibold text-slate-900">{`${plural(eligible.length, "next action is", "next actions are")} older than 4 weeks`}</p>
-          <p className="m-0 text-sm text-slate-600">Release them to Someday / maybe in one go? They keep their project, Tags and notes, and you can undo this right away.</p>
+        <div className="flex flex-col gap-3 rounded-card bg-card p-4">
+          <p className="m-0 text-co-body font-semibold text-ink">{`${plural(eligible.length, "next action is", "next actions are")} older than 4 weeks`}</p>
+          <p className="m-0 text-co-meta text-ink-muted">Release them to Someday / maybe in one go? They keep their project, Tags and notes, and you can undo this right away.</p>
           {bulk.releaseAction.failure ? <FailureBanner failure={bulk.releaseAction.failure} online={bulk.releaseAction.online} /> : null}
           {expanded ? (
-            <ul aria-label="Next actions older than 4 weeks" className="m-0 flex list-none flex-col divide-y divide-slate-100 p-0 text-sm text-slate-800">
+            <ul aria-label="Next actions older than 4 weeks" className="m-0 flex list-none flex-col p-0 text-co-meta text-ink">
               {eligible.map((task) => (
                 <li key={task.id} className="flex justify-between gap-3 py-2">
                   <span>{task.title}</span>
-                  <span className="text-xs text-slate-500">{`${daysInNext((task.formulation as NonNullable<TaskResponse["formulation"]>).started_at, now)} days`}</span>
+                  <span className="text-co-meta text-ink-muted">{`${daysInNext((task.formulation as NonNullable<TaskResponse["formulation"]>).started_at, now)} days`}</span>
                 </li>
               ))}
             </ul>

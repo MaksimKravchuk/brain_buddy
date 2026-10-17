@@ -37,4 +37,15 @@ public enum NativeAccountDestination {
         c.queryItems = [URLQueryItem(name: "expected_owner", value: ownerID)]
         return c.url
     }
+
+    /// The web agents page (spec 028): same origin rules, fixed path, no query, no credential.
+    public static func agentsURL(origin: String) -> URL? {
+        guard var c = URLComponents(string: origin), let host = c.host, !host.isEmpty,
+            c.scheme == "https" || (c.scheme == "http" && host == "localhost"),
+            c.user == nil, c.password == nil, c.query == nil, c.fragment == nil,
+            c.path.isEmpty || c.path == "/"
+        else { return nil }
+        c.path = "/settings/agents"
+        return c.url
+    }
 }

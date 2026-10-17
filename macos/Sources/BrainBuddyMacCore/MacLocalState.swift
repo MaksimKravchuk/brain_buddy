@@ -21,6 +21,8 @@ package struct MacLocalState: Codable, Hashable, Sendable {
     package var somedayReviews: [String: TaskReviewMark]
     package var projectReviews: [String: ProjectReviewMark]
     package var sidebar: Sidebar
+    /// 029: the Mac's one-time first run. Dates and an outcome only, never text; nil on older files.
+    package var firstRun: FirstRunRecord?
 
     package struct Sidebar: Codable, Hashable, Sendable {
         /// X-06: the "Archived projects" disclosure, collapsed until the person opens it.
@@ -35,7 +37,7 @@ package struct MacLocalState: Codable, Hashable, Sendable {
         installSalt: Data, workspaceFirstWrittenAt: Date? = nil, legacyImport: LegacyImportRecord? = nil,
         legacyCleanupDoneAt: Date? = nil, waitingReviews: [String: TaskReviewMark] = [:],
         somedayReviews: [String: TaskReviewMark] = [:], projectReviews: [String: ProjectReviewMark] = [:],
-        sidebar: Sidebar = Sidebar()
+        sidebar: Sidebar = Sidebar(), firstRun: FirstRunRecord? = nil
     ) {
         version = Self.currentVersion
         self.installSalt = installSalt
@@ -46,6 +48,7 @@ package struct MacLocalState: Codable, Hashable, Sendable {
         self.somedayReviews = somedayReviews
         self.projectReviews = projectReviews
         self.sidebar = sidebar
+        self.firstRun = firstRun
     }
 
     /// A new state with a fresh salt.
@@ -56,7 +59,7 @@ package struct MacLocalState: Codable, Hashable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case version, installSalt, workspaceFirstWrittenAt, legacyImport, legacyCleanupDoneAt
-        case waitingReviews, somedayReviews, projectReviews, sidebar
+        case waitingReviews, somedayReviews, projectReviews, sidebar, firstRun
     }
 
     package init(from decoder: any Decoder) throws {
@@ -70,6 +73,24 @@ package struct MacLocalState: Codable, Hashable, Sendable {
         somedayReviews = try values.decodeIfPresent([String: TaskReviewMark].self, forKey: .somedayReviews) ?? [:]
         projectReviews = try values.decodeIfPresent([String: ProjectReviewMark].self, forKey: .projectReviews) ?? [:]
         sidebar = try values.decodeIfPresent(Sidebar.self, forKey: .sidebar) ?? Sidebar()
+        firstRun = try values.decodeIfPresent(FirstRunRecord.self, forKey: .firstRun)
+    }
+}
+
+/// 029-FR-015: when the first run was decided, how it ended and when its tip was dismissed.
+package struct FirstRunRecord: Codable, Hashable, Sendable {
+    package enum Outcome: String, Codable, Sendable {
+        case notNeeded, inProgress, skipped, notYet, firstStep, signedIn
+    }
+
+    package var decidedAt: Date
+    package var outcome: Outcome
+    package var tipDismissedAt: Date?
+
+    package init(decidedAt: Date, outcome: Outcome, tipDismissedAt: Date? = nil) {
+        self.decidedAt = decidedAt
+        self.outcome = outcome
+        self.tipDismissedAt = tipDismissedAt
     }
 }
 

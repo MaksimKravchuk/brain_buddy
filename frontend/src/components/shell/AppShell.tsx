@@ -17,9 +17,9 @@ import {
   RotateCcw,
   Search,
   Settings,
-  Sprout,
   X
 } from "lucide-react";
+import { CarryOnMark } from "../brand/CarryOnMark";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ComponentType, KeyboardEvent as ReactKeyboardEvent, ReactNode, RefObject } from "react";
 import { createPortal } from "react-dom";
@@ -50,8 +50,6 @@ interface AppShellProps {
   /** Overlay detail surface, outside the inert workspace. */
   panel?: ReactNode;
   panelModal?: boolean;
-  /** Carry On limestone ground. Screens not yet migrated keep the legacy surface, so their palette text stays readable. */
-  ground?: boolean;
   counts: TaskCounts;
   projects: ProjectResponse[];
   tags: TagResponse[];
@@ -148,7 +146,7 @@ function WeeklyReviewLink(): React.JSX.Element {
 }
 
 export function AppShell(props: AppShellProps): React.JSX.Element {
-  const { children, panel, panelModal, ground } = props;
+  const { children, panel, panelModal } = props;
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const navigationTriggerRef = useRef<HTMLButtonElement>(null);
   const location = useLocation();
@@ -170,7 +168,7 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
 
   return (
     <ShellToastProvider>
-      <div className={`min-h-screen text-ink ${ground ? "bg-ground" : "bg-surface-base"}`}>
+      <div className="min-h-screen bg-ground text-ink">
         <div inert={panelModal}>
           <TopBar onOpenDrawer={() => setIsDrawerOpen(true)} navigationTriggerRef={navigationTriggerRef} />
           <DeletionCancelledBanner />
@@ -606,8 +604,8 @@ function TopBar({ onOpenDrawer, navigationTriggerRef }: {
         <Menu className="h-5 w-5" />
       </button>
       <Link to="/tasks/next" className="flex shrink-0 items-center gap-2 whitespace-nowrap font-voice text-xl text-ink">
-        <Sprout className="h-[22px] w-[22px] text-ink max-[359px]:hidden" aria-hidden />
-        <span>BrainBuddy</span>
+        <CarryOnMark className="h-[26px] w-[26px] text-ink max-[359px]:hidden" />
+        <span>Carry On</span>
       </Link>
       <TaskSearch className="hidden w-[340px] max-w-[32vw] md:flex" findShortcut />
       <div className="ml-auto flex shrink-0 items-center gap-2 max-[359px]:gap-1 sm:gap-3">

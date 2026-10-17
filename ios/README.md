@@ -132,11 +132,17 @@ with the package tests red or the app unbuilt.
 | `ios-kit` | `ubuntu-latest`, `swift:6.2-noble` | The package builds and its tests pass on Linux |
 | `ios-app` | `macos-26`, newest Xcode 26 | The generated project builds the app and widgets for the simulator (unsigned); the package tests pass on macOS. The raw `xcodebuild` log and `.xcresult` are uploaded on failure |
 
-On a pull request they do their work only when it touches `ios/` (or a shared
-surface such as `.github/` or `scripts/`); otherwise they pass at once, and
-`ios-app` does so on Linux rather than waiting for a macOS runner. On pushes
-to `main` and `trunk-candidate/**` they always run, as every lane does on the
-landing path.
+On pull requests, `ios-app` runs for changes under `ios/` or `rust/` and
+shared CI inputs. `ios-kit` runs for kit, bridge-script and Rust inputs.
+Unaffected lanes pass without building; `ios-app` uses a Linux runner for
+that no-op. Tooling changes exercise the lanes that consume them, while a
+`.github/` change exercises every lane.
+
+Merge groups and `trunk-candidate/**` pushes run all Linux lanes, including
+`ios-kit`; `ios-app` follows the same input filter. A push to `main` skips
+repeating the native builds only when the exact SHA already passed CI as a
+merge group or trunk candidate. Nightly main CI runs the native lanes again
+to catch changes outside the source tree, such as a new Xcode.
 
 [`.github/workflows/ios.yml`](../.github/workflows/ios.yml) only uploads: see
 TestFlight below. Neither is part of `make verify-all`.
@@ -147,6 +153,27 @@ both workflows pin the same pair. To upgrade XcodeGen, download the new
 `xcodegen.zip`, take its `shasum -a 256`, and change both values together in
 both files. In `ios.yml`, which holds the App Store Connect key, every action
 is also pinned to a commit SHA (with its tag in a comment).
+
+### Shared Apple Rust bridge cache
+
+[The trusted main-push cache producer](../.github/workflows/warm-rust-bridge.yml)
+prepares the existing full Apple and Mac-only Rust bridge artifacts in the `main`
+cache scope. Pull requests and merge-group branches can restore that shared cache;
+a cache created only for one PR or queue branch is not shared with its siblings.
+
+Keys include the Rust source tree, bridge build script, selected Xcode version,
+host architecture and target set. Only an exact match skips Rust compilation.
+A missing or evicted entry still takes the existing cold-build path. This cache
+contains source-derived compiler output and generated bindings, with the existing
+GitHub inactivity/quota eviction policy; it contains no runtime user data or secrets.
+The app/widget build and complete package tests still run normally on affected PRs
+and merge groups. Cache warming never provides a product-check verdict.
+
+To check reuse, inspect the producer's successful run and the matching cache's
+`refs/heads/main` metadata, then inspect the merge-group iOS job for the exact cache
+hit, normal app/widget build, package test count and stage durations. Compare with
+a cold run using the same Rust inputs/toolchain; total CI time can still be limited
+by another required lane.
 
 ## TestFlight
 
@@ -413,9 +440,10 @@ release; then nothing is recorded and the Performance row is gone.
 - The design deviations in `docs/native-ios-app.md` (SF Symbols, derived dark
   mode, SF Pro, system glass motion, sky-700 for text and filled controls) are
   awaiting product sign-off.
-- The app icon is the Sprout logo in white on sky (`#0EA5E9`), a single
-  1024 × 1024 px image; iOS derives the dark and tinted variants. No other
-  brand mark exists yet.
+- The app icon is the Carry On "closer" icon, a single 1024 × 1024 px image
+  rendered from `.claude/skills/brain-buddy-design/brand/app-icon.svg` (opaque,
+  no corner mask); iOS derives the dark and tinted variants. The widget
+  extension has no icon of its own and uses the app's.
 - `Shared/PrivacyInfo.xcprivacy` declares a baseline (UserDefaults, file
   timestamps, account email and user content for app functionality). Keep it
   in step with the code.

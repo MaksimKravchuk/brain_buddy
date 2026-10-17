@@ -17,6 +17,8 @@ import SwiftUI
 struct ContentView: View {
     let launch: MacLaunch
     @State private var showsPlaceholders = false
+    /// 029-FR-002: the first-run decision is made before the workspace window renders.
+    @State private var firstRunDecided = false
 
     var body: some View {
         Group {
@@ -24,6 +26,8 @@ struct ContentView: View {
                 if host.workspace.loadError != nil {
                     // X-09: nothing syncs until the file can be read (mac-app-host §9).
                     UnreadableWorkspaceView(host: host)
+                } else if !firstRunDecided {
+                    LaunchPlaceholderView(visible: showsPlaceholders)
                 } else {
                     WorkspaceView(model: model, sync: sync)
                         .task {
@@ -38,6 +42,11 @@ struct ContentView: View {
             } else {
                 LaunchPlaceholderView(visible: showsPlaceholders)
             }
+        }
+        .onChange(of: launch.host != nil, initial: true) { _, ready in
+            guard ready, !firstRunDecided else { return }
+            if launch.host?.workspace.loadError == nil { launch.model?.decideFirstRun() }
+            firstRunDecided = true
         }
         .task {
             await launch.run { notice in UpgradeNotice.present(notice) }
@@ -189,6 +198,8 @@ struct WorkspaceView: View {
     @State private var columns: NavigationSplitViewVisibility = .all
     /// The window's undo stack: Edit › Undo (⌘Z) takes back the last Done, Cancel or move.
     @Environment(\.undoManager) private var undoManager
+    @Environment(\.openSettings) private var openSettings
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var quickCapture = QuickCaptureController()
     @State private var voicePresented = false
     @State private var selectedTaskID: TaskID?
@@ -247,6 +258,9 @@ struct WorkspaceView: View {
     @State private var renamingTask: TaskRecord?
     @State private var quickRenameTitle = ""
     @State private var quickRenameError: String?
+    @State private var capturingFirstItem = false
+    @State private var handingOff: TaskRecord?
+    @State private var agentList: AgentSettingsModel?
     @FocusState private var addFocused: Bool
     @FocusState private var quickRenameFocused: Bool
     @FocusState private var collectionNameFocused: Bool
@@ -274,7 +288,7 @@ struct WorkspaceView: View {
             sidebar
                 .navigationSplitViewColumnWidth(min: 310, ideal: 340, max: 400)
         } detail: {
-            taskCanvas
+            detailCanvas
                 .inspector(isPresented: inspectorPresented) {
                     inspectorContent
                         .inspectorColumnWidth(min: inspectorWidth, ideal: inspectorWidth, max: inspectorWidth)
@@ -309,7 +323,7 @@ struct WorkspaceView: View {
         .onChange(of: selectedTaskID) { _, id in sync.triggers?.setOpenTask(id) }
         .focusedSceneValue(\.workspaceModel, model)
         .focusedSceneValue(\.macSyncController, sync)
-        .onAppear { quickCapture.start(model: model) }
+        .onAppear(perform: windowAppeared)
         .onDisappear {
             quickCapture.stop()
             saveTaskEditsOnClose()
@@ -325,12 +339,50 @@ struct WorkspaceView: View {
         .onChange(of: model.workspace.state) { _, _ in Task { await model.prepareVisibleQueries() } }
     }
 
+    /// The agent-run hooks, kept off `window` so its modifier chain stays within the type checker's budget.
+    private var agentAwareCanvas: some View {
+        firstRunCanvas
+            .task(id: model.workspace.account?.id) { await model.refreshAgents() }
+            .task { await model.agentRuns.run() }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in Task { await model.refreshAgents() } }
+            .onChange(of: scenePhase) { _, phase in model.agentRuns.isWindowVisible = phase != .background }
+            .onChange(of: model.agentAvailability.isOnline) { _, online in model.agentRuns.isOnline = online }
+            .onChange(of: model.sidebarCounts) { _, _ in if model.showsAgentsSection { Task { await model.refreshAgentSteps() } } }
+            .onChange(of: model.showsAgentsSection) { _, shown in if !shown, model.destination.isAgentRuns { requestNavigation(.destination(.list(.waiting))) } }
+    }
+
+    @ViewBuilder
+    private var routedCanvas: some View {
+        if case .agentRuns(let filter) = model.destination {
+            AgentRunsCanvas(model: model, filter: filter, selectedTaskID: selectedTaskID, onSelect: selectRun)
+                .onChange(of: selectedTaskID.flatMap { model.task($0) }) { _, task in
+                    if let task, taskForm?.taskID != task.id { taskForm = TaskAutosave(task: task) }
+                }
+        } else {
+            taskCanvas
+        }
+    }
+
+    private func selectRun(_ run: AgentRunItem) {
+        if let id = model.stepID(forServerID: run.taskServerID) { requestNavigation(.task(id)) }
+    }
+
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         // X-01 "sidebar hidden": in attention states only, the line's words and glyph; nothing
         // about sync in the toolbar otherwise.
         ToolbarItem(placement: .navigation) {
             SyncToolbarStatusItem(controller: sync, sidebarHidden: columns == .detailOnly)
+        }
+        ToolbarItem(placement: .primaryAction) {
+            if model.destination.isAgentRuns, model.canAddAgent {
+                Button {
+                    model.agentAvailability.requestAddAgent()
+                    openSettings()
+                } label: {
+                    Label { Text(AgentsCopy.addNewAgent) } icon: { MacBoardIconView(icon: .plus, size: 15) }
+                }
+            }
         }
         ToolbarItemGroup(placement: .primaryAction) {
             Button {
@@ -368,16 +420,54 @@ struct WorkspaceView: View {
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
                 .selectionDisabled()
-            ForEach(SidebarEntries.standard.sections) { section in
+            ForEach(fixedSidebarSections) { section in
+                if section.id == "dates", !firstRun.showsFirstRunSidebar { agentsSection }
                 sidebarSection(section)
             }
-            projectsSection
-            archivedProjectsSection
-            tagsSection
+            if !firstRun.showsFirstRunSidebar {
+                projectsSection
+                archivedProjectsSection
+                tagsSection
+            }
         }
         .listStyle(.sidebar)
         .navigationTitle("BrainBuddy")
         .safeAreaInset(edge: .bottom) { footer }
+    }
+
+    /// G-01, between Lists and Dates: All runs and the agents of the listed runs (board M22, DSAgents).
+    @ViewBuilder
+    private var agentsSection: some View {
+        if model.showsAgentsSection {
+            let runs = model.listedRuns
+            let rows = AgentSidebarRow.rows(
+                runs: runs, counts: model.agentRuns.perAgentCounts, connections: agentList?.rows ?? [])
+            Section {
+                sidebarButton(
+                    AgentsCopy.allRuns, symbol: "", destination: .agentRuns(.all), trailing: runs.isEmpty ? nil : "\(runs.count)")
+                ForEach(rows) { row in
+                    sidebarButton(
+                        row.name, symbol: "", destination: .agentRuns(.agent(row.id)), trailing: row.trailing,
+                        attention: row.needsYou)
+                }
+            } header: { MacSidebarSectionHeader(title: AgentsCopy.sidebar) }
+            .task(id: model.workspace.account?.id) { await loadAgentList() }
+        }
+    }
+
+    /// The connection list behind the status words of agents with no listed runs (030-FR-004).
+    private func loadAgentList() async {
+        guard let account = model.workspace.account else { return agentList = nil }
+        let list = agentList ?? AgentSettingsModel(account: account, availability: model.agentAvailability)
+        list.update(account: account)
+        agentList = list
+        await list.reload()
+    }
+
+    /// F-04: Lists and Dates only while the first run shows.
+    private var fixedSidebarSections: [SidebarSection] {
+        let all = SidebarEntries.standard.sections
+        return firstRun.showsFirstRunSidebar ? all.filter { $0.header == "Lists" || $0.header == "Dates" } : all
     }
 
     private var projectsSection: some View {
@@ -625,22 +715,24 @@ struct WorkspaceView: View {
     }
 
     private func sidebarButton(
-        _ title: String, symbol: String, destination: WorkspaceDestination, tint: Color? = nil
+        _ title: String, symbol: String, destination: WorkspaceDestination, tint: Color? = nil, trailing: String? = nil,
+        attention: Bool = false
     ) -> some View {
         let count: Int? = {
-            guard case .list(let list) = destination else { return nil }
+            guard case .list(let list) = destination, !firstRun.showsFirstRunSidebar else { return nil }
             guard model.countsReadiness == .ready else { return nil }
-            return model.sidebarCounts.count(for: list)
+            // Waiting for counts its people and its listed agent runs: n + m (030-FR-009).
+            return model.sidebarCounts.count(for: list) + (list == .waiting ? model.listedRuns.count : 0)
         }()
         return Button {
             requestNavigation(.destination(destination))
         } label: {
             MacSidebarRowLabel(
                 title: title, leading: leading(symbol: symbol, destination: destination, tint: tint),
-                trailing: count.map { "\($0)" }, selected: model.destination == destination
+                trailing: count.map { "\($0)" } ?? trailing, selected: model.destination == destination, attention: attention
             )
         }
-        .accessibilityLabel(count.map { "\(title), \($0) open tasks" } ?? title)
+        .accessibilityLabel(count.map { "\(title), \($0) open tasks" } ?? (attention ? "\(title), needs you" : title))
         .buttonStyle(.plain)
         .listRowBackground(Color.clear)
     }
@@ -1064,13 +1156,91 @@ struct WorkspaceView: View {
         return section.title
     }
 
+    private var firstRun: FirstRunModel { model.firstRun }
+
+    /// F-03 stands in for the list only on Next actions; any other list the person opens shows as usual.
+    private var showsLanding: Bool { firstRun.phase == .landing && model.destination == .list(.next) }
+
+    private func windowAppeared() {
+        quickCapture.start(model: model)
+        firstRun.hotkeyAvailable = quickCapture.hotkeyRegistered
+        firstRun.speechAvailable = VoiceTranscriber.bundledModel() != nil
+    }
+
+    /// The detail column with the first-run hooks; they live here, not on `window`, so that
+    /// modifier chain stays within the type checker's budget.
+    private var detailCanvas: some View {
+        agentAwareCanvas
+            // 029-FR-013: an account linked at any step ends the first run.
+            .onChange(of: model.workspace.account != nil) { _, linked in
+                if linked { firstRun.accountLinked() }
+            }
+            .onChange(of: firstRun.phase) { _, phase in firstRunPhaseChanged(phase) }
+    }
+
+    /// F-01 replaces the empty Inbox; every other phase uses the list with F-02/F-03 around it.
+    @ViewBuilder
+    private var firstRunCanvas: some View {
+        if firstRun.phase == .welcome {
+            WelcomeInboxView(
+                text: $model.draft, hotkeyAvailable: firstRun.hotkeyAvailable, speechAvailable: firstRun.speechAvailable,
+                errorText: model.error, onSubmit: submitFirstCapture, onSkip: { firstRun.skip() },
+                onMic: { voicePresented = true }
+            )
+            .frame(minWidth: 560, minHeight: 480)
+            .background(.coBgGround)
+        } else {
+            routedCanvas
+        }
+    }
+
+    /// F-01.03: Return adds one Inbox item with exactly the typed text; the draft clears only then.
+    private func submitFirstCapture() {
+        guard !capturingFirstItem else { return }
+        capturingFirstItem = true
+        let written = model.draft
+        Task {
+            defer { capturingFirstItem = false }
+            if await firstRun.capture(written, using: model) { model.draft = "" }
+        }
+    }
+
+    private func firstRunPhaseChanged(_ phase: FirstRunPhase) {
+        switch phase {
+        case .firstStep(let id):
+            model.choose(.list(.inbox))
+            select(id)
+        case .landing:
+            model.choose(.list(.next))
+            select(nil)
+        case .undecided, .welcome, .done:
+            break
+        }
+    }
+
+    /// F-03: the card and the tip stand in for the list's one row.
+    @ViewBuilder
+    private var landing: some View {
+        if showsLanding {
+            let step = model.tasks.first { $0.state == .next }
+            LandingTip(
+                step: step?.title, tip: firstRun.landingTip,
+                onOpenStep: { if let step { requestNavigation(.task(step.id)) } },
+                onDismiss: { firstRun.dismissTip() }
+            )
+            .padding(.horizontal, 28)
+            .padding(.bottom, 16)
+        }
+    }
+
     private var taskCanvas: some View {
-        let sections = presentedSections(model.sections)
+        let sections = showsLanding ? [] : presentedSections(model.sections)
         let orders = Dictionary(sections.map { ($0.id, $0.rows.map(\.id)) }, uniquingKeysWith: { first, _ in first })
         let onScreen = sections.flatMap { $0.rows.map(\.id) }
         return VStack(alignment: .leading, spacing: 0) {
             canvasHeader
             canvasMessages
+            landing
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
@@ -1102,7 +1272,7 @@ struct WorkspaceView: View {
                             model.refreshQueryPresentation()
                         }
                     }
-                    .buttonStyle(.macSecondaryPill)
+                    .buttonStyle(.carryOnSecondary)
                     .disabled(!model.listPageState.hasPrevious)
                     Text("More results").macRowMeta()
                     Button("Next page") {
@@ -1111,7 +1281,7 @@ struct WorkspaceView: View {
                             model.refreshQueryPresentation()
                         }
                     }
-                    .buttonStyle(.macSecondaryPill)
+                    .buttonStyle(.carryOnSecondary)
                     .disabled(!model.listPageState.hasNext)
                 }
                 .frame(maxWidth: .infinity)
@@ -1149,7 +1319,10 @@ struct WorkspaceView: View {
 
     @ViewBuilder
     private var inspectorContent: some View {
-        if let id = selectedTaskID, let task = model.task(id) {
+        if case .firstStep(let id) = firstRun.phase, let task = model.task(id) {
+            FirstStepInspector(firstRun: firstRun, writer: model, original: task.title)
+                .id(id)
+        } else if let id = selectedTaskID, let task = model.task(id) {
             TaskInspector(
                 task: task, model: model,
                 title: formBinding(\.title, task.title),
@@ -1164,7 +1337,10 @@ struct WorkspaceView: View {
                 nextInboxID: nextInboxID(after: task),
                 onCommand: { inspectorCommand($0, task: task) },
                 onFocusChange: { inspectorFocus = $0 },
-                onExtrasDirtyChange: { extrasDirty = $0 }
+                onExtrasDirtyChange: { extrasDirty = $0 },
+                runSection: agentRunSection(for: task),
+                handOff: handOffControl(for: task),
+                onHandOff: { handingOff = task }
             )
             .id(task.id)
         } else {
@@ -1172,6 +1348,22 @@ struct WorkspaceView: View {
                 MacInspectorEmpty(text: "Select something to sort it.")
             }
         }
+    }
+
+    /// G-05 under the fields of a step that has a listed run (030-FR-019); nil otherwise.
+    private func agentRunSection(for task: TaskRecord) -> AnyView? {
+        guard let server = task.serverID, model.listedRuns.contains(where: { $0.taskServerID == server }) else { return nil }
+        return AgentRunSectionView(model: model, task: task, onHandOff: { handingOff = task }).map { AnyView($0.id(task.id)) }
+    }
+
+    private func handOffControl(for task: TaskRecord) -> HandOffControl {
+        HandOffControl(relayEnabled: model.agentAvailability.relayEnabled && model.workspace.account != nil, serverID: task.serverID)
+    }
+
+    /// G-04, attached beside the other task sheets (030-FR-013).
+    @ViewBuilder
+    private func handOffSheet(_ task: TaskRecord) -> some View {
+        if let sheet = HandoffSheet(model: model, task: task, onClose: { handingOff = nil }) { sheet }
     }
 
     /// The Inbox items on screen, in order.
@@ -1243,6 +1435,17 @@ struct WorkspaceView: View {
         if let overview {
             projectOverviewCard(overview)
                 .padding(.bottom, 16)
+        }
+        if model.destination == .list(.waiting), !model.listedRuns.isEmpty {
+            // G-03: runs above the list's own rows, which become the People group; no step moves.
+            sectionHeader(AgentsCopy.waitingAgents, top: 0)
+            ForEach(model.listedRuns) { run in
+                AgentRunRow(
+                    item: run, style: .waiting, now: Date(),
+                    selected: selectedTaskID != nil && selectedTaskID == model.stepID(forServerID: run.taskServerID),
+                    onSelect: { selectRun(run) })
+            }
+            sectionHeader(AgentsCopy.waitingPeople, top: 14)
         }
         if let pinned = quickOpenedTaskID, selectedTaskID == pinned, !onScreen.contains(pinned), let task = model.task(pinned) {
             sectionHeader("Opened from Quick Open", top: 0)
@@ -1339,7 +1542,7 @@ struct WorkspaceView: View {
                     .foregroundStyle(.coTextSecondary)
                     .carryOnFont(CarryOnTypeScale.meta)
             }
-            listControls
+            if !firstRun.showsFirstRunSidebar { listControls }
         }
         .padding(.horizontal, 28)
         .padding(.top, 28)
@@ -1370,15 +1573,15 @@ struct WorkspaceView: View {
         HStack(spacing: 16) {
             if model.destination == .list(.inbox) {
                 Button("Clarify Inbox") { requestNavigation(.clarifyInbox) }
-                    .buttonStyle(.macSecondaryPill)
+                    .buttonStyle(.carryOnSecondary)
             }
             if model.destination == .list(.waiting) {
                 Button("Review Waiting for") { requestNavigation(.reviewWaiting) }
-                    .buttonStyle(.macSecondaryPill)
+                    .buttonStyle(.carryOnSecondary)
             }
             if model.destination == .list(.someday) {
                 Button("Review Someday") { requestNavigation(.reviewSomeday) }
-                    .buttonStyle(.macSecondaryPill)
+                    .buttonStyle(.carryOnSecondary)
             }
             if model.destination == .list(.next) {
                 Toggle(
@@ -1447,11 +1650,21 @@ struct WorkspaceView: View {
         case .project(let id): model.project(id)?.name ?? "Project"
         case .tag(let id): "#" + (model.tag(id)?.name ?? "Tag")
         case .history(let state): state.title
+        case .agentRuns: AgentsCopy.allRuns
         }
     }
 
     private var taskCountCaption: String {
+        switch firstRun.phase {
+        case .firstStep where model.destination == .list(.inbox): return FirstRunCopy.listHeader
+        case .landing where showsLanding:
+            return FirstRunCopy.landingHeader.replacingOccurrences(of: "\(destinationTitle) · ", with: "")
+        case .undecided, .welcome, .firstStep, .landing, .done: break
+        }
         if model.destination.isHistory { return Self.plural(model.listResult?.totalCount ?? 0, "task") }
+        if model.destination == .list(.waiting), !model.listedRuns.isEmpty {
+            return AgentsCopy.waitingHeader(people: model.openTaskCount, agents: model.listedRuns.count)
+        }
         let open = Self.plural(model.openTaskCount, "open task")
         return model.isArchivedProjectDestination ? "Archived project · \(open)" : open
     }
@@ -1740,7 +1953,7 @@ struct WorkspaceView: View {
                 ) {
                     if case .failed = model.capturePreviewReadiness {
                         Button("Retry preview") { Task { await model.prepareCapturePreview(model.captureDraft) } }
-                            .buttonStyle(.macQuietPill)
+                            .buttonStyle(.carryOnQuiet)
                     }
                 }
             }
@@ -1748,7 +1961,7 @@ struct WorkspaceView: View {
                 MacCaptureNote(text: notice, topPadding: 12)
                 if model.hasAppliedTaskFilter {
                     Button("Clear search") { requestNavigation(.clearTaskFilters) }
-                        .buttonStyle(.macQuietPill)
+                        .buttonStyle(.carryOnQuiet)
                         .padding(.top, 4)
                 }
             }
@@ -1880,6 +2093,7 @@ extension WorkspaceView {
                     .disabled(sheetIsBusy)
                     .interactiveDismissDisabled(sheetIsBusy)
             }
+            .sheet(item: $handingOff) { task in handOffSheet(task) }
             .sheet(item: $movingTask) { task in
                 moveToWaitingSheet(task)
                     .disabled(sheetIsBusy)
@@ -2733,12 +2947,12 @@ private struct WaitingReviewView: View {
                 small: true)
             HStack(spacing: 8) {
                 Button("Back") { self.decision = nil }
-                    .buttonStyle(.macQuietPill)
+                    .buttonStyle(.carryOnQuiet)
                 Spacer()
                 Button(decision == .followUp ? "Create follow-up" : "Move to Next actions") {
                     submit(item, decision: decision)
                 }
-                .buttonStyle(.macStrongPill)
+                .buttonStyle(.carryOnStrong)
                 .disabled(!validAnswer(actionTitle, limit: EditorLimits.title) || (decision == .followUp && archived))
             }
         }
@@ -2766,7 +2980,7 @@ private struct WaitingReviewView: View {
             }
             Button("No longer relevant…", role: .destructive) { confirmingCancel = true }
         }
-        .buttonStyle(.macSecondaryPill)
+        .buttonStyle(.carryOnSecondary)
         if archived {
             MacReviewLine(text: "Unarchive the project to add a follow-up there.", small: true)
         }
@@ -2914,10 +3128,10 @@ private struct SomedayReviewView: View {
                 small: true)
             HStack(spacing: 8) {
                 Button("Back") { enteringNext = false }
-                    .buttonStyle(.macQuietPill)
+                    .buttonStyle(.carryOnQuiet)
                 Spacer()
                 Button("Move to Next actions") { activate(item) }
-                    .buttonStyle(.macStrongPill)
+                    .buttonStyle(.carryOnStrong)
                     .disabled(!validAnswer(actionTitle, limit: EditorLimits.title) || archived)
             }
         }
@@ -2941,7 +3155,7 @@ private struct SomedayReviewView: View {
             .disabled(archived)
             Button("No longer relevant…", role: .destructive) { confirmingCancel = true }
         }
-        .buttonStyle(.macSecondaryPill)
+        .buttonStyle(.carryOnSecondary)
         if archived {
             MacReviewLine(text: "Unarchive the project to activate this task.", small: true)
         }

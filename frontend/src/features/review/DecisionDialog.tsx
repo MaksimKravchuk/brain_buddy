@@ -145,8 +145,8 @@ function Backdrop({ inline, onDismiss, children }: { inline: boolean; onDismiss:
   return inline ? (
     <>{children}</>
   ) : (
-    <div className="fixed inset-0 z-[100] flex items-stretch justify-center sm:items-center sm:p-6">
-      <div data-testid="decision-dialog-scrim" aria-hidden className="absolute inset-0 bg-slate-50/80 backdrop-blur-xs motion-safe:animate-fade-in" onClick={onDismiss} />
+    <div className="fixed inset-0 z-[100] flex items-stretch justify-center sm:items-center sm:p-6 motion-safe:animate-fade-in">
+      <div data-testid="decision-dialog-scrim" aria-hidden className="absolute inset-0 bg-ink/30 motion-safe:animate-fade-in" onClick={onDismiss} />
       {children}
     </div>
   );
@@ -508,41 +508,41 @@ export function DecisionDialog({
         onKeyDown={onKeyDown}
         className={
           inline
-            ? "relative flex w-full flex-col rounded-[14px] border border-slate-200 bg-white shadow-soft"
-            : "relative flex h-full w-full flex-col overflow-y-auto bg-white shadow-floating sm:h-auto sm:max-h-[calc(100vh-48px)] sm:w-[560px] sm:rounded-[20px] sm:border sm:border-slate-200"
+            ? "relative flex w-full flex-col rounded-card bg-card"
+            : "relative flex h-full w-full flex-col overflow-y-auto co-glass-dense sm:h-auto sm:max-h-[calc(100vh-48px)] sm:w-[560px] sm:rounded-sheet"
         }
       >
-        <div className="flex items-start gap-3 border-b border-slate-100 px-5 pb-3 pt-4">
+        <div className="flex items-start gap-3 px-5 pb-3 pt-4">
           <div className="min-w-0 flex-1">
             {marker ? (
-              <p className={`inline-flex h-[22px] items-center gap-1 rounded-full border px-2 text-[11px] font-medium ${marker === "asks" ? "border-indigo-200 bg-indigo-50 text-indigo-700" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
+              <p className={`inline-flex h-[22px] items-center gap-1 rounded-full px-2 text-co-meta font-medium ${marker === "asks" ? "bg-quiet text-ink-muted" : "bg-quiet text-warning"}`}>
                 {marker === "asks" ? <CircleHelp className="h-3 w-3" aria-hidden /> : <Archive className="h-3 w-3" aria-hidden />}
                 {marker === "asks" ? "Asks for a decision" : "Moves to Someday tomorrow"}
               </p>
             ) : null}
-            <h2 id={titleId} ref={titleRef} tabIndex={-1} className="mt-1 break-words text-[18px] font-semibold leading-[1.3] text-slate-900 outline-hidden">
+            <h2 id={titleId} ref={titleRef} tabIndex={-1} className="mt-1 break-words text-co-body font-semibold text-ink outline-hidden focus-visible:shadow-ring-focus">
               {currentTitle}
             </h2>
-            {meta ? <p className="mt-0.5 text-xs text-slate-500">{meta}</p> : null}
+            {meta ? <p className="mt-0.5 text-co-meta text-ink-muted">{meta}</p> : null}
           </div>
           {inline ? null : (
-            <button type="button" aria-label="Close" className="-mr-1.5 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-surface-sunken hover:text-slate-900" onClick={dismiss}>
+            <button type="button" aria-label="Close" className="-mr-1.5 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-control text-ink-muted hover:bg-quiet-pressed hover:text-ink" onClick={dismiss}>
               <X className="h-4 w-4" aria-hidden />
             </button>
           )}
         </div>
 
         <div className="flex flex-col gap-4 px-5 py-4">
-          {!online ? <p role="status" className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">{COPY.offline}</p> : null}
+          {!online ? <p role="status" className="rounded-card bg-quiet px-3 py-2 text-co-meta text-ink-muted">{COPY.offline}</p> : null}
           {failure ? (
-            <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            <div role="alert" className="flex flex-wrap items-center gap-2 rounded-card bg-quiet px-3 py-2 text-co-meta text-warning">
               <span>{failure.copy}</span>
-              {failure.referenceId ? <span className="text-xs">Ref {failure.referenceId}</span> : null}
+              {failure.referenceId ? <span className="text-co-meta">Ref {failure.referenceId}</span> : null}
               {failure.retry ? (
                 <button
                   type="button"
                   disabled={disabled}
-                  className="min-h-11 rounded-lg px-3 font-semibold text-amber-900 hover:bg-amber-100 disabled:opacity-50"
+                  className="min-h-11 rounded-control px-3 font-semibold text-warning hover:bg-quiet-pressed disabled:opacity-50"
                   onClick={() => void send(lastAttempt.current as Attempt)}
                 >
                   Retry
@@ -551,14 +551,14 @@ export function DecisionDialog({
             </div>
           ) : null}
           {stale ? (
-            <section aria-labelledby={`${titleId}-stale`} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-              <h3 id={`${titleId}-stale`} className="m-0 font-semibold text-slate-900">{COPY.staleHeading}</h3>
+            <section aria-labelledby={`${titleId}-stale`} className="rounded-card bg-quiet px-3 py-2 text-co-meta text-ink-muted">
+              <h3 id={`${titleId}-stale`} className="m-0 font-semibold text-ink">{COPY.staleHeading}</h3>
               <p className="m-0 mt-1">{COPY.staleBody}</p>
               {stale.now ? (
-                <dl className="mt-2 grid grid-cols-[48px_1fr] gap-x-2 text-xs">
-                  <dt className="text-slate-500">Was</dt>
+                <dl className="mt-2 grid grid-cols-[48px_1fr] gap-x-2 text-co-meta">
+                  <dt className="text-ink-muted">Was</dt>
                   <dd className="m-0">{stale.was.title}</dd>
-                  <dt className="text-slate-500">Now</dt>
+                  <dt className="text-ink-muted">Now</dt>
                   <dd className="m-0">{stale.now.title}</dd>
                 </dl>
               ) : null}
@@ -576,12 +576,12 @@ export function DecisionDialog({
               }}
             >
               {restored ? (
-                <p className="m-0 flex items-center gap-2 text-xs text-slate-600">
+                <p className="m-0 flex items-center gap-2 text-co-meta text-ink-muted">
                   {COPY.draftBack}
                   <button
                     type="button"
                     disabled={busy}
-                    className="min-h-11 rounded-lg px-2 font-medium text-sky-700 hover:bg-sky-50 disabled:opacity-50"
+                    className="min-h-11 rounded-control px-2 font-medium text-ink hover:bg-quiet-pressed disabled:opacity-50"
                     onClick={() => {
                       persistText(initialText, view);
                       setRestored(false);
@@ -592,7 +592,7 @@ export function DecisionDialog({
                   </button>
                 </p>
               ) : null}
-              <label className="flex flex-col gap-1 text-sm font-medium text-slate-800">
+              <label className="flex flex-col gap-1 text-co-meta font-medium text-ink">
                 {formCopy.prompt}
                 <input
                   ref={fieldRef}
@@ -605,58 +605,58 @@ export function DecisionDialog({
                   // text sent is the text shown (Retry resends exactly that).
                   readOnly={busy}
                   aria-disabled={busy ? true : undefined}
-                  className="min-h-11 rounded-lg border border-slate-300 px-3 text-base font-normal text-slate-900 outline-hidden focus:border-brand-primary read-only:bg-slate-50 read-only:text-slate-600 sm:text-sm"
+                  className="min-h-11 rounded-card px-3 text-co-body font-normal text-ink outline-hidden focus-visible:shadow-ring-focus read-only:bg-sunken read-only:text-ink-muted"
                   onChange={(event) => persistText(event.currentTarget.value, view)}
                 />
               </label>
-              {formCopy.help ? <p className="m-0 text-xs text-slate-600">{formCopy.help}</p> : null}
+              {formCopy.help ? <p className="m-0 text-co-meta text-ink-muted">{formCopy.help}</p> : null}
               {view === "first_step" ? (
-                <p className="m-0 text-xs text-slate-600">
-                  The old wording stays in this task&apos;s notes as <span className="font-medium text-slate-800">Was: {currentTitle}</span>
+                <p className="m-0 text-co-meta text-ink-muted">
+                  The old wording stays in this task&apos;s notes as <span className="font-medium text-ink">Was: {currentTitle}</span>
                 </p>
               ) : null}
               {view === "extend" ? (
-                <p className="m-0 text-xs text-slate-600">
+                <p className="m-0 text-co-meta text-ink-muted">
                   {`Asks again on ${keepUntil}. If still undecided, it moves to Someday on ${parksOn}. You can do this once for this wording.`}
                 </p>
               ) : null}
-              {cosmetic ? <p className="m-0 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-700">{COPY.cosmetic}</p> : null}
+              {cosmetic ? <p className="m-0 rounded-card bg-quiet px-3 py-2 text-co-meta text-ink-muted">{COPY.cosmetic}</p> : null}
               <div className="mt-1 flex flex-wrap items-center gap-2">
-                <button type="button" disabled={busy} className="min-h-11 rounded-lg px-3 text-sm font-medium text-slate-700 hover:bg-surface-sunken disabled:opacity-50" onClick={() => guarded(backToCard)}>
+                <button type="button" disabled={busy} className="min-h-11 rounded-control px-3 text-co-meta font-medium text-ink-muted hover:bg-quiet-pressed disabled:opacity-50" onClick={() => guarded(backToCard)}>
                   Back
                 </button>
                 <button
                   type="submit"
                   disabled={!canSave}
                   aria-describedby={view === "extend" && trimmedText === "" ? hintId : undefined}
-                  className="ml-auto min-h-11 rounded-lg bg-sky-700 px-4 text-sm font-semibold text-white hover:bg-sky-800 disabled:opacity-50"
+                  className="ml-auto min-h-11 rounded-control bg-ink px-4 text-co-meta font-semibold text-ground hover:bg-ink/85 disabled:opacity-50"
                 >
                   {busy ? "Saving…" : saveLabel}
                 </button>
               </div>
-              {view === "extend" && trimmedText === "" ? <p id={hintId} className="m-0 text-right text-xs text-slate-600">{COPY.reasonNeeded}</p> : null}
+              {view === "extend" && trimmedText === "" ? <p id={hintId} className="m-0 text-right text-co-meta text-ink-muted">{COPY.reasonNeeded}</p> : null}
             </form>
           ) : asks ? (
             <>
-              {stale ? null : <p className="m-0 text-sm text-slate-700">{COPY.framing}</p>}
+              {stale ? null : <p className="m-0 text-co-meta text-ink-muted">{COPY.framing}</p>}
               {isThirdStall(formulationClass, (formulation as TaskFormulationResponse).consecutive_stalled) ? (
-                <section aria-label="Third stalled wording" className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-slate-700">
+                <section aria-label="Third stalled wording" className="rounded-card bg-quiet px-3 py-2 text-co-meta text-ink-muted">
                   <p className="m-0">{COPY.thirdStall}</p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     {canvasAvailable ? (
-                      <Link to="/crt" className="inline-flex min-h-11 items-center rounded-lg border border-slate-200 bg-white px-3 font-medium text-slate-800 hover:border-slate-300">
+                      <Link to="/crt" className="inline-flex min-h-11 items-center rounded-control bg-card px-3 font-medium text-ink">
                         Think it through
                       </Link>
                     ) : null}
-                    <button type="button" disabled={disabled} className="min-h-11 rounded-lg border border-slate-200 bg-white px-3 font-medium text-slate-800 hover:border-slate-300 disabled:opacity-50" onClick={() => decide("someday")}>
+                    <button type="button" disabled={disabled} className="min-h-11 rounded-control bg-card px-3 font-medium text-ink disabled:opacity-50" onClick={() => decide("someday")}>
                       Release to Someday
                     </button>
                   </div>
                 </section>
               ) : null}
               <div>
-                <p className="m-0 mb-2 text-xs font-semibold text-slate-600">
-                  What got in the way? <span className="font-normal text-slate-500">· optional</span>
+                <p className="m-0 mb-2 text-co-meta font-semibold text-ink-muted">
+                  What got in the way? <span className="font-normal text-ink-muted">· optional</span>
                 </p>
                 <div role="group" aria-label="What got in the way, optional" className="flex flex-wrap gap-1.5">
                   {STALL_REASONS.map((option) => (
@@ -665,7 +665,7 @@ export function DecisionDialog({
                       type="button"
                       aria-pressed={reason === option.code}
                       disabled={busy}
-                      className={`min-h-11 rounded-full border px-3 text-[13px] font-medium ${reason === option.code ? "border-sky-700 bg-sky-50 text-sky-800" : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"}`}
+                      className={`min-h-11 rounded-full px-3 text-co-meta font-medium ${reason === option.code ? "bg-ink text-ground" : "bg-quiet text-ink-muted hover:bg-quiet-pressed"}`}
                       onClick={() => setReason(reason === option.code ? null : option.code)}
                     >
                       {option.label}
@@ -674,7 +674,7 @@ export function DecisionDialog({
                 </div>
               </div>
               <div>
-                <p className="m-0 mb-2 text-xs font-semibold text-slate-600">What now?</p>
+                <p className="m-0 mb-2 text-co-meta font-semibold text-ink-muted">What now?</p>
                 <div role="group" aria-label="Decisions" className="flex flex-col gap-1.5">
                   {decisions.map((decision, index) => (
                     <button
@@ -682,49 +682,49 @@ export function DecisionDialog({
                       type="button"
                       data-decision={decision.type}
                       disabled={disabled}
-                      className={`flex min-h-11 w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm ${recommended === decision.type ? "border-sky-600 ring-1 ring-sky-600" : "border-slate-200"} bg-white text-slate-900 hover:border-slate-300 disabled:opacity-60`}
+                      className={`flex min-h-11 w-full items-center gap-2 rounded-control px-3 py-2 text-left text-co-meta ${recommended === decision.type ? "bg-quiet-pressed" : "bg-quiet"} text-ink hover:bg-quiet-pressed disabled:opacity-60`}
                       onClick={() => choose(decision.type)}
                     >
                       <span className="font-medium">{decision.label}</span>
-                      {decision.sub ? <span className="text-xs text-slate-500">{decision.sub}</span> : null}
-                      {recommended === decision.type ? <span className="rounded-full bg-sky-100 px-2 py-[1px] text-[11px] font-semibold text-sky-800">Recommended</span> : null}
-                      {pending === decision.type ? <span className="text-xs text-slate-600">Saving…</span> : null}
-                      <kbd aria-hidden className="ml-auto rounded border border-slate-200 px-1.5 text-[11px] text-slate-500">{index + 1}</kbd>
+                      {decision.sub ? <span className="text-co-meta text-ink-muted">{decision.sub}</span> : null}
+                      {recommended === decision.type ? <span className="rounded-full bg-card px-2 text-co-meta font-semibold text-ink">Recommended</span> : null}
+                      {pending === decision.type ? <span className="text-co-meta text-ink-muted">Saving…</span> : null}
+                      <kbd aria-hidden className="ml-auto rounded px-1.5 text-co-meta text-ink-muted">{index + 1}</kbd>
                     </button>
                   ))}
                 </div>
-                {extended ? <p className="m-0 mt-2 text-xs text-slate-500">{COPY.extensionUsed}</p> : null}
+                {extended ? <p className="m-0 mt-2 text-co-meta text-ink-muted">{COPY.extensionUsed}</p> : null}
               </div>
             </>
           ) : (
-            <p className="m-0 text-sm text-slate-700">{COPY.noLongerAsks}</p>
+            <p className="m-0 text-co-meta text-ink-muted">{COPY.noLongerAsks}</p>
           )}
         </div>
 
         {confirm ? (
-          <div className="absolute inset-0 flex items-center justify-center bg-white/80 p-5">
+          <div className="absolute inset-0 flex items-center justify-center bg-ground p-5">
             <div
               ref={confirmRef}
               role="alertdialog"
               aria-modal="true"
               aria-labelledby={`${titleId}-discard`}
               aria-describedby={`${titleId}-discard-body`}
-              className="w-full max-w-[360px] rounded-[14px] border border-slate-200 bg-white p-4 shadow-floating"
+              className="w-full max-w-[360px] rounded-card co-glass-dense p-4"
             >
-              <h3 id={`${titleId}-discard`} className="m-0 text-sm font-semibold text-slate-900">{COPY.discardTitle}</h3>
-              <p id={`${titleId}-discard-body`} className="m-0 mt-1 text-sm text-slate-600">{COPY.discardBody}</p>
+              <h3 id={`${titleId}-discard`} className="m-0 text-co-meta font-semibold text-ink">{COPY.discardTitle}</h3>
+              <p id={`${titleId}-discard-body`} className="m-0 mt-1 text-co-meta text-ink-muted">{COPY.discardBody}</p>
               <div className="mt-3 flex gap-2">
                 <button
                   ref={keepEditingRef}
                   type="button"
-                  className="min-h-11 flex-1 rounded-lg bg-sky-700 px-3 text-sm font-semibold text-white hover:bg-sky-800"
+                  className="min-h-11 flex-1 rounded-control bg-ink px-3 text-co-meta font-semibold text-ground hover:bg-ink/85"
                   onClick={() => keepEditing(confirm.rearm)}
                 >
                   Keep editing
                 </button>
                 <button
                   type="button"
-                  className="min-h-11 flex-1 rounded-lg border border-slate-200 px-3 text-sm font-medium text-slate-700 hover:border-slate-300"
+                  className="min-h-11 flex-1 rounded-control bg-quiet hover:bg-quiet-pressed px-3 text-co-meta font-medium text-ink"
                   onClick={() => {
                     const { then } = confirm;
                     setConfirm(null);

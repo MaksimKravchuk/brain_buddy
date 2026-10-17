@@ -117,31 +117,6 @@ struct MacOutlineChip: View {
     }
 }
 
-/// One answer of a choice row ("Put it in", the language): a 13 chip, 26 high; the chosen one takes
-/// the shared `chip-selected` colours, as on board 10 (regular weight there, unlike iOS's semibold).
-struct MacChoiceChip: View {
-    let title: String
-    let selected: Bool
-    let action: () -> Void
-    @Environment(\.isEnabled) private var isEnabled
-
-    var body: some View {
-        Button(action: action) {
-            Text(title)
-                .font(MacCaptureFont.chip)
-                .lineLimit(1)
-                .foregroundStyle(selected ? CarryOnColorStyle.coChipSelectedFg : CarryOnColorStyle.coChipFg)
-                .padding(.horizontal, 12)
-                .frame(height: 26)
-                .background(selected ? CarryOnColorStyle.coChipSelectedBg : CarryOnColorStyle.coChipBg, in: Capsule())
-                .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .opacity(isEnabled ? 1 : 0.4)
-        .accessibilityAddTraits(selected ? .isSelected : [])
-    }
-}
-
 /// A value and the words a choice chip shows for it.
 struct MacChoice<Value: Hashable>: Hashable {
     let value: Value
@@ -160,9 +135,16 @@ struct MacChoiceChipRow<Value: Hashable>: View {
     var body: some View {
         MacInspectorFlow(spacing: 6) {
             ForEach(options, id: \.value) { option in
-                MacChoiceChip(title: option.title, selected: option.value == selection) {
+                let selected = option.value == selection
+                Button {
                     selection = option.value
+                } label: {
+                    CarryOnChip(option.title, size: .quick, isSelected: selected)
+                        .contentShape(Capsule())
                 }
+                .buttonStyle(.plain)
+                .opacity(isEnabled ? 1 : 0.4)
+                .accessibilityAddTraits(selected ? .isSelected : [])
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -299,7 +281,7 @@ struct MacNewTaskClassification: View {
     var body: some View {
         MacInspectorFlow(spacing: 6) {
             if let project {
-                MacInspectorChip(text: project.isNew ? "\(project.name) (new project)" : project.name)
+                CarryOnChip(project.isNew ? "\(project.name) (new project)" : project.name)
             } else {
                 MacOutlineChip(text: "No project")
             }
@@ -307,7 +289,7 @@ struct MacNewTaskClassification: View {
                 MacOutlineChip(text: "No tags")
             } else {
                 ForEach(Array(tags.enumerated()), id: \.offset) { _, tag in
-                    MacInspectorChip(text: tag.isNew ? "\(tag.name) (new tag)" : tag.name)
+                    CarryOnChip(tag.isNew ? "\(tag.name) (new tag)" : tag.name)
                 }
             }
         }
@@ -336,7 +318,7 @@ struct MacNewTaskFooter<Extra: View>: View {
     var body: some View {
         HStack(spacing: 8) {
             Button(action: onAdd) { Text("Add") }
-                .buttonStyle(.macStrongPill)
+                .buttonStyle(.carryOnStrong)
                 .disabled(!addEnabled)
                 .accessibilityLabel("Add task")
             extra
@@ -381,10 +363,10 @@ struct MacPutItInContent: View {
             .accessibilityLabel("GTD list")
             HStack(spacing: 8) {
                 Button("Continue", action: onContinue)
-                    .buttonStyle(.macStrongPill)
+                    .buttonStyle(.carryOnStrong)
                     .keyboardShortcut(.defaultAction)
                 Button("Cancel", action: onCancel)
-                    .buttonStyle(.macQuietPill)
+                    .buttonStyle(.carryOnQuiet)
                     .keyboardShortcut(.cancelAction)
                 Spacer(minLength: 0)
             }
@@ -466,9 +448,9 @@ struct MacVoiceCaptureCard<Transcript: View, More: View>: View {
             if phase == .recording {
                 HStack(spacing: 8) {
                     Button("Stop & transcribe", action: onStop)
-                        .buttonStyle(.macStrongPill)
+                        .buttonStyle(.carryOnStrong)
                     Button("Discard", action: onDiscardRecording)
-                        .buttonStyle(.macQuietPill)
+                        .buttonStyle(.carryOnQuiet)
                 }
                 .padding(.top, 12)
             }
@@ -500,7 +482,7 @@ struct MacVoiceCaptureCard<Transcript: View, More: View>: View {
             HStack(spacing: 8) {
                 if let onUseAsTask {
                     Button("Use as task draft", action: onUseAsTask)
-                        .buttonStyle(.macStrongPill)
+                        .buttonStyle(.carryOnStrong)
                         .disabled(!canUseTranscript)
                 }
                 Spacer(minLength: 0)

@@ -287,64 +287,64 @@ export function WhileYouWereAway({
     : anyReturned ? `Return the other ${candidates.length} to Next` : `Return all ${candidates.length} to Next`;
 
   return (
-    <div className="fixed inset-0 z-[150] flex items-stretch justify-center bg-slate-50/80 backdrop-blur-xs sm:items-center sm:p-6">
+    <div className="fixed inset-0 z-[150] flex items-stretch justify-center bg-ink/30 sm:items-center sm:p-6 motion-safe:animate-fade-in">
       <section
         ref={sectionRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={headingId}
         onKeyDown={onKeyDown}
-        className="relative flex h-full w-full flex-col overflow-y-auto bg-white shadow-floating sm:h-auto sm:max-h-[calc(100vh-48px)] sm:w-[560px] sm:rounded-[20px] sm:border sm:border-slate-200"
+        className="relative flex h-full w-full flex-col overflow-y-auto co-glass-dense sm:h-auto sm:max-h-[calc(100vh-48px)] sm:w-[560px] sm:rounded-sheet"
       >
         <div className="flex items-start gap-3 px-5 pb-2 pt-5">
-          <h2 id={headingId} ref={headingRef} tabIndex={-1} className="m-0 flex-1 text-[20px] font-semibold leading-[1.3] text-slate-900 outline-hidden">
+          <h2 id={headingId} ref={headingRef} tabIndex={-1} className="m-0 flex-1 font-voice text-co-step text-ink outline-hidden focus-visible:shadow-ring-focus">
             While you were away
           </h2>
           <button
             type="button"
             aria-label="Close"
-            className="-mr-1.5 -mt-1 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-surface-sunken hover:text-slate-900"
+            className="-mr-1.5 -mt-1 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-card text-ink-muted hover:bg-quiet-pressed hover:text-ink"
             onClick={() => onDone(false)}
           >
             <X className="h-4 w-4" aria-hidden />
           </button>
         </div>
-        <div className="flex flex-col gap-3 px-5 pb-5 text-sm text-slate-700">
+        <div className="flex flex-col gap-3 px-5 pb-5 text-co-meta text-ink-muted">
           <p className="m-0 leading-relaxed">{intro(parks.length)}</p>
-          {!online ? <p role="status" className="m-0 rounded-lg bg-slate-50 px-3 py-2">You&apos;re offline. Returning tasks needs a connection.</p> : null}
-          {summary ? <p role="status" className="m-0 rounded-lg bg-slate-50 px-3 py-2">{summary}</p> : null}
+          {!online ? <p role="status" className="m-0 rounded-card bg-quiet px-3 py-2">You&apos;re offline. Returning tasks needs a connection.</p> : null}
+          {summary ? <p role="status" className="m-0 rounded-card bg-quiet px-3 py-2">{summary}</p> : null}
           {!projectsKnown && projectsQuery.isError ? (
-            <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
+            <div role="alert" className="flex flex-wrap items-center gap-2 rounded-card bg-quiet px-3 py-2 text-warning">
               <span>We couldn&apos;t load your projects, so tasks can&apos;t be returned yet.</span>
               {describeReviewError(projectsQuery.error).referenceId ? (
-                <span className="text-xs">Ref {describeReviewError(projectsQuery.error).referenceId}</span>
+                <span className="text-co-meta">Ref {describeReviewError(projectsQuery.error).referenceId}</span>
               ) : null}
-              <button type="button" className="min-h-11 rounded-lg px-3 font-semibold hover:bg-amber-100" onClick={() => void projectsQuery.refetch()}>
+              <button type="button" className="min-h-11 rounded-control px-3 font-semibold hover:bg-quiet-pressed" onClick={() => void projectsQuery.refetch()}>
                 Retry
               </button>
             </div>
           ) : null}
-          <ul className="m-0 flex list-none flex-col divide-y divide-slate-100 rounded-xl border border-slate-200 p-0">
+          <ul className="m-0 flex list-none flex-col gap-2 p-0">
             {loaded.map(({ park, task }) => {
               const status = rows[task.id];
               const project = projectOf(task);
               const titleId = `${headingId}-${task.id}`;
               const elsewhere = movedElsewhere(task);
               return (
-                <li key={task.id} aria-labelledby={titleId} className="flex flex-col gap-1 px-3 py-2.5">
+                <li key={task.id} aria-labelledby={titleId} className="flex flex-col gap-1 rounded-card bg-quiet px-3 py-2.5">
                   <div className="flex flex-wrap items-center gap-2">
                     <div className="min-w-0 flex-1">
-                      <p id={titleId} className="m-0 break-words font-medium text-slate-900">{task.title}</p>
+                      <p id={titleId} className="m-0 break-words font-medium text-ink">{task.title}</p>
                       {status?.kind === "returned" ? (
-                        <p className="m-0 text-xs text-slate-600">Back in Next with a fresh start</p>
+                        <p className="m-0 text-co-meta text-ink-muted">Back in Next with a fresh start</p>
                       ) : status?.kind === "stale" ? (
-                        <p className="m-0 text-xs text-slate-600">
+                        <p className="m-0 text-co-meta text-ink-muted">
                           {status.current ? `Now in ${LIST_NAMES[status.current.state]}` : "We couldn't check where it is now."}
                         </p>
                       ) : elsewhere ? (
-                        <p className="m-0 text-xs text-slate-600">{`Now in ${LIST_NAMES[task.state]}`}</p>
+                        <p className="m-0 text-co-meta text-ink-muted">{`Now in ${LIST_NAMES[task.state]}`}</p>
                       ) : (
-                        <p className="m-0 text-xs text-slate-500">
+                        <p className="m-0 text-co-meta text-ink-muted">
                           {projectsKnown
                             ? `Parked ${formatReviewDate(park.parked_at)} · ${project ? (project.state === "archived" ? `${project.name} (archived)` : project.name) : "no project"}`
                             : `Parked ${formatReviewDate(park.parked_at)}`}
@@ -352,12 +352,12 @@ export function WhileYouWereAway({
                       )}
                     </div>
                     {status?.kind === "returned" ? (
-                      <span className="text-xs font-semibold text-slate-600">Returned</span>
+                      <span className="text-co-meta font-semibold text-ink-muted">Returned</span>
                     ) : status?.kind === "stale" && status.current === null ? (
                       <button
                         type="button"
                         disabled={!online || returningAll}
-                        className="min-h-11 rounded-lg px-2 text-[13px] font-semibold text-slate-800 hover:bg-slate-100 disabled:opacity-60"
+                        className="min-h-11 rounded-control px-2 text-co-meta font-semibold text-ink hover:bg-quiet-pressed disabled:opacity-60"
                         onClick={() => void returnTask(task)}
                       >
                         Retry
@@ -367,7 +367,7 @@ export function WhileYouWereAway({
                         type="button"
                         aria-disabled="true"
                         aria-label={`Return unavailable: project ${(project as ProjectResponse).name} is archived`}
-                        className="min-h-11 rounded-lg border border-slate-200 px-3 text-xs font-medium text-slate-500"
+                        className="min-h-11 rounded-control bg-quiet hover:bg-quiet-pressed px-3 text-co-meta font-medium text-ink-muted"
                       >
                         Project archived
                       </button>
@@ -376,7 +376,7 @@ export function WhileYouWereAway({
                         type="button"
                         aria-label={`Return ${task.title} to Next`}
                         disabled={!online || !projectsKnown || returningAll || status?.kind === "returning"}
-                        className="min-h-11 rounded-lg border border-slate-200 bg-white px-3 text-[13px] font-medium text-slate-800 hover:border-slate-300 disabled:opacity-60"
+                        className="min-h-11 rounded-control bg-quiet hover:bg-quiet-pressed px-3 text-co-meta font-medium text-ink disabled:opacity-60"
                         onClick={() => void returnTask(task)}
                       >
                         {status?.kind === "returning" ? "Returning…" : "Return to Next"}
@@ -384,16 +384,16 @@ export function WhileYouWereAway({
                     )}
                   </div>
                   {status?.kind === "stale" ? (
-                    <p className="m-0 text-xs text-slate-600">{`“${task.title}” changed on another device, so it was left as it is there.`}</p>
+                    <p className="m-0 text-co-meta text-ink-muted">{`“${task.title}” changed on another device, so it was left as it is there.`}</p>
                   ) : null}
                   {status?.kind === "failed" ? (
-                    <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-900">
+                    <div role="alert" className="flex flex-wrap items-center gap-2 rounded-card bg-quiet px-2 py-1 text-co-meta text-warning">
                       <span>{`Couldn't return “${task.title}” to Next. It's still in Someday / maybe.`}</span>
                       {status.referenceId ? <span>Ref {status.referenceId}</span> : null}
                       <button
                         type="button"
                         disabled={!online || returningAll}
-                        className="min-h-11 rounded-lg px-2 font-semibold hover:bg-amber-100 disabled:opacity-60"
+                        className="min-h-11 rounded-control px-2 font-semibold hover:bg-quiet-pressed disabled:opacity-60"
                         onClick={() => void returnTask(task)}
                       >
                         Retry
@@ -405,10 +405,10 @@ export function WhileYouWereAway({
             })}
           </ul>
           {continueFailure ? (
-            <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
+            <div role="alert" className="flex flex-wrap items-center gap-2 rounded-card bg-quiet px-3 py-2 text-warning">
               <span>Couldn&apos;t save that you&apos;ve seen these. Try again.</span>
-              {continueFailure.referenceId ? <span className="text-xs">Ref {continueFailure.referenceId}</span> : null}
-              <button type="button" className="min-h-11 rounded-lg px-3 font-semibold hover:bg-amber-100" onClick={confirmSeen}>
+              {continueFailure.referenceId ? <span className="text-co-meta">Ref {continueFailure.referenceId}</span> : null}
+              <button type="button" className="min-h-11 rounded-control px-3 font-semibold hover:bg-quiet-pressed" onClick={confirmSeen}>
                 Retry
               </button>
             </div>
@@ -418,7 +418,7 @@ export function WhileYouWereAway({
               <button
                 type="button"
                 disabled={!online || !projectsKnown || returning}
-                className="min-h-11 rounded-lg border border-slate-200 px-4 font-medium text-slate-800 hover:border-slate-300 disabled:opacity-60"
+                className="min-h-11 rounded-control bg-quiet hover:bg-quiet-pressed px-4 font-medium text-ink disabled:opacity-60"
                 onClick={() => void returnAll()}
               >
                 {returnAllLabel}
@@ -427,7 +427,7 @@ export function WhileYouWereAway({
             <button
               type="button"
               disabled={resolving || returning || acknowledgeMutation.isPending}
-              className="min-h-11 rounded-lg bg-sky-700 px-5 font-semibold text-white hover:bg-sky-800 disabled:opacity-60"
+              className="min-h-11 rounded-control bg-ink px-5 font-semibold text-ground hover:bg-ink/85 disabled:opacity-60"
               onClick={confirmSeen}
             >
               Continue

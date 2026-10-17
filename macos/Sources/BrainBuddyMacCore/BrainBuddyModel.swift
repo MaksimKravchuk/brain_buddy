@@ -1,3 +1,6 @@
+import struct BrainBuddyAPI.APIError
+import struct BrainBuddyAPI.AgentRunDTO
+import struct BrainBuddyAPI.AgentRunSummaryDTO
 import class BrainBuddyAPI.BrainBuddyAPIClient
 import BrainBuddyCore
 import BrainBuddyWorkspace
@@ -98,6 +101,13 @@ package final class BrainBuddyModel {
     package private(set) var localState: MacLocalState
     package private(set) var isSaving = false
     package private(set) var captureEditorID = UUID().uuidString
+    /// 029: the one-time first run, decided once at launch from facts on this Mac.
+    package let firstRun: FirstRunModel
+    /// 030: availability, the memory-only run cache and the All runs store of the signed-in account.
+    package let agentAvailability: AgentAvailability
+    package let agentRuns: AgentRunsStore
+    @ObservationIgnored private let agentCache = AgentMemoryCache()
+    @ObservationIgnored private let agentSteps = AgentStepsBox()
 
     package var destination: WorkspaceDestination = .list(.next)
     /// The list a capture from this screen goes to.
@@ -132,11 +142,47 @@ package final class BrainBuddyModel {
     /// The search the list shows: applied on submit, as before 021.
     package private(set) var appliedSearch: String?
 
-    package init(workspace: Workspace, localStateStore: MacLocalStateStore, now: @escaping @Sendable () -> Date = { Date() }) {
+    /// The two agent remotes default to the account's server; tests pass scripted ones.
+    package init(
+        workspace: Workspace, localStateStore: MacLocalStateStore, now: @escaping @Sendable () -> Date = { Date() },
+        agentAvailabilityRemote: (@MainActor (LinkedAccount) -> any AgentAvailabilityRemote)? = nil,
+        agentRunsRemote: (any AgentRunsRemote)? = nil
+    ) {
         self.workspace = workspace
         self.localStateStore = localStateStore
         self.now = now
         localState = localStateStore.load() ?? (try? localStateStore.update { _ in }) ?? .fresh()
+        firstRun = FirstRunModel(store: localStateStore, now: now)
+        agentAvailability = AgentAvailability(
+            account: workspace.account, remote: agentAvailabilityRemote ?? { AccountAgentRuns.client(for: $0) })
+        let steps = agentSteps
+        agentRuns = AgentRunsStore(
+            remote: agentRunsRemote ?? AccountAgentRuns(workspace: workspace), steps: { steps.steps },
+            availability: agentAvailability, cache: agentCache, now: now)
+    }
+
+    /// 029-FR-001, 029-FR-002: decides the first run once, at launch and before the first window
+    /// renders; opens the Inbox when it shows. Not called by `init`, so a model that is only a
+    /// workspace view (tests, previews) never starts or records a first run.
+    package func decideFirstRun() {
+        firstRun.decide(launchFacts())
+        if let destination = firstRun.launchDestination { choose(destination) }
+        localState = localStateStore.load() ?? localState
+    }
+
+    /// What this Mac already holds. Counts are the kit's own state; a Rust-selected workspace
+    /// answers asynchronously, so the synchronous signals decide alone there.
+    private func launchFacts() -> FirstRunLaunchFacts {
+        let tasks = workspace.state.tasks.values
+        let counted = !workspace.isRustSelected
+        return FirstRunLaunchFacts(
+            hasAccount: workspace.account != nil,
+            workspaceWrittenBefore: localState.workspaceFirstWrittenAt != nil,
+            legacyImportBroughtTasks: localState.legacyImport?.state == .completed,
+            openTaskCount: counted ? tasks.filter(\.isOpen).count : nil,
+            projectCount: counted ? workspace.state.projects.count : nil,
+            hasInboxItem: tasks.contains { $0.state == .inbox }
+        )
     }
 
     package convenience init(host: WorkspaceHost) {
@@ -337,13 +383,13 @@ package final class BrainBuddyModel {
     /// every section.
     package var sections: [TaskSection] {
         _ = queryRevision
-        guard listReadiness == .ready else { return [] }
+        guard !destination.isAgentRuns, listReadiness == .ready else { return [] }
         return workspace.list(destination.query, options: currentListOptions).sections
     }
 
     package var listResult: TaskListResult? {
         _ = queryRevision
-        guard listReadiness == .ready else { return nil }
+        guard !destination.isAgentRuns, listReadiness == .ready else { return nil }
         return workspace.list(destination.query, options: currentListOptions)
     }
 
@@ -369,7 +415,7 @@ package final class BrainBuddyModel {
         switch destination {
         case .list(let list): selectedList = list
         case .project, .tag: selectedList = .inbox
-        case .date, .history: selectedList = .next
+        case .date, .history, .agentRuns: selectedList = .next
         }
         reload()
     }
@@ -1354,6 +1400,67 @@ package final class BrainBuddyModel {
         SyncStatusDescriber.describe(workspace.syncSnapshot, now: now(), device: .mac, calendar: .current)
     }
 
+    // MARK: Agents (030)
+
+    package var showsAgentsSection: Bool {
+        agentAvailability.ownerID != nil && (agentAvailability.relayEnabled || !agentRuns.items.isEmpty)
+    }
+
+    package var canAddAgent: Bool { agentAvailability.relayEnabled && agentAvailability.passwordState != .none }
+
+    package var listedRuns: [AgentRunItem] { agentAvailability.ownerID == nil ? [] : agentRuns.items }
+
+    package func syncAgentAccount() {
+        let before = agentAvailability.ownerID
+        agentAvailability.update(account: workspace.account)
+        if agentAvailability.ownerID != before { dropAgentRuns() }
+    }
+
+    /// Sign-in, sign-out, the first window and the window becoming active: flag, password state, steps, runs.
+    package func refreshAgents() async {
+        syncAgentAccount()
+        guard agentAvailability.ownerID != nil else { return }
+        await agentAvailability.activate()
+        await refreshAgentSteps()
+        await agentRuns.refresh()
+    }
+
+    /// A successful "Sync now": availability is read again past the five-minute throttle, then steps and runs.
+    package func refreshAgentsAfterSync() async {
+        syncAgentAccount()
+        guard agentAvailability.ownerID != nil else { return }
+        await agentAvailability.refresh()
+        await refreshAgentSteps()
+        await agentRuns.refresh()
+    }
+
+    /// The open steps with a server id and a title, read through the kit (it is async on a Rust workspace).
+    package func refreshAgentSteps() async {
+        guard agentAvailability.ownerID != nil, let ids = try? await workspace.openStepServerIDs() else { return }
+        let unshown = ids.filter { workspace.task($0.taskID) == nil }.map(\.taskID)
+        var titles: [TaskID: String] = [:]
+        for start in stride(from: 0, to: unshown.count, by: 200) {
+            for task in (try? await workspace.prepareTaskViews(Array(unshown[start..<min(start + 200, unshown.count)]))) ?? [] {
+                titles[task.id] = task.title
+            }
+        }
+        agentSteps.steps = ids.compactMap { step in
+            guard let server = step.serverID, let title = workspace.task(step.taskID)?.title ?? titles[step.taskID] else { return nil }
+            return AgentOpenStep(title: title, serverID: server)
+        }
+        agentSteps.taskIDs = Dictionary(ids.compactMap { step in step.serverID.map { ($0, step.taskID) } }) { first, _ in first }
+        agentRuns.stepsChanged()
+    }
+
+    package func stepID(forServerID id: String) -> TaskID? { agentSteps.taskIDs[id] }
+
+    private func dropAgentRuns() {
+        agentCache.clear()
+        agentRuns.reset()
+        agentSteps.steps = []
+        agentSteps.taskIDs = [:]
+    }
+
     // MARK: Sign-out
 
     /// After a sign-out (design X-04 "empty (first run) after sign-out"): the workspace is empty and
@@ -1364,6 +1471,57 @@ package final class BrainBuddyModel {
         waitingForDraft = ""
         taskEditInProgress = false
         unarchiveRefusal = nil
+        agentAvailability.update(account: nil)
+        dropAgentRuns()
         choose(.list(.inbox))
+    }
+}
+
+/// The open steps the store lists runs for, kept by the model because the kit reads them asynchronously.
+@MainActor
+private final class AgentStepsBox {
+    var steps: [AgentOpenStep] = []
+    var taskIDs: [String: TaskID] = [:]
+}
+
+/// The runs reads for whichever account the workspace has when the call is made.
+private struct AccountAgentRuns: AgentRunsRemote {
+    let workspace: Workspace
+
+    @MainActor static func client(for account: LinkedAccount) -> BrainBuddyAPIClient {
+        BrainBuddyAPIClient(
+            baseURL: account.serverURL, tokenStore: WorkspaceHost.systemTokenStore(), identity: WorkspaceHost.clientIdentity)
+    }
+
+    @MainActor private func client() -> BrainBuddyAPIClient? { workspace.account.map(Self.client(for:)) }
+
+    private func signedIn() async throws(APIError) -> BrainBuddyAPIClient {
+        guard let client = await client() else {
+            throw APIError(kind: .unauthorized, message: "Signed out.", requestMayHaveBeenSent: false)
+        }
+        return client
+    }
+
+    func agentRunSummaries(taskIDs: [String]) async throws(APIError) -> [String: AgentRunSummaryDTO] {
+        try await signedIn().agentRunSummaries(taskIDs: taskIDs)
+    }
+
+    func agentRun(id: String) async throws(APIError) -> AgentRunDTO { try await signedIn().agentRun(id: id) }
+}
+
+// MARK: - First run writes (029)
+
+extension BrainBuddyModel: FirstRunTaskWriting {
+    /// F-01.03: the text exactly as written, in the Inbox: a plain `createTask`, no Smart Add parse.
+    package func captureFirstItem(_ text: String) async -> TaskID? {
+        let id = TaskID.random()
+        let created = await run { try await workspace.apply([.createTask(.init(taskID: id, title: text, list: .inbox))], editorID: $0) }
+        return created ? id : nil
+    }
+
+    /// F-02.04: title and note in one `updateTask`, then the move to Next actions, as one change.
+    package func saveFirstStep(_ id: TaskID, step: String, original: String) async -> Bool {
+        let changes = FirstRunModel.stepChanges(step: step, original: original, existingDetails: workspace.task(id)?.details)
+        return await saveTask(id, changes: changes, moveTo: .next)
     }
 }
