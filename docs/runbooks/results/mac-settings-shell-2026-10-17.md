@@ -33,3 +33,7 @@ The actual production Scene is hosted through macOS 26 `NSHostingSceneRepresenta
 The record run intentionally emitted two snapshot-record issues before visual review and replay. No tolerance was weakened. Baselines: `macos/Tests/BrainBuddyMacTests/__Snapshots__/mac-settings-chrome-{light,dark}-native2x.png`. Only native2x was available locally; an actual native1x CI capture remains a parent-owned gate.
 
 Prepared from `47c1d175645a565e15d31f86d794e090d16a20ab` on `codex/mac-settings-board`. Parent owns independent exact-SHA QA, CI, integration, push and delivery. This local evidence does not claim those gates or production acceptance have passed.
+
+## Actual CI-native1x capture
+
+Run `39026964638` exercised all 459 Mac tests; its only two issues were missing light/dark native1x header references. The actual emitted PNGs were downloaded from `macos-app-logs-1`, reviewed against the accepted header and copied unchanged. Both show all three labels/glyphs and the selected rectangle without a shared capsule. No tolerance or product code changed. Independent exact-head QA and repeat CI remain required after this reference-only commit.
