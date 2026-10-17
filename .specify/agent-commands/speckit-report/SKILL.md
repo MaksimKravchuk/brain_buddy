@@ -51,11 +51,10 @@ is reported as absent.
    ran, which were skipped and why. Never present a skipped suite as passing.
 8. **What was accepted.** The `acceptance.md` verdict, the criteria tally
    (covered / weak / missing), and the traceability matrix link.
-9. **How it landed.** The trunk candidate SHA and CI run URL, or the PR link
-   for an ASK-class change. When the mainline SHIP/SHOW path was used there is
-   no PR object — write **"No PR object exists (SHIP/SHOW verified-trunk
-   landing)"** rather than leaving the field blank. A blank field reads as an
-   oversight; the explicit sentence reads as the fact it is.
+9. **How it landed.** The PR link, the reviewed PR head SHA, the merge-group
+   SHA that landed and its CI run URL, and for an ASK-class change the recorded
+   owner approval (ADR-0035: every change lands as a PR through the merge
+   queue). Never leave the field blank: a blank field reads as an oversight.
 10. **What is still open.** Deferred lanes, advisory findings not acted on,
     known gaps. This section is the one the human will act on; do not soften
     it and do not omit it when it is uncomfortable.

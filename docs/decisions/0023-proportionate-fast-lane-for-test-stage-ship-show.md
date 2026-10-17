@@ -3,6 +3,10 @@
 Date: 2026-09-16
 Status: Accepted by the product owner; the ASK surfaces that leave the fast lane are
 narrowed by [ADR-0030](0030-pre-launch-narrow-ask-class.md) while there are no real users
+Partially superseded by [ADR-0035](0035-merge-queue-pr-landing.md) (2026-10-17): where
+this record names the verified-trunk path or landing, read the PR + merge-queue landing,
+and read the exact-SHA candidate CI run as the merge-group CI run. The fast lane is
+otherwise unchanged.
 Amends: ADR-0005 (mandatory Spec Kit scope), ADR-0008 (SHIP/SHOW evidence),
 ADR-0011/0012/0014 (planning-review applicability)
 Related: ADR-0010 (opt-in managed outcomes), ADR-0022 (proportionate feature flags)

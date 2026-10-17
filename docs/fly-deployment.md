@@ -1,11 +1,11 @@
 # Fly.io Deployment Runbook
 
 > **Production release policy:** [ADR-0008](decisions/0008-verified-trunk-serial-landing.md),
-> as amended by [ADR-0023](decisions/0023-proportionate-fast-lane-for-test-stage-ship-show.md),
-> sends eligible SHIP/SHOW work through PR-less verified trunk: exact-SHA candidate CI,
-> serial landing, deploy-time main-head proof, and authenticated production smoke. ASK
-> work retains explicit approval, exact-SHA green CI, review evidence, and the audited
-> landing intervention in the autonomous delivery runbook. The setup commands below are
+> as amended by [ADR-0023](decisions/0023-proportionate-fast-lane-for-test-stage-ship-show.md)
+> and [ADR-0035](decisions/0035-merge-queue-pr-landing.md), sends every change through a
+> PR and the merge queue: exact-SHA CI on the merge-group commit, deploy-time main-head
+> proof, and authenticated production smoke. ASK work additionally needs explicit
+> recorded owner approval on the PR (see the autonomous delivery runbook). The setup commands below are
 > bootstrap/reference material, not authority for an agent or operator to perform an ad-hoc
 > production deploy. Follow the
 > [autonomous delivery runbook](autonomous-delivery-runbook.md) for release, incident, and

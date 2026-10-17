@@ -23,11 +23,11 @@ Allure taxonomy on every product
 test with the covering feature-qualified id (`NNN-FR-###`/`NNN-SC-###`) in
 the test name or story; acceptance
 graded by an agent that did not write the code; landing class decided by
-`scripts/classify_path_risk.py`, with SHIP and SHOW landing PR-less through
-verified trunk and ASK-class changes never landing automatically — a PR carries
-their review evidence, but merging it does not by itself update `main` (ADR-0008;
-ADR-0008; see `AGENTS.md` and `docs/autonomous-delivery-runbook.md` for the recorded
-approval and ruleset requirements).
+`scripts/classify_path_risk.py` (ADR-0008); every change, SHIP, SHOW or ASK,
+lands as a PR through the merge queue behind `Full CI` and `Docker Images`, and an
+ASK-class PR enters the queue only after explicit recorded owner approval on the PR
+for its exact head SHA (ADR-0035; see `AGENTS.md` and
+`docs/autonomous-delivery-runbook.md`).
 
 Before freeze, the implementation writer MUST produce a typed receipt using
 `.specify/templates/pre-freeze-receipt.schema.json` and run

@@ -4,6 +4,13 @@ Date: 2026-07-22
 Status: Accepted; ASK path scope amended by [ADR-0030](0030-pre-launch-narrow-ask-class.md)
 while there are no real users; the native (macOS/Windows) lanes on the landing path
 amended by [ADR-0034](0034-native-lanes-off-the-landing-critical-path.md)
+Partially superseded by [ADR-0035](0035-merge-queue-pr-landing.md) (2026-10-17): every
+change, SHIP, SHOW or ASK, now lands as a pull request through the merge queue behind
+`Full CI` and `Docker Images`. The PR-less `trunk-candidate/<sha>` path,
+`scripts/submit_to_trunk.sh`, the `restrict_updates` / deploy-key-only-bypass ruleset
+requirement and the temporary ruleset intervention for ASK are withdrawn; ADR-0035 lists
+the affected sections. Classification, exact-SHA CI, the release workflow's proof,
+deploy, smoke and rollback below remain in force.
 Decision owner: BrainBuddy
 Supersedes: the PR-mandatory release path and PR-preview trigger surface of
 [ADR-0003](0003-autonomous-delivery-guardrails.md) (its identity, least-privilege,

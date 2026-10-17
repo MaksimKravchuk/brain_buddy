@@ -100,9 +100,9 @@ Decisions on the four installable extensions:
 
 - **`git` — NOT INSTALLED**, and the reason is specific rather than blanket.
   It provides five commands; the extension installs all or none:
-  `speckit.git.commit` auto-commits after each Spec Kit command, which breaks
-  ADR-0008 — `scripts/submit_to_trunk.sh` requires exactly one non-merge commit
-  whose parent equals current `origin/main`. `speckit.git.feature` duplicates
+  `speckit.git.commit` auto-commits after each Spec Kit command, which fills
+  the PR branch with per-stage commits that the merge queue's merge commit
+  then carries into `main`'s history (ADR-0035). `speckit.git.feature` duplicates
   `.specify/scripts/bash/create-new-feature.sh` and fights worktree ownership.
   `speckit.git.initialize` is irrelevant here. The two read-only commands
   (`speckit.git.validate`, `speckit.git.remote`) are harmless but add nothing:
@@ -262,8 +262,9 @@ artifacts. Maintain a compact ledger: slice → owner → branch/worktree → PR
 SHA → CI → review → next action. Do not paste full build logs into the parent
 session. After all slices are integrated, run full feature acceptance and
 trace each FR/SC to the PR evidence. A PR is not authorization to merge or
-deploy: ADR-0008 still governs ASK approvals and SHIP/SHOW verified-trunk
-landing; review-only PRs for SHIP/SHOW do not replace that route.
+deploy: every slice PR lands through the merge queue behind `Full CI` and
+`Docker Images`, and an ASK-class slice enters the queue only after explicit
+recorded owner approval on the PR (ADR-0035).
 
 ### BrainBuddy stages around the Spec Kit core
 

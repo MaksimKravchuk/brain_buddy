@@ -1,118 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Submit the current HEAD as a verified-trunk landing candidate.
+# RETIRED by ADR-0035 (docs/decisions/0035-merge-queue-pr-landing.md).
 #
-# Validates a clean working tree, a current origin/main base, and exactly one
-# candidate commit, runs fast local checks, then pushes the exact candidate
-# SHA to a unique trunk-candidate/<sha> ref. Full CI runs on that ref; the
-# default-branch release workflow (deploy-fly-production.yml) consumes the
-# completed run and its land job fast-forwards main only after every
-# required job succeeds. Candidate-controlled CI itself can never promote.
+# This script used to push one candidate commit to a trunk-candidate/<sha>
+# ref, and the release workflow's land job fast-forwarded main with a deploy
+# key (ADR-0008). The main ruleset no longer lets that key update main, so a
+# candidate could pass CI and still never land. Every change, SHIP, SHOW or
+# ASK, now lands as a pull request through the merge queue behind Full CI and
+# Docker Images; ASK additionally needs recorded owner approval on the PR.
 #
-# This script never pushes to main and never force-pushes anything.
-# SUBMIT_TRUNK_SKIP_CHECKS=1 skips the fast local checks (offline contract
-# tests and emergencies only — CI remains the authoritative gate). The
-# SUBMIT_TRUNK_PRE_FREEZE_RECEIPT variable is required and must point to a
-# local, non-secret JSON receipt; it is validated against the frozen HEAD SHA.
-# There is intentionally no default receipt path.
-# Ship/Show/Ask path classification below is NOT skippable: ASK-class
-# changes require a reviewed PR or an explicitly authorized manual
-# high-risk landing (ADR-0008), never automatic trunk promotion.
+# The file is kept so existing references fail loudly instead of silently.
+# It runs no git command and pushes nothing.
 
-# Resolved before any cd so the classifier is taken from this script's own
-# checkout, not from whatever repository the candidate lives in.
-script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-
-log() { echo "[submit-to-trunk] $1"; }
-fail() {
-  echo "[submit-to-trunk] FAIL: $1" >&2
-  exit 1
-}
-
-git rev-parse --is-inside-work-tree >/dev/null 2>&1 || fail "not inside a git repository"
-
-repo_root=$(git rev-parse --show-toplevel)
-cd "${repo_root}"
-
-if [[ -n "$(git status --porcelain)" ]]; then
-  fail "working tree is not clean; commit or stash everything first"
-fi
-
-log "fetching origin/main..."
-git fetch --quiet origin main
-
-head_sha=$(git rev-parse HEAD)
-main_sha=$(git rev-parse origin/main)
-
-if [[ "${head_sha}" == "${main_sha}" ]]; then
-  fail "HEAD equals origin/main; there is no candidate commit to submit"
-fi
-
-parents=$(git rev-list --parents -n 1 "${head_sha}" | wc -w)
-if [[ "${parents}" -ne 2 ]]; then
-  fail "candidate must be a single non-merge commit (squash the series first)"
-fi
-
-parent_sha=$(git rev-parse "${head_sha}^")
-if [[ "${parent_sha}" != "${main_sha}" ]]; then
-  fail "candidate must contain exactly one commit whose parent is the current \
-origin/main (${main_sha}); rebase/squash onto origin/main and retry"
-fi
-
-# Freeze the exact candidate before any submission side effect. The receipt is
-# a local writer artifact and contains no secrets; requiring an explicit path
-# prevents a missing receipt from silently becoming a successful submission.
-receipt_validator="${script_dir}/validate_pre_freeze_receipt.py"
-[[ -f "${receipt_validator}" ]] || fail "missing pre-freeze receipt validator ${receipt_validator}"
-receipt_path="${SUBMIT_TRUNK_PRE_FREEZE_RECEIPT:-}"
-[[ -n "${receipt_path}" ]] || fail "pre-freeze receipt is required; set SUBMIT_TRUNK_PRE_FREEZE_RECEIPT to a receipt JSON path"
-log "validating pre-freeze receipt for frozen candidate ${head_sha}..."
-python3 "${receipt_validator}" "${receipt_path}" --sha "${head_sha}" \
-  || fail "pre-freeze receipt validation failed for frozen candidate ${head_sha}"
-
-# Mechanical Ship/Show/Ask enforcement (ADR-0008), never skippable.
-command -v python3 >/dev/null 2>&1 || fail "python3 is required to classify candidate risk"
-classifier="${script_dir}/classify_path_risk.py"
-[[ -f "${classifier}" ]] || fail "missing risk classifier ${classifier}"
-log "classifying changed paths (Ship/Show/Ask)..."
-# NUL-separated with --no-renames: git never quotes -z output, so non-ASCII
-# paths classify on their real names, and a rename away from an ASK path
-# still surfaces as its deletion. The same form runs in the trusted landing
-# gate of the default-branch release workflow.
-if ! git diff --no-renames --name-only -z "${main_sha}" "${head_sha}" \
-  | python3 "${classifier}" --null; then
-  fail "candidate touches ASK-class paths; ASK changes require a reviewed PR or \
-an explicitly authorized manual high-risk landing (ADR-0008)"
-fi
-
-if [[ "${SUBMIT_TRUNK_SKIP_CHECKS:-0}" == "1" ]]; then
-  log "WARNING: fast local checks skipped (SUBMIT_TRUNK_SKIP_CHECKS=1); CI is still authoritative"
-else
-  log "running fast local checks..."
-  if [[ -f scripts/check_spec_kit_specs.py ]]; then
-    python3 scripts/check_spec_kit_specs.py
-  fi
-  if [[ -d backend ]] && command -v ruff >/dev/null 2>&1; then
-    (cd backend && ruff check app tests)
-  fi
-  if command -v actionlint >/dev/null 2>&1; then
-    actionlint
-  fi
-fi
-
-candidate_branch="trunk-candidate/${head_sha}"
-log "pushing candidate ${candidate_branch}..."
-git push origin "${head_sha}:refs/heads/${candidate_branch}"
-
-log "candidate submitted: ${candidate_branch} (${head_sha})"
-
-origin_url=$(git remote get-url origin)
-repo_slug=$(printf '%s\n' "${origin_url}" \
-  | sed -E 's#^git@github\.com:##; s#^https://github\.com/##; s#\.git$##')
-if [[ "${repo_slug}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
-  encoded_branch="trunk-candidate%2F${head_sha}"
-  log "watch CI: https://github.com/${repo_slug}/actions?query=branch%3A${encoded_branch}"
-else
-  log "origin is not a github.com remote; check your CI dashboard for ${candidate_branch}"
-fi
+cat >&2 <<'EOF'
+[submit-to-trunk] FAIL: PR-less trunk-candidate landing is retired (ADR-0035).
+[submit-to-trunk] Nothing was pushed. Land every change (SHIP, SHOW or ASK) as a
+[submit-to-trunk] pull request against main through the merge queue instead:
+[submit-to-trunk]   1. push your branch and open a PR against main;
+[submit-to-trunk]   2. wait for Full CI and Docker Images on the PR head and resolve
+[submit-to-trunk]      every review thread (ASK also needs recorded owner approval
+[submit-to-trunk]      on the PR for the exact head SHA);
+[submit-to-trunk]   3. add the PR to the merge queue.
+[submit-to-trunk] See docs/decisions/0035-merge-queue-pr-landing.md and
+[submit-to-trunk] docs/autonomous-delivery-runbook.md (Merge-queue landing).
+EOF
+exit 1
