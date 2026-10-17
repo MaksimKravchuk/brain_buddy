@@ -1363,3 +1363,45 @@ describe("020-FR-051 AppShell review dialogs at web open", () => {
     expect(within(fresh).getByRole("button", { name: "Change the number of days" })).toBeInTheDocument();
   });
 });
+
+describe("AppShell update-required alert (027 D-02)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  async function refuseNextRequest(): Promise<void> {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ code: "UPGRADE_REQUIRED", message: "Reload to update." }), {
+          status: 426,
+          headers: { "Content-Type": "application/json", "X-Correlation-ID": "cid-shell" }
+        })
+      )
+    );
+    await act(async () => {
+      await apiClient.listTasks().catch(() => undefined);
+    });
+  }
+
+  it("027-FR-018 shows the update-required alert when a normal API call is refused with 426 UPGRADE_REQUIRED", async () => {
+    renderShell();
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    await refuseNextRequest();
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("Reload to update. (ref: cid-shell)");
+    expect(within(alert).getByRole("button", { name: "Reload" })).toBeVisible();
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+  });
+
+  it("027-FR-018 keeps the alert reachable while a modal panel makes the workspace inert", async () => {
+    renderShell({ panel: <div role="dialog" aria-modal="true" aria-label="Task detail" />, panelModal: true });
+
+    await refuseNextRequest();
+
+    const alert = screen.getByRole("alert");
+    expect(alert.closest("[inert]")).toBeNull();
+  });
+});

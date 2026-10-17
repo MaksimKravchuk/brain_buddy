@@ -43,6 +43,7 @@ import {
 } from "./shellToast";
 import type { ShellNotify, ShellToastAction } from "./shellToast";
 import { SignOutDialog } from "./SignOutDialog";
+import { UpdateRequiredToast } from "./UpdateRequiredToast";
 import { loadSignOutSummary, type SignOutSummary } from "./signOutSummary";
 
 interface AppShellProps {
@@ -184,6 +185,10 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
           </div>
           <NavigationDrawer {...props} open={isDrawerOpen} onClose={closeDrawer} />
         </div>
+        {/* 027 D-02: the update-required alert registers the 426 handler, so it
+            mounts once here. It sits outside the inert workspace so a modal panel
+            never silences or disables it. */}
+        <UpdateRequiredToast />
         {panel}
         {/* Spec 020: the explainer, then While you were away, only while the flag is on. */}
         {weeklyReviewEnabled ? <ReviewStartupDialogs /> : null}
