@@ -15,7 +15,7 @@ from scripts.select_backend_tests import build_map
 
 
 class CoverageIntegrationTests(unittest.TestCase):
-    def test_036_FR_002_combined_relative_data_reports_real_hits_and_test_contexts(self) -> None:
+    def test_036_FR_002_036_SC_001_combined_relative_data_reports_real_hits_and_test_contexts(self) -> None:
         """036-SC-001: shard data from other workspaces preserves coverage and map owners."""
         previous = Path.cwd()
         try:

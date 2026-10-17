@@ -188,7 +188,7 @@ class MutationMergeTests(unittest.TestCase):
             **extra,
         }
 
-    def test_036_FR_003_merges_disjoint_scope_and_sums_raw_counters(self) -> None:
+    def test_036_FR_003_036_SC_002_merges_disjoint_scope_and_sums_raw_counters(self) -> None:
         """036-SC-002: preserve every mutant and judge the combined raw counts."""
         """SC-002: aggregate raw counters produce a weighted checked total."""
         parts = [
@@ -218,19 +218,41 @@ class MutationMergeTests(unittest.TestCase):
         self.assertEqual(result["stats"]["killed"], 1)
 
     def test_036_FR_003_rejects_missing_scope_duplicate_identity_bad_stats_and_interruption(self) -> None:
-        p0 = self._part(0, ["app/services/tree_service.py"], ["m1"])
-        p1 = self._part(1, ["app/services/task.py"], ["m2"])
+        """036-FR-003: each corruption is rejected after a valid aggregate baseline."""
+        tree_id = "app.services.tree_service.x1"
+        task_id = "app.services.task.x1"
+        p0 = self._part(0, ["app/services/tree_service.py"], [tree_id])
+        p1 = self._part(1, ["app/services/task.py"], [task_id])
+        baseline = ci_shards.merge_mutation_manifests([p0, p1], sha="a" * 40)
+        self.assertEqual(baseline["identities"], sorted([tree_id, task_id]))
+        self.assertEqual(baseline["stats"]["total"], 2)
         cases = [
-            [p0],
-            [p0, {**p1, "assigned": ["app/services/tree_service.py"]}],
-            [p0, {**p1, "identities": ["m1"]}],
-            [p0, {**p1, "stats": {**p1["stats"], "killed": -1}}],
-            [p0, {**p1, "stats": {**p1["stats"], "check_was_interrupted_by_user": 1}}],
-            [p0, {**p1, "sha": "b" * 40}],
-            [p0, {**p1, "status": None}],
+            ("missing part", [p0], "exactly two manifests"),
+            (
+                "wrong assigned scope",
+                [p0, {**p1, "assigned": ["app/services/tree_service.py"]}],
+                "scope is missing or incorrectly assigned",
+            ),
+            (
+                "duplicate identity",
+                [p0, self._part(1, ["app/services/task.py"], [task_id, task_id])],
+                "duplicate mutant identity",
+            ),
+            (
+                "negative counter",
+                [p0, {**p1, "stats": {**p1["stats"], "killed": -1}}],
+                "invalid mutation counter: killed",
+            ),
+            (
+                "interrupted campaign",
+                [p0, {**p1, "stats": {**p1["stats"], "check_was_interrupted_by_user": 1}}],
+                "mutation campaign was interrupted",
+            ),
+            ("wrong SHA", [p0, {**p1, "sha": "b" * 40}], "source SHA or shard count"),
+            ("missing status", [p0, {**p1, "status": None}], "failed or was interrupted"),
         ]
-        for parts in cases:
-            with self.subTest(parts=parts), self.assertRaises(ValueError):
+        for name, parts, expected_message in cases:
+            with self.subTest(corruption=name), self.assertRaisesRegex(ValueError, expected_message):
                 ci_shards.merge_mutation_manifests(parts, sha="a" * 40)
 
 
