@@ -18,7 +18,7 @@ async function openSyntheticAdmin(page: import("@playwright/test").Page): Promis
       },
       "/api/admin/feature-flags": { degraded: false, flags: [
         { name: "voice_brain_dump", mode: "off", selected_users: [] },
-        { name: "mobile_task_classification", mode: "selected_users", selected_users: [{ account_id: "member", email: "member.long-email-address@example.test" }] },
+        { name: "weekly_review", mode: "selected_users", selected_users: [{ account_id: "member", email: "member.long-email-address@example.test" }] },
         { name: "external_agent_relay", mode: "on", selected_users: [] }
       ] },
       "/api/tasks": { items: [], next_cursor: null, has_more: false, counts_by_state: { inbox: 0, next: 0, waiting: 0, someday: 0 } },

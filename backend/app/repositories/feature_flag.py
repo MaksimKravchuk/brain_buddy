@@ -42,7 +42,11 @@ from enum import Enum
 from pathlib import Path
 from typing import ClassVar
 
-from app.core.config import FeatureFlagState, ManagedFlagMigrationSeed
+from app.core.config import (
+    RETIRED_FEATURE_FLAGS,
+    FeatureFlagState,
+    ManagedFlagMigrationSeed,
+)
 from app.core.logging import get_correlation_id
 from app.exceptions import RepositoryError, StorageUnavailableError
 from app.utils.file_ops import atomic_write
@@ -79,7 +83,6 @@ migration id and when it completed (010-SC-007).
 
 MANAGED_FLAGS: tuple[str, ...] = (
     "voice_brain_dump",
-    "mobile_task_classification",
     "external_agent_relay",
     "task_title_autocomplete",
     "crt_canvas",
@@ -95,8 +98,14 @@ OPTIONAL_MANAGED_FLAGS: tuple[str, ...] = ("cli_auth",)
 """
 
 _ADR_0019_MANAGED_FLAGS: frozenset[str] = frozenset(
-    {"voice_brain_dump", "mobile_task_classification", "external_agent_relay"}
+    {"voice_brain_dump", "external_agent_relay"}
 )
+"""The ADR-0019 rows an older store must still hold to be upgraded.
+
+`mobile_task_classification` was the third until it was retired; a store that
+still carries its row is recognized by ignoring `RETIRED_FEATURE_FLAGS` rather
+than by requiring the name, so an old store and a post-retirement store both
+upgrade."""
 
 _POST_ADR_0019_DEFAULT_OFF_FLAGS: tuple[str, ...] = (
     "task_title_autocomplete",
@@ -420,6 +429,7 @@ class FeatureFlagOverrideRepository(BaseRepository):
         rows = conn.execute(
             "SELECT flag, mode, selected_users FROM feature_flags"
         ).fetchall()
+        rows = [row for row in rows if row["flag"] not in RETIRED_FEATURE_FLAGS]
         present = frozenset(row["flag"] for row in rows)
         if (
             not _ADR_0019_MANAGED_FLAGS
@@ -491,6 +501,38 @@ class FeatureFlagOverrideRepository(BaseRepository):
         )
 
     @staticmethod
+    def _scrub_retired_rows(conn: sqlite3.Connection, account_id: str) -> None:
+        """Erase an account from the cohort of any leftover retired-flag row.
+
+        A retired row is ignored by `_load`, but it may still name account IDs,
+        so GDPR erasure must reach it. An unparseable cohort is cleared: the
+        flag no longer exists, so there is nothing to preserve.
+        """
+
+        for retired in sorted(RETIRED_FEATURE_FLAGS):
+            row = conn.execute(
+                "SELECT selected_users FROM feature_flags WHERE flag = ?",
+                (retired,),
+            ).fetchone()
+            if row is None:
+                continue
+            try:
+                cohort = json.loads(row["selected_users"])
+            except TypeError, ValueError:
+                cohort = None
+            if isinstance(cohort, list) and account_id not in cohort:
+                continue
+            kept = (
+                [member for member in cohort if member != account_id]
+                if isinstance(cohort, list)
+                else []
+            )
+            conn.execute(
+                "UPDATE feature_flags SET selected_users = ? WHERE flag = ?",
+                (json.dumps(kept), retired),
+            )
+
+    @staticmethod
     def _upsert_row(conn: sqlite3.Connection, flag: str, entry: FlagOverride) -> None:
         """Write one row, refusing before SQL runs if the cohort is not
         canonical (010-SC-007) — the write path is the last line of defense,
@@ -531,7 +573,12 @@ class FeatureFlagOverrideRepository(BaseRepository):
         rows = conn.execute(
             "SELECT flag, mode, selected_users FROM feature_flags"
         ).fetchall()
-        present = {row["flag"]: row for row in rows}
+        # A retired flag's leftover row is ignored, never an error: it is not
+        # loaded, not resolved and not written back (`scrub_user` still erases
+        # an account from its cohort).
+        present = {
+            row["flag"]: row for row in rows if row["flag"] not in RETIRED_FEATURE_FLAGS
+        }
         if not set(MANAGED_FLAGS).issubset(present) or not set(present).issubset(
             set(MANAGED_FLAGS + OPTIONAL_MANAGED_FLAGS)
         ):
@@ -680,6 +727,7 @@ class FeatureFlagOverrideRepository(BaseRepository):
                                 ),
                             )
                             self._upsert_row(conn, flag, trimmed)
+                        self._scrub_retired_rows(conn, account_id)
                         conn.commit()
                     except BaseException:
                         conn.rollback()
