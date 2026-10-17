@@ -9,21 +9,21 @@ Swift function name) so `scripts/check_requirement_coverage.py` can trace them.
 
 ## Phase 1 — Spec (PR-01)
 
-- [ ] T001 [US1] Write intake, spec, design, plan, tasks and the requirements checklist in `specs/031-ios-voice-brain-dump/`
+- [x] T001 [US1] Write intake, spec, design, plan, tasks and the requirements checklist in `specs/031-ios-voice-brain-dump/`
 
 ## Phase 2 — Kit model (PR-02)
 
-- [ ] T002 [US1] Add `HeardStep`, `StepExtracting`, `SentenceStepExtractor`, `SpeechCapturing`, `SpeechCaptureError`, `BrainDumpCapturePort`, `BrainDumpProject`, `VoiceLanguage` and `VoiceBrainDumpCopy` in `ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/VoiceBrainDump/`, and make `Workspace` conform to `BrainDumpCapturePort`
-- [ ] T003 [US1] Implement `VoiceBrainDumpModel` (start, live debounced reads, fallback, merge with edits and removals, project match, stop, add with partial failure, cancel, close confirmation) per plan.md
-- [ ] T004 [P] [US1] Test every phase and rule with a fake speech capture, a fake extractor and a fake port in `ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/VoiceBrainDumpModelTests.swift`
+- [x] T002 [US1] Add `HeardStep`, `StepExtracting`, `SentenceStepExtractor`, `SpeechCapturing`, `SpeechCaptureError`, `BrainDumpCapturePort`, `BrainDumpProject`, `VoiceLanguage` and `VoiceBrainDumpCopy` in `ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/VoiceBrainDump/`, and make `Workspace` conform to `BrainDumpCapturePort`
+- [x] T003 [US1] Implement `VoiceBrainDumpModel` (start, live debounced reads, fallback, merge with edits and removals, project match, stop, add with partial failure, cancel, close confirmation) per plan.md
+- [x] T004 [P] [US1] Test every phase and rule with a fake speech capture, a fake extractor and a fake port in `ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/VoiceBrainDumpModelTests.swift`
 
 ## Phase 3 — App: speech and steps (PR-03), sheet (PR-04)
 
-- [ ] T005 [US1] Add `AppleSpeechCapture` (AVAudioEngine tap, on-device `SFSpeechRecognizer`, permissions, no file) in `ios/BrainBuddy/Screens/Capture/Voice/`
-- [ ] T006 [US1] Add `AppleStepExtractor` (Foundation Models, `@Generable` steps, throws when unavailable) in `ios/BrainBuddy/Screens/Capture/Voice/`
-- [ ] T007 [US1] Declare `NSMicrophoneUsageDescription` and `NSSpeechRecognitionUsageDescription` in `ios/project.yml`
-- [ ] T008 [US1] Add `VoiceCaptureSheet` per design.md (states V-02.1 to V-02.9, language menu, close confirmation, toast on add), its rows and the voice button face in `VoiceCaptureParts.swift`
-- [ ] T009 [US1] Show the voice button in the capture glass bar's leading slot, presenting the sheet, in `ios/BrainBuddy/Screens/Capture/CaptureSheet.swift`
+- [x] T005 [US1] Add `AppleSpeechCapture` (AVAudioEngine tap, on-device `SFSpeechRecognizer`, permissions, no file) in `ios/BrainBuddy/Screens/Capture/Voice/`
+- [x] T006 [US1] Add `AppleStepExtractor` (Foundation Models, `@Generable` steps, throws when unavailable) in `ios/BrainBuddy/Screens/Capture/Voice/`
+- [x] T007 [US1] Declare `NSMicrophoneUsageDescription` and `NSSpeechRecognitionUsageDescription` in `ios/project.yml`
+- [x] T008 [US1] Add `VoiceCaptureSheet` per design.md (states V-02.1 to V-02.9, language menu, close confirmation, toast on add), its rows and the voice button face in `VoiceCaptureParts.swift`
+- [x] T009 [US1] Show the voice button in the capture glass bar's leading slot, presenting the sheet, in `ios/BrainBuddy/Screens/Capture/CaptureSheet.swift`
 
 ## Phase 4 — Close (PR-05)
 
