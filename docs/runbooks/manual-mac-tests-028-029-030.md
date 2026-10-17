@@ -200,7 +200,7 @@ Signed in as Account A (flag ON), both test agents running, steps from 1.5 synce
 | A-14 | Hand off "Compare quotes, ask me which one" to Hermes. | Within about 90 seconds (the stub delay) the run is "Needs you". |
 | A-15 | Make a new step while the backend is stopped, then choose Hand off… on it. | Hand off… is disabled with "This step hasn't reached your account yet." Restart the backend. |
 | A-16 | Stop the backend and choose Hand off… on a synced step. | "Handing off needs a connection." Nothing is sent. Restart the backend. |
-| A-17 | Stop both agents, then open Hand off…. | The sheet says no agent is ready and offers Open Settings…, which opens Settings › Agents. Start both agents again and Test again each. |
+| A-17 | Stop both agents, then open Hand off…. | Opening the sheet tests each agent again, so stopping the processes is enough (no Test again first). The sheet says no agent is ready and offers Open Settings…, which opens Settings › Agents. Start both agents again and Test again each. |
 
 **Runs**
 
