@@ -1,0 +1,2 @@
+# Research
+Two queue jobs miss the same full Apple key. Of 93 observed Apple cache entries none was on main. PR job 117189094168 restored the identical key in four seconds; its iOS lane took 11:41. Existing main CI skips Apple lanes after an exact queue-verified landing, so it does not populate main caches on that path. A separate trusted push producer avoids repeating product tests just to populate caches. Exact-key matching preserves the existing source/toolchain/platform contract. GitHub cache scope documentation confirms sibling branch caches cannot be restored.

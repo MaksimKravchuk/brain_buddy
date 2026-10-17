@@ -1,0 +1,226 @@
+{
+  "architect_action": "Hold implementation and put this decision packet to the human. These are product decisions; no agent may answer them for them. Every lens that produced evidence ran on one provider, so this panel's agreement is one vendor's opinion counted several times.",
+  "artifacts_changed_since_preflight": false,
+  "artifacts_digest": "6f0980627b27df84f69f505bc819ed91cd04833a7415dc3e8ddfbf94b1469a34",
+  "declared_risk": "medium",
+  "degraded_lenses": [],
+  "human_signoff": {
+    "approved_by": "Max (current chat)",
+    "approved_on": "2026-10-16",
+    "artifacts_digest": "6f0980627b27df84f69f505bc819ed91cd04833a7415dc3e8ddfbf94b1469a34",
+    "rationale": "The owner explicitly requested implementing the first agreed step: a shared Rust bridge cache on main without reducing checks, passing CI and verifying merge-queue reuse and speed. Authorization is limited to this bounded scope, preserved protections and normal PR/queue delivery; no ruleset intervention, secret change or unrelated PR mutation is authorized.",
+    "run_id": "035-shared-cache-20261016"
+  },
+  "missing_reviewers": [],
+  "model_unverified_lenses": [],
+  "oracle_unknown_lenses": [],
+  "panel_correlated": true,
+  "panel_oracles": {
+    "codex/gpt-5.6-sol": 5
+  },
+  "panel_providers": {
+    "codex": 5
+  },
+  "product_decisions": [
+    {
+      "affected_acceptance": "FR-001 and SC-001 require both main-scoped entries to exist, the Edge Cases section accepts eviction, and plan.md:18 currently forbids deleting existing caches; the decision determines the lifecycle and rollback contract.",
+      "category": "privacy",
+      "options": [
+        "Accept the platform-managed GitHub Actions cache lifecycle, document the current retention/eviction rule and settings, and keep account export and purge N/A because entries contain no user data.",
+        "Set an owner-defined maximum lifetime independent of the platform default; the implementing agent chooses the cleanup mechanism, while account export and purge remain N/A for these non-personal artifacts."
+      ],
+      "question": "Should the shared main-scoped compiler caches use GitHub Actions' platform-managed retention and eviction unchanged, or must BrainBuddy impose an explicit shorter maximum lifetime?",
+      "reviewer": "privacy-consent-security",
+      "why_needed": "The feature introduces durable repository cache records but specifies neither their retention period nor deletion trigger. Retention periods are product privacy decisions; cleanup mechanics remain with the implementing agent."
+    }
+  ],
+  "reviewers": [
+    {
+      "oracle": {
+        "artifacts_digest": "6f0980627b27df84f69f505bc819ed91cd04833a7415dc3e8ddfbf94b1469a34",
+        "degraded": false,
+        "executable": "/opt/homebrew/bin/codex",
+        "integration": "codex",
+        "model": "gpt-5.6-sol"
+      },
+      "role": "requirements-consistency",
+      "summary": "The cache outcome is generally consistent across the artifacts, but the release plan contradicts the accepted ASK landing contract and does not preserve exact-SHA review evidence across its two-PR merge-queue sequence.",
+      "verdict": "changes-required"
+    },
+    {
+      "oracle": {
+        "artifacts_digest": "6f0980627b27df84f69f505bc819ed91cd04833a7415dc3e8ddfbf94b1469a34",
+        "degraded": false,
+        "executable": "/opt/homebrew/bin/codex",
+        "integration": "codex",
+        "model": "gpt-5.6-sol"
+      },
+      "role": "architecture-consistency",
+      "summary": "The cache identity, variants, paths, data ownership, and rollback model align with current consumers. Changes are required because the ASK landing sequence contradicts binding repository controls, and cache-outage fallback is promised but absent from the unchanged consumers.",
+      "verdict": "changes-required"
+    },
+    {
+      "oracle": {
+        "artifacts_digest": "6f0980627b27df84f69f505bc819ed91cd04833a7415dc3e8ddfbf94b1469a34",
+        "degraded": false,
+        "executable": "/opt/homebrew/bin/codex",
+        "integration": "codex",
+        "model": "gpt-5.6-sol"
+      },
+      "role": "testability-evidence",
+      "summary": "The success-path evidence and serial implementation → warm → merge-group verification lanes are otherwise proportionate, but two gaps prevent approval: the planned ASK landing cannot occur under the accepted controls, and the focused workflow-contract test is neither included in exact-SHA CI nor scoped to every accepted operational failure mode. No product decision is needed.",
+      "verdict": "changes-required"
+    },
+    {
+      "oracle": {
+        "artifacts_digest": "6f0980627b27df84f69f505bc819ed91cd04833a7415dc3e8ddfbf94b1469a34",
+        "degraded": false,
+        "executable": "/opt/homebrew/bin/codex",
+        "integration": "codex",
+        "model": "gpt-5.6-sol"
+      },
+      "role": "privacy-consent-security",
+      "summary": "Consent, owner scoping, 404-vs-403 behavior, and account-data authorization are N/A because this feature adds no product API or user-content path. The proposed workflow is least-privilege and caches only source-derived compiler artifacts. However, a cold producer run will emit an absolute runner-local path in GitHub logs, violating Constitution Principle I, and the new main-scoped caches lack an explicit retention, deletion, purge, and export disposition. The retention period requires a product privacy decision.",
+      "verdict": "product-decision-required"
+    },
+    {
+      "oracle": {
+        "artifacts_digest": "6f0980627b27df84f69f505bc819ed91cd04833a7415dc3e8ddfbf94b1469a34",
+        "degraded": false,
+        "executable": "/opt/homebrew/bin/codex",
+        "integration": "codex",
+        "model": "gpt-5.6-sol"
+      },
+      "role": "ux-accessibility-mobile",
+      "summary": "This lens does not apply. The artifacts consistently constrain the feature to trusted CI cache preparation, explicitly declare no user-visible surface and no impact on mobile workflows, and introduce no product loading, empty, error, partial-failure, keyboard, focus, destructive-action, or interruption/resume behavior to specify.",
+      "verdict": "pass"
+    }
+  ],
+  "risk": "medium",
+  "risk_escalated_by_classifier": false,
+  "run_id": "035-shared-cache-20261016",
+  "single_provider_panel": true,
+  "stale_reviews": [],
+  "status": "product-decision-required",
+  "technical_findings": [
+    {
+      "category": "landing-contract consistency",
+      "description": "The plan correctly classifies the workflow change as ASK, but then requires normal PR/merge-queue landing and explicitly says that no ruleset intervention is planned. The accepted landing contract says every `.github/` change is ASK and, while the landing deploy key remains the sole bypass actor, neither a PR nor a direct human push can update main without the recorded temporary ruleset intervention. The follow-up documentation PR also cannot produce the required real merge-group evidence under those stated protections. This leaves the planned acceptance sequence without a valid landing path and conflicts with the specification's unqualified assertion that existing protections are preserved.",
+      "evidence": [
+        "specs/035-shared-rust-bridge-cache/plan.md:11 classifies the change as ASK but states that normal PR/queue protections will be used and no ruleset intervention is planned.",
+        "specs/035-shared-rust-bridge-cache/plan.md:14 requires enqueuing both the workflow PR and a follow-up documentation PR to obtain merge-group evidence.",
+        "specs/035-shared-rust-bridge-cache/spec.md:30-33 requires compliant workflow-safety evidence while asserting that existing main protections are preserved.",
+        "docs/decisions/0030-pre-launch-narrow-ask-class.md:32-45 keeps every path under .github/ in the ASK class.",
+        "docs/decisions/0008-verified-trunk-serial-landing.md:64-75 requires explicit approval, exact-SHA CI, and an audited temporary ruleset intervention while the deploy key is the sole bypass actor.",
+        "docs/autonomous-delivery-runbook.md:135-145 states that an ASK PR carries review evidence but cannot itself land under the current protection model.",
+        "AGENTS.md:132-134 repeats the binding ASK classification and landing procedure."
+      ],
+      "recommendation": "Revise the specification and plan to name a governance-compliant landing and restoration sequence for every planned PR: explicit recorded approval, green required CI on the exact landing SHA, audited temporary ruleset intervention, and evidence that protections were restored. If repository settings now provide a separately accountable merge path, first reconcile the accepted ADR and runbook with that current state and cite the evidence instead of asserting a queue-only path.",
+      "reviewer": "requirements-consistency",
+      "severity": "blocking"
+    },
+    {
+      "category": "exact-SHA acceptance evidence",
+      "description": "SC-003 requires required checks to pass on the reviewed SHA, but the plan reviews the first PR candidate before enqueueing it, after which the merge queue creates a different merge-group candidate. The later documentation PR advances the repository again and has no independent exact-SHA review step. Consequently, the plan does not establish that the reviewed, tested, landed, and deployed SHA are identical, and the first PR's review cannot cover the final documentation commit.",
+      "evidence": [
+        "specs/035-shared-rust-bridge-cache/spec.md:30 requires required CI and workflow-safety checks to pass on the reviewed SHA.",
+        "specs/035-shared-rust-bridge-cache/plan.md:14 places review before enqueueing the first PR and then introduces a separate documentation PR without specifying another exact-SHA independent review.",
+        "specs/035-shared-rust-bridge-cache/quickstart.md:2 verifies the producer and later merge-group run but does not verify that either final landed SHA is the independently reviewed SHA.",
+        "AGENTS.md:81-86 requires the deployed SHA to match both the tested SHA and the independently reviewed SHA and states that any SHA change invalidates prior evidence.",
+        "AGENTS.md:208-209 requires the independent reviewer to review the frozen exact SHA.",
+        "docs/autonomous-delivery-runbook.md:458-468 requires landing the reviewed, exact CI-tested SHA and carrying that same SHA through main CI and deployment."
+      ],
+      "recommendation": "Define an exact-SHA evidence sequence for each repository-changing step. Freeze the actual SHA that will land, obtain independent review and required CI for that same SHA, verify main equals it, and retain deployment evidence. Treat the follow-up documentation commit as a new SHA requiring its own applicable gate; do not reuse the workflow PR's review as evidence for it.",
+      "reviewer": "requirements-consistency",
+      "severity": "blocking"
+    },
+    {
+      "category": "ADR alignment and landing",
+      "description": "The plan classifies the new workflow as ASK but then routes it through normal PR/merge-queue protections and explicitly plans no ruleset intervention. Under the binding delivery architecture, a workflow change cannot land that way: every .github path is ASK, automatic candidate submission rejects it, and the landing deploy key is the sole restrict_updates bypass actor. The documented sequence is therefore not executable as written.",
+      "evidence": [
+        "specs/035-shared-rust-bridge-cache/plan.md:11 states that no ruleset intervention is planned.",
+        "specs/035-shared-rust-bridge-cache/plan.md:14 says to enqueue the workflow PR and later use another merge-group PR.",
+        "docs/decisions/0030-pre-launch-narrow-ask-class.md:32-45 classifies every GitHub workflow and action under .github as ASK.",
+        "docs/decisions/0008-verified-trunk-serial-landing.md:64-75 requires recorded approval, exact-SHA green CI, and an audited temporary ruleset intervention for ASK landing; it states that a PR cannot itself update main while the deploy key is the sole bypass actor.",
+        "scripts/classify_path_risk.py:61-66 classifies .github/ as ASK.",
+        "scripts/submit_to_trunk.sh:74-87 rejects ASK paths from automatic trunk submission.",
+        "docs/autonomous-delivery-runbook.md:135-142 and 231-237 repeat the mandatory temporary-intervention and re-enable evidence contract."
+      ],
+      "recommendation": "Amend the plan and quickstart to use the established ASK procedure for the first PR: reviewed evidence vehicle, exact-SHA green required CI, explicit recorded approval, audited temporary ruleset intervention, landing of that exact SHA, and proof that protections were restored. Only then should the documentation probe enter the merge queue and verify reuse.",
+      "reviewer": "architecture-consistency",
+      "severity": "blocking"
+    },
+    {
+      "category": "Failure handling and contract consistency",
+      "description": "The specification promises that a cache outage retains the cold-build path, but the plan keeps existing consumers unchanged. Both Apple consumers currently invoke actions/cache@v6 without an error-tolerant recovery boundary. A restore exception fails that step, so the subsequent bridge-build step does not run; only an ordinary cache miss reaches the cold build. Warming failure and eviction handling do not satisfy the broader outage requirement.",
+      "evidence": [
+        "specs/035-shared-rust-bridge-cache/spec.md:18-19 explicitly includes cache outage in the cold-build guarantee.",
+        "specs/035-shared-rust-bridge-cache/plan.md:6-7 says existing consumers remain unchanged and only describes exact misses.",
+        "specs/035-shared-rust-bridge-cache/plan.md:17-18 covers warming failure and eviction but not consumer restore errors.",
+        ".github/workflows/ci.yml:995-1014 shows the full Apple consumer's cache action followed by a cold build only when cache-hit is not true.",
+        ".github/workflows/ci.yml:1140-1160 has the same behavior for the Mac-only variant.",
+        "[actions/cache v6 restoreImpl.ts](https://github.com/actions/cache/blob/v6/src/restoreImpl.ts#L79-L84) marks restore exceptions as step failures with core.setFailed."
+      ],
+      "recommendation": "Extend the plan's owned scope to provide an explicit consumer-side restore-error fallback for both Apple variants. It must remove or avoid partially restored output before cold compilation and retain required-check failure for genuine build/test failures. Add focused verification for this failure path; an exact cache miss test alone is insufficient.",
+      "reviewer": "architecture-consistency",
+      "severity": "important"
+    },
+    {
+      "category": "operational acceptance evidence",
+      "description": "The plan classifies the workflow change as ASK but says that normal PR/queue protections will land it and that no ruleset intervention is planned. Under the accepted landing contract, a workflow PR cannot update main while the landing deploy key is the sole bypass actor. Consequently the producer cannot reach main and SC-001/SC-002 live evidence cannot be collected using the documented plan.",
+      "evidence": [
+        "specs/035-shared-rust-bridge-cache/plan.md:11 states that the change is ASK, relies on normal PR/queue protections, and plans no ruleset intervention.",
+        "specs/035-shared-rust-bridge-cache/spec.md:28-30 requires main-scoped entries and a real merge-group restoration.",
+        "docs/decisions/0030-pre-launch-narrow-ask-class.md:32-45 classifies every workflow under .github/ as ASK.",
+        "docs/decisions/0008-verified-trunk-serial-landing.md:284-299 requires explicit recorded approval, green exact-SHA CI, and an audited temporary ruleset intervention for an ASK landing.",
+        "docs/autonomous-delivery-runbook.md:135-142 defines the same three-part ASK landing evidence contract."
+      ],
+      "recommendation": "Amend the delivery and evidence lane to include the existing ASK procedure: run-bound approval for the frozen SHA, required CI URLs proving that SHA green, the audited temporary ruleset intervention with actor/reason/re-enable evidence, main SHA read-back, and only then the producer and merge-group verification. This is an implementation/governance correction, not a product decision.",
+      "reviewer": "testability-evidence",
+      "severity": "blocking"
+    },
+    {
+      "category": "automated evidence reachability and coverage",
+      "description": "The plan introduces a focused semantic test for the new workflow, but neither required exact-SHA CI nor make validate-ci invokes that test. The stated test scope also omits explicit assertions for the accepted concurrency, cancellation, and failed-warm isolation safeguards. Full CI could therefore pass while the new test is never executed or while those operational invariants are absent.",
+      "evidence": [
+        "specs/035-shared-rust-bridge-cache/plan.md:6-10 defines exact-SHA checkout, serialized non-cancelling producers, cold fallback, and a new scripts/test_warm_rust_bridge_workflow.py test, but lists only trigger, permissions, key/path compatibility, variants, and miss-only compilation as its assertions.",
+        "specs/035-shared-rust-bridge-cache/spec.md:18-19 accepts concurrent-push safety, cancellation non-certification, invalidation, outage, eviction, and failed-warm fallback as edge outcomes.",
+        "specs/035-shared-rust-bridge-cache/quickstart.md:2 runs the new test as a separate local command rather than through a required suite.",
+        "Makefile:133-158 enumerates validate-ci checks without scripts/test_warm_rust_bridge_workflow.py.",
+        "github/workflows/ci.yml:63-111 enumerates workflow-lint validations without scripts/test_warm_rust_bridge_workflow.py.",
+        "specify/memory/constitution.md:70-78 requires affected behavior and material failure risks to have evidence on the prepared candidate."
+      ],
+      "recommendation": "Make the focused test reachable from required exact-SHA CI and make validate-ci, or place its assertions in an already invoked workflow-contract check. Extend the same least-cost test to cover the specified concurrency/cancel behavior, exact triggering-SHA checkout, input invalidation, and the separation that prevents failed or cancelled warming from certifying product checks. Record its passing result for the frozen SHA.",
+      "reviewer": "testability-evidence",
+      "severity": "blocking"
+    },
+    {
+      "category": "log-privacy",
+      "description": "The planned cache-miss path invokes the existing bridge script unchanged, and that script deterministically writes its absolute KIT directory to the GitHub Actions log. Constitution Principle I forbids local file paths in logs, so the first successful warming run would violate a binding MUST.",
+      "evidence": [
+        ".specify/memory/constitution.md:63-68",
+        "specs/035-shared-rust-bridge-cache/plan.md:6-7",
+        "specs/035-shared-rust-bridge-cache/spec.md:25",
+        "ios/scripts/build-rust-bridge.sh:26-29",
+        "ios/scripts/build-rust-bridge.sh:124-129"
+      ],
+      "recommendation": "Amend FR-004 and the plan so producer logs and recorded evidence explicitly exclude absolute or runner-local paths. Permit the implementing agent to adjust the necessary owned path or workflow boundary, and require cold-run evidence that bridge preparation emits only fixed or repository-relative location labels while preserving exact-key behavior.",
+      "reviewer": "privacy-consent-security",
+      "severity": "blocking"
+    },
+    {
+      "category": "retention-deletion-export",
+      "description": "The feature creates two new main-scoped durable cache entries, but the artifacts mention eviction without defining the retention source of truth, deletion trigger, or lifetime. They also do not explicitly state that these non-personal build artifacts are outside account export and account purge and may survive an account purge. Because the contents are limited to compiler artifacts and generated bindings, this is not currently a GDPR erasure gap, but the disposition cannot remain implicit.",
+      "evidence": [
+        "specs/035-shared-rust-bridge-cache/spec.md:18-19",
+        "specs/035-shared-rust-bridge-cache/spec.md:22-25",
+        "specs/035-shared-rust-bridge-cache/data-model.md:1-2",
+        "specs/035-shared-rust-bridge-cache/plan.md:17-18",
+        "docs/data-retention.md:216-248"
+      ],
+      "recommendation": "After resolving the retention decision below, add an explicit cache-lifecycle disposition to the spec or data model: retention/eviction authority and maximum or inherited lifetime, deletion trigger, whether access refreshes retention, and the statement that entries contain no user/runtime data or secrets, are excluded from account export, are untouched by account purge, and may survive purge. Align the rollback and cache-deletion non-goals with that disposition.",
+      "reviewer": "privacy-consent-security",
+      "severity": "important"
+    }
+  ]
+}

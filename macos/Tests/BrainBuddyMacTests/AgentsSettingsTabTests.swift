@@ -77,6 +77,14 @@
             #expect(MacSettingsView.selection(current: .sync, addAgentRequested: false) == .sync)
         }
 
+        @Test("030_FR_036 the hand-off Open Settings request selects Agents from any tab")
+        func openSettingsRequestSelectsAgentsTab() {
+            for tab in MacSettingsTab.allCases {
+                #expect(MacSettingsView.selection(current: tab, agentsTabRequested: true) == .agents)
+                #expect(MacSettingsView.selection(current: tab, agentsTabRequested: false) == tab)
+            }
+        }
+
         @Test("028_FR_001 the Settings window is 820 wide, opens at 620 and may shrink to a scrolling minimum")
         func settingsWindowSizeFitsTheBoard() {
             #expect(MacSettingsView.width == 820)

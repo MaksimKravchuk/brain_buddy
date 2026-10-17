@@ -127,8 +127,8 @@ package final class AgentRunActions {
 
     private func perform(_ payload: String, _ call: (UUID) async throws(APIError) -> AgentRunDTO) async {
         guard phase != .working else { return }
-        guard availability.isOnline else { return phase = .failed(.offline) }
         phase = .working
+        guard await availability.confirmOnline() else { return phase = .failed(.offline) }
         let owner = availability.ownerID
         let key = pending.flatMap { $0.payload == payload ? $0.key : nil } ?? UUID()
         pending = (payload, key)

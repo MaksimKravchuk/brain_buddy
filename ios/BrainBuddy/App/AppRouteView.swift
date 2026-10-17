@@ -23,6 +23,10 @@ struct AppRouteView: View {
             ReviewEntryScreen()
         case .performance:
             PerformanceScreen()
+        case .account:
+            AccountScreen()
+        case .signInMethods:
+            SignInMethodsScreen()
         }
     }
 }
