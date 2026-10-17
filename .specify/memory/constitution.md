@@ -1,5 +1,27 @@
 <!--
 Sync Impact Report:
+- Version change: 4.0.1 -> 5.0.0
+- Why MAJOR: the sanctioned landing path changes incompatibly (ADR-0035, owner
+  decision 2026-10-17, issues #513/#514). PR-less SHIP/SHOW landing through
+  `scripts/submit_to_trunk.sh` and `trunk-candidate/<sha>` is retired; every
+  change, SHIP, SHOW or ASK, lands as a pull request through the merge queue
+  behind `Full CI` and `Docker Images`, and ASK additionally needs explicit
+  recorded owner approval on the PR. The temporary ruleset intervention is gone.
+  Exact-SHA CI, Ship/Show/Ask classification and the Fly release path are kept.
+- Modified principles: None
+- Modified sections: Operational Guardrails (delivery bullet)
+- Added sections: None
+- Removed sections: None
+- Dependent docs updated: AGENTS.md, docs/autonomous-delivery-runbook.md,
+  docs/spec-kit-workflow.md, docs/fly-deployment.md, README.md,
+  docs/decisions/0008, 0023, 0030 (partial-supersession notes),
+  .specify/agent-commands/speckit-report/SKILL.md
+- Templates updated: tasks-template.md
+- Follow-up TODOs: remove the inert `trunk-candidate/**` workflow paths in a
+  separate ASK change; owner restores the `main` ruleset deletion rule.
+-->
+<!--
+Prior Sync Impact Report (4.0.1), preserved:
 - Version change: 4.0.0 -> 4.0.1
 - Why PATCH: clarification only. The Operational Guardrail naming `backend/data`
   as the data location is qualified for the server move to Rust (ADR-0032,
@@ -118,7 +140,7 @@ Security, configuration, delivery, and release constraints apply to all work.
 - Follow `.env.example` for environment setup; never hardcode secrets. Compose and Fly deployments MUST respect API key and session-auth controls.
 - Backend data persists under `backend/data` with an LRU cache and optional volumes; after the cutover to the Rust server (ADR-0032) persistent data lives in managed PostgreSQL and object storage instead. Either way, treat stored data as sensitive and keep it out of version control.
 - Frontend defaults to `/api`; remote stacks require explicit proxy/origin configuration that preserves cookies and same-origin behavior where expected.
-- Verified CI on the exact landed SHA is the merge gate, not a pull request. Work happens in isolated branches/worktrees; every change is classified Ship/Show/Ask under ADR-0008. Eligible SHIP and SHOW work uses ADR-0023's one risk-selected independent gate, then lands PR-less through `scripts/submit_to_trunk.sh` and the default-branch release workflow, which fast-forwards `main` only to a SHA that passed full required CI. ASK-class changes (auth/privacy, destructive data/schema, billing/provider credentials, CI/CD/security/infra, irreversible external effects) never land automatically: a PR carries their review evidence, but merging it does not by itself update `main` — see `AGENTS.md` and `docs/autonomous-delivery-runbook.md` for the recorded-approval and ruleset requirements. `main` deploys through the normal Fly release path in both cases.
+- Verified CI on the exact landed SHA is the merge gate, and a pull request through the merge queue is the only way to land (ADR-0035). Work happens in isolated branches/worktrees; every change is classified Ship/Show/Ask under ADR-0008 (ASK scope narrowed by ADR-0030). Eligible SHIP and SHOW work uses ADR-0023's one risk-selected independent gate on the PR head, then lands through the merge queue, which moves `main` only to a merge-group commit that passed `Full CI` and `Docker Images`. ASK-class changes take the same path and enter the queue only after explicit recorded owner approval on the PR for its exact head SHA — see `AGENTS.md` and `docs/autonomous-delivery-runbook.md`. `main` deploys through the normal Fly release path in every case.
 
 ## Development Workflow & Quality Gates
 How features are specified, planned, implemented, reviewed, and released.
@@ -135,4 +157,4 @@ This constitution supersedes conflicting local practices and guides all reviews.
 - Compliance is checked by ADR-0023's risk-selected independent gate before SHIP/SHOW release and by the full review path for ineligible or ASK work; violations need documented justification plus a remediation plan and owner.
 - Accepted ADRs under `docs/decisions/` may refine this constitution for their decision scope, but broad governance changes belong here.
 
-**Version**: 4.0.1 | **Ratified**: 2025-12-20 | **Last Amended**: 2026-10-14
+**Version**: 5.0.0 | **Ratified**: 2025-12-20 | **Last Amended**: 2026-10-17

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Deterministic contract tests for scripts/submit_to_trunk.sh.
+"""Contract tests for the retired scripts/submit_to_trunk.sh (ADR-0035).
 
-Runs the real script inside throwaway git repositories with a local bare
-"origin" so the candidate-submission contract (clean tree, current base,
-single commit, unique trunk-candidate ref, no force pushes, never main)
-is verified offline.
+PR-less trunk-candidate landing is retired: every change lands as a pull
+request through the merge queue. The script is kept only so stale callers
+fail loudly. These tests run it inside a throwaway git repository with a
+local bare "origin" and an otherwise valid candidate, and assert that it
+fails fast, points at ADR-0035 and the merge-queue path, and pushes nothing.
 """
 
 from __future__ import annotations
@@ -20,6 +21,17 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "scripts" / "submit_to_trunk.sh"
 
 
+def _git_env() -> dict[str, str]:
+    return {
+        "PATH": os.environ.get("PATH", ""),
+        "HOME": os.environ.get("HOME", ""),
+        "GIT_AUTHOR_NAME": "Contract Test",
+        "GIT_AUTHOR_EMAIL": "contract-test@example.com",
+        "GIT_COMMITTER_NAME": "Contract Test",
+        "GIT_COMMITTER_EMAIL": "contract-test@example.com",
+    }
+
+
 def _git(cwd: Path, *args: str) -> str:
     result = subprocess.run(
         ["git", *args],
@@ -32,19 +44,7 @@ def _git(cwd: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
-def _git_env() -> dict[str, str]:
-    env = {
-        "PATH": os.environ.get("PATH", ""),
-        "HOME": os.environ.get("HOME", ""),
-        "GIT_AUTHOR_NAME": "Contract Test",
-        "GIT_AUTHOR_EMAIL": "contract-test@example.com",
-        "GIT_COMMITTER_NAME": "Contract Test",
-        "GIT_COMMITTER_EMAIL": "contract-test@example.com",
-    }
-    return env
-
-
-class SubmitToTrunkScriptTest(unittest.TestCase):
+class RetiredSubmitToTrunkScriptTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -69,41 +69,55 @@ class SubmitToTrunkScriptTest(unittest.TestCase):
         _git(self.clone, "push", "origin", "main")
         _git(self.clone, "checkout", "-b", "feature")
 
-    def _commit(self, name: str, content: str = "change\n") -> str:
-        path = self.clone / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
-        _git(self.clone, "add", name)
-        _git(self.clone, "commit", "-m", f"feat: {name}")
-        return _git(self.clone, "rev-parse", "HEAD")
+    def _valid_candidate(self) -> dict[str, str]:
+        """One SHIP commit on current origin/main plus a matching receipt:
+        everything the retired script used to accept."""
 
-    def _run(self, env_overrides: dict[str, str] | None = None
-             ) -> subprocess.CompletedProcess[str]:
+        (self.clone / "docs").mkdir()
+        (self.clone / "docs" / "notes.md").write_text("notes\n", encoding="utf-8")
+        _git(self.clone, "add", "docs/notes.md")
+        _git(self.clone, "commit", "-m", "docs: notes")
+        sha = _git(self.clone, "rev-parse", "HEAD")
+        receipt = Path(self.tmp.name) / "pre-freeze-receipt.json"
+        receipt.write_text(
+            json.dumps(
+                {
+                    "contract": "brainbuddy.pre-freeze-writer-receipt/v1",
+                    "implementation_sha": sha,
+                    "inventory": ["docs/notes.md"],
+                    "gates": [
+                        {
+                            "id": gate_id,
+                            "status": "PASS",
+                            "command": "test",
+                            "observation": "passed",
+                            "evidence": "captured",
+                        }
+                        for gate_id in (
+                            "writer.tests",
+                            "writer.verify_all",
+                            "writer.path_classification",
+                            "writer.diff_review",
+                        )
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
         env = _git_env()
         env["SUBMIT_TRUNK_SKIP_CHECKS"] = "1"
-        if "SUBMIT_TRUNK_PRE_FREEZE_RECEIPT" not in (env_overrides or {}):
-            receipt = Path(self.tmp.name) / "pre-freeze-receipt.json"
-            sha = _git(self.clone, "rev-parse", "HEAD")
-            receipt.write_text(json.dumps({
-                "contract": "brainbuddy.pre-freeze-writer-receipt/v1",
-                "implementation_sha": sha,
-                "inventory": ["feature.txt"],
-                "gates": [
-                    {"id": gate_id, "status": "PASS", "command": "test",
-                     "observation": "passed", "evidence": "captured"}
-                    for gate_id in ("writer.tests", "writer.verify_all",
-                                    "writer.path_classification", "writer.diff_review")
-                ],
-            }), encoding="utf-8")
-            env["SUBMIT_TRUNK_PRE_FREEZE_RECEIPT"] = str(receipt)
-        env.update(env_overrides or {})
+        env["SUBMIT_TRUNK_PRE_FREEZE_RECEIPT"] = str(receipt)
+        return env
+
+    def _run(self, cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             ["bash", str(SCRIPT)],
-            cwd=self.clone,
+            cwd=cwd,
             capture_output=True,
             text=True,
             env=env,
-            timeout=120,
+            timeout=60,
+            check=False,
         )
 
     def _origin_refs(self) -> dict[str, str]:
@@ -114,159 +128,43 @@ class SubmitToTrunkScriptTest(unittest.TestCase):
             refs[name] = sha
         return refs
 
-    def test_script_never_force_pushes_or_targets_main(self) -> None:
-        self.assertTrue(SCRIPT.exists(), "submit_to_trunk.sh must exist")
+    def test_script_is_kept_executable_and_never_pushes(self) -> None:
+        self.assertTrue(SCRIPT.exists(), "submit_to_trunk.sh must be kept")
         self.assertTrue(os.access(SCRIPT, os.X_OK), "script must be executable")
         text = SCRIPT.read_text(encoding="utf-8")
         self.assertIn("set -euo pipefail", text)
+        self.assertIn("ADR-0035", text)
+        self.assertNotIn("git push", text)
+        self.assertNotIn("git fetch", text)
         self.assertNotIn("--force", text)
-        self.assertNotIn("push -f", text)
-        self.assertNotIn("refs/heads/main", text.replace("refuse", ""))
 
-    def test_happy_path_pushes_unique_candidate_ref(self) -> None:
-        sha = self._commit("feature.txt")
-        result = self._run()
+    def test_valid_candidate_fails_fast_and_pushes_nothing(self) -> None:
+        refs_before = self._origin_refs()
+        result = self._run(self.clone, self._valid_candidate())
         combined = result.stdout + result.stderr
-        self.assertEqual(result.returncode, 0, combined)
-        refs = self._origin_refs()
-        candidate_ref = f"refs/heads/trunk-candidate/{sha}"
-        self.assertIn(candidate_ref, refs)
-        self.assertEqual(refs[candidate_ref], sha)
-        self.assertIn(f"trunk-candidate/{sha}", combined)
-        # main is untouched by submission
-        self.assertNotEqual(refs["refs/heads/main"], sha)
-
-    def test_missing_pre_freeze_receipt_fails_before_submission(self) -> None:
-        self._commit("feature.txt")
-        result = self._run({"SUBMIT_TRUNK_PRE_FREEZE_RECEIPT": ""})
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("pre-freeze receipt", (result.stdout + result.stderr).lower())
+        self.assertNotEqual(result.returncode, 0, combined)
+        self.assertEqual(self._origin_refs(), refs_before)
         self.assertNotIn("trunk-candidate", "".join(self._origin_refs()))
 
-    def test_pre_freeze_receipt_must_match_frozen_candidate_sha(self) -> None:
-        self._commit("feature.txt")
-        receipt = Path(self.tmp.name) / "wrong-receipt.json"
-        receipt.write_text(json.dumps({"implementation_sha": "a" * 40}), encoding="utf-8")
-        result = self._run({"SUBMIT_TRUNK_PRE_FREEZE_RECEIPT": str(receipt)})
+    def test_failure_message_points_at_adr_and_merge_queue(self) -> None:
+        result = self._run(self.clone, self._valid_candidate())
+        message = result.stderr
+        self.assertIn("retired", message)
+        self.assertIn("docs/decisions/0035-merge-queue-pr-landing.md", message)
+        self.assertIn("merge queue", message)
+        self.assertIn("pull request", message)
+        self.assertIn("Full CI", message)
+        self.assertIn("Docker Images", message)
+        self.assertIn("ASK", message)
+        self.assertIn("Nothing was pushed", message)
+
+    def test_fails_fast_outside_a_git_repository(self) -> None:
+        outside = Path(self.tmp.name) / "not-a-repo"
+        outside.mkdir()
+        result = self._run(outside, _git_env())
         self.assertNotEqual(result.returncode, 0)
-        self.assertNotIn("trunk-candidate", "".join(self._origin_refs()))
-
-    def test_dirty_working_tree_fails_closed(self) -> None:
-        self._commit("feature.txt")
-        (self.clone / "dirty.txt").write_text("uncommitted\n", encoding="utf-8")
-        result = self._run()
-        self.assertNotEqual(result.returncode, 0)
-        self.assertNotIn("trunk-candidate", "".join(self._origin_refs()))
-
-    def test_no_new_commit_fails_closed(self) -> None:
-        result = self._run()
-        self.assertNotEqual(result.returncode, 0)
-        self.assertNotIn("trunk-candidate", "".join(self._origin_refs()))
-
-    def test_multi_commit_series_fails_closed(self) -> None:
-        self._commit("one.txt")
-        self._commit("two.txt")
-        result = self._run()
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("exactly one commit", result.stdout + result.stderr)
-        self.assertNotIn("trunk-candidate", "".join(self._origin_refs()))
-
-    def test_stale_base_fails_closed(self) -> None:
-        self._commit("feature.txt")
-        # Advance origin/main from a second clone so the candidate is stale.
-        other = Path(self.tmp.name) / "other"
-        subprocess.run(
-            ["git", "clone", str(self.origin), str(other)],
-            check=True,
-            capture_output=True,
-            env=_git_env(),
-        )
-        (other / "mainline.txt").write_text("moved\n", encoding="utf-8")
-        _git(other, "add", "mainline.txt")
-        _git(other, "commit", "-m", "feat: mainline moved")
-        _git(other, "push", "origin", "main")
-
-        result = self._run()
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("origin/main", result.stdout + result.stderr)
-        self.assertNotIn("trunk-candidate", "".join(self._origin_refs()))
-
-    def test_merge_commit_fails_closed(self) -> None:
-        self._commit("feature.txt")
-        _git(self.clone, "checkout", "-b", "side", "origin/main")
-        (self.clone / "side.txt").write_text("side\n", encoding="utf-8")
-        _git(self.clone, "add", "side.txt")
-        _git(self.clone, "commit", "-m", "feat: side")
-        _git(self.clone, "checkout", "feature")
-        _git(self.clone, "merge", "--no-ff", "-m", "merge side", "side")
-        result = self._run()
-        self.assertNotEqual(result.returncode, 0)
-        self.assertNotIn("trunk-candidate", "".join(self._origin_refs()))
-
-    def test_ask_class_release_workflow_path_fails_closed(self) -> None:
-        """The Ship/Show/Ask gate is mechanical and not skippable: an
-        ASK-class path fails the submission even with fast checks skipped
-        (the default in these tests) and pushes nothing."""
-
-        self._commit(".github/workflows/deploy-fly-production.yml", "on: push\n")
-        result = self._run()
-        combined = result.stdout + result.stderr
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("ASK", combined)
-        self.assertNotIn("trunk-candidate", "".join(self._origin_refs()))
-
-    def test_ask_class_migration_path_fails_closed(self) -> None:
-        self._commit("backend/migrations/0002_drop.sql", "-- destructive\n")
-        result = self._run()
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("ASK", result.stdout + result.stderr)
-        self.assertNotIn("trunk-candidate", "".join(self._origin_refs()))
-
-    def test_non_ascii_ask_data_path_fails_closed(self) -> None:
-        """git quotes non-ASCII paths in newline output; the gate must use
-        NUL-separated listing so the real path still classifies as ASK."""
-
-        self._commit("backend/data/évil.json", "{}\n")
-        result = self._run()
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("ASK", result.stdout + result.stderr)
-        self.assertNotIn("trunk-candidate", "".join(self._origin_refs()))
-
-    def test_rename_of_ask_path_to_harmless_name_fails_closed(self) -> None:
-        """A rename must classify as delete+add (--no-renames): removing an
-        ASK-class data file is itself an ASK change even when the new path is
-        harmless."""
-
-        _git(self.clone, "checkout", "main")
-        data = self.clone / "backend" / "data" / "tree_1.json"
-        data.parent.mkdir(parents=True, exist_ok=True)
-        data.write_text("{}\n", encoding="utf-8")
-        _git(self.clone, "add", "backend/data/tree_1.json")
-        _git(self.clone, "commit", "-m", "chore: add data")
-        _git(self.clone, "push", "origin", "main")
-        _git(self.clone, "checkout", "-B", "feature", "main")
-        _git(self.clone, "mv", "backend/data/tree_1.json", "harmless.txt")
-        _git(self.clone, "commit", "-m", "refactor: rename data away")
-
-        result = self._run()
-        combined = result.stdout + result.stderr
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("ASK", combined)
-        self.assertIn("backend/data/tree_1.json", combined)
-        self.assertNotIn("trunk-candidate", "".join(self._origin_refs()))
-
-    def test_ship_class_docs_path_is_submitted(self) -> None:
-        sha = self._commit("docs/notes.md", "notes\n")
-        result = self._run()
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn(f"refs/heads/trunk-candidate/{sha}", self._origin_refs())
-
-    def test_resubmitting_same_sha_is_idempotent(self) -> None:
-        self._commit("feature.txt")
-        first = self._run()
-        self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
-        second = self._run()
-        self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
+        self.assertIn("ADR-0035", result.stderr)
+        self.assertNotIn("not inside a git repository", result.stderr)
 
 
 if __name__ == "__main__":

@@ -3,9 +3,11 @@
 This runbook operationalizes
 [ADR-0003](decisions/0003-autonomous-delivery-guardrails.md) and
 [ADR-0008](decisions/0008-verified-trunk-serial-landing.md), as amended for bounded
-SHIP/SHOW work by [ADR-0023](decisions/0023-proportionate-fast-lane-for-test-stage-ship-show.md).
+SHIP/SHOW work by [ADR-0023](decisions/0023-proportionate-fast-lane-for-test-stage-ship-show.md)
+and partially superseded by [ADR-0035](decisions/0035-merge-queue-pr-landing.md), under
+which every change lands as a pull request through the merge queue.
 It is the authority for
-verified trunk landings, agent-created PRs (ASK class), visual review apps, normal
+merge-queue landings, agent-created PRs, visual review apps, normal
 production releases, and incidents involving those paths. It does not grant authority to
 mutate remote resources.
 
@@ -26,11 +28,10 @@ or QA gate, exact-SHA CI, landing, deployment, and production smoke are post-fre
 obligations; they remain governed by ADR-0008 and ADR-0023 and cannot be claimed or
 replaced by this receipt.
 
-`scripts/submit_to_trunk.sh` requires the explicit, non-secret environment
-variable `SUBMIT_TRUNK_PRE_FREEZE_RECEIPT`, pointing to that local JSON file.
-It freezes `HEAD`, then invokes the validator with that exact SHA before path
-classification or any candidate-ref push. The variable has no default: an
-absent, unreadable, malformed, or SHA-mismatched receipt fails closed.
+No landing tool consumes the receipt any more: `scripts/submit_to_trunk.sh`, which
+required it through `SUBMIT_TRUNK_PRE_FREEZE_RECEIPT`, is retired by ADR-0035 and
+fails fast. Where a task or the full path requires a receipt, validate it against the
+frozen PR head SHA before the independent gate.
 
 ## Balanced fast lane (eligible SHIP/SHOW changes)
 
@@ -60,165 +61,134 @@ All ASK changes and ineligible SHIP/SHOW changes use the existing full path. Fas
 eligibility never bypasses path classification, CI, landing proof, smoke, cleanup, or
 rollback.
 
-## Verified trunk landing (SHIP/SHOW changes)
+## Merge-queue landing (every change)
 
-ADR-0008 makes PR-less serial landing the normal path for low-risk (SHIP) and
-medium-risk (SHOW) changes. ASK-class changes — authentication/privacy, destructive
-data/schema, billing/provider credentials, CI/CD/security/infrastructure, irreversible
-external effects — never land automatically; they use the ASK landing procedure below
-(review evidence via PR, landing via an audited temporary ruleset intervention).
+ADR-0035 makes a pull request through the merge queue the only landing path, for SHIP,
+SHOW and ASK alike. PR-less landing through `scripts/submit_to_trunk.sh` and
+`trunk-candidate/<sha>` refs is retired; the script fails fast and pushes nothing.
+ASK-class changes (under ADR-0030: persisted data and migrations, secrets, GitHub
+workflows, GDPR account deletion/export, `allurerc.mjs`, and the landing gate itself)
+take the same path and additionally need recorded owner approval (below).
 
 ### Procedure
 
-1. Implement the slice in an isolated worktree under
-   [Constitution Principle II's testing policy](../.specify/memory/constitution.md#ii-tested-delivery-across-stack),
-   as one candidate commit whose parent is the current `origin/main`
-   (squash an atomic series before submitting).
-2. Freeze the candidate and obtain ADR-0023's risk-selected independent gate on that
-   exact SHA. On the full path, obtain every gate required by its accepted criteria.
-3. Run `scripts/submit_to_trunk.sh`. It validates clean state, current base, and a single
-   non-merge commit, mechanically classifies every changed path with
-   `scripts/classify_path_risk.py` fed by `git diff --no-renames --name-only -z`
-   (NUL-separated, so non-ASCII paths classify on their real names and a rename away
-   from an ASK path still surfaces as its deletion; ASK-class paths — under ADR-0030,
-   persisted data and migrations, secrets, GitHub workflows, GDPR account deletion/export,
-   `allurerc.mjs`, and the landing gate itself — fail the submission; this
-   gate is never skippable), runs fast local checks, pushes the exact SHA to
-   `trunk-candidate/<sha>`, and prints the Actions URL. It never pushes `main` and
-   never force-pushes.
-4. Full required CI (the same job set as `main`) runs on the candidate ref.
-   Candidate-controlled CI holds **no write permission and pushes nothing** — it can
-   never promote. A skipped required job fails `full-ci`, so a landing can never ride
-   on a vacuously green gate.
-5. The completed successful candidate CI run triggers the **default-branch release
-   workflow** (`deploy-fly-production.yml`; `workflow_run` always executes the `main`
-   copy of the definition, so a candidate's workflow edits cannot affect its own
-   landing). Its `land` job — read-only token (`contents: read`), no PAT, running in
-   the GitHub `landing` environment and pushing with the dedicated
-   `TRUNK_LANDING_SSH_KEY` SSH deploy key (which the environment's `main`-only branch
-   policy keeps out of candidate-controlled CI's reach) —
-   re-verifies that the candidate still has exactly one parent equal to the current
-   `origin/main`, re-runs the ASK path gate using the trusted `origin/main` copy of
-   the classifier over the NUL-separated changed paths, fast-forwards `main` to the
-   exact tested SHA with a plain (never force) push, best-effort deletes the candidate
-   ref, and proves `origin/main` equals the tested SHA. Stale candidates, merge
-   commits, raced pushes, and ASK-class paths fail closed without mutating `main`.
-   The `fly-production-deploy` concurrency group is safety serialization, **not a FIFO
-   queue**: at most one landing+deploy runs and at most one more stays pending; GitHub
-   may cancel additional pending runs. A cancelled run fails closed (nothing lands) —
-   resubmit the candidate.
-6. The `deploy` job of the same run starts only after the landing proof
-   (`needs: land`), holds the production environment and Fly secrets under
-   `contents: read`, and re-verifies for **every** consumed run (candidate and `main`)
-   that `origin/main` equals the tested `workflow_run.head_sha` immediately before any
-   Fly mutation, so a stale CI run that completes late can never redeploy a superseded
-   SHA. The deploy-key fast-forward (unlike a `GITHUB_TOKEN` push) retriggers push CI
-   on `main`; that re-run re-verifies the landed SHA on `main` and its release run
-   takes the proof-only path (no push, so no recursion) and idempotently redeploys the
-   same SHA, failing closed if a newer landing superseded it. The consumed candidate
-   CI run plus the landing proof remain the evidence. Significant new capabilities
-   use server-owned feature flags (default OFF). Corrections to expected existing
-   behavior do not require a new flag, per the owner's 2026-09-06 decision in
-   ADR-0022; all verification and rollback requirements still apply.
-   `delivery_canary` still rolls out OFF → INTERNAL → ON via
+1. Implement the slice in an isolated worktree and branch created from the current
+   `origin/main`, under
+   [Constitution Principle II's testing policy](../.specify/memory/constitution.md#ii-tested-delivery-across-stack).
+2. Classify every changed path with `scripts/classify_path_risk.py --null`, fed by
+   `git diff --no-renames --name-only -z origin/main...HEAD` (NUL-separated, so
+   non-ASCII paths classify on their real names and a rename away from an ASK path
+   still surfaces as its deletion). Every user-visible non-ASK change is semantically
+   SHOW. Record the class in the PR description.
+3. Freeze the PR head and obtain ADR-0023's risk-selected independent gate on that
+   exact SHA. On the full path, obtain every gate required by its accepted criteria. A
+   new push to the PR head invalidates verdicts given for the old head.
+4. Open the PR against `main` (see the PR procedure below). Required `Full CI` and
+   `Docker Images` run on the PR head; every review thread must be resolved. A skipped
+   required job fails `full-ci`, so a landing can never ride on a vacuously green gate.
+   PR CI holds **no write permission and pushes nothing**.
+5. For ASK, obtain explicit recorded owner approval on the PR for the exact head SHA
+   (a PR review approval, or a PR comment by the owner naming that SHA) before the PR
+   enters the queue. A new push needs a fresh approval.
+6. Add the PR to the merge queue. The queue builds a merge-group commit on the current
+   `main` (and any entries ahead of it), runs `Full CI` and `Docker Images` on that exact
+   commit, and moves `main` to it only when the whole group is green. A failed or
+   ejected entry lands nothing; fix the PR and enqueue it again.
+7. The push to `main` runs CI on `main`. The completed successful run triggers the
+   **default-branch release workflow** (`deploy-fly-production.yml`; `workflow_run`
+   always executes the `main` copy of the definition, so a PR's workflow edits cannot
+   affect its own release). For a `main` run its `land` job (read-only token) pushes
+   nothing and proves `origin/main` equals the tested SHA. The
+   `fly-production-deploy` concurrency group is safety serialization, **not a FIFO
+   queue**: at most one release runs and at most one more stays pending; GitHub may
+   cancel additional pending runs, which then fail closed.
+8. The `deploy` job of the same run starts only after that proof (`needs: land`),
+   holds the production environment and Fly secrets under `contents: read`, and
+   re-verifies that `origin/main` equals the tested `workflow_run.head_sha` immediately
+   before any Fly mutation, so a stale CI run that completes late can never redeploy a
+   superseded SHA. Significant new capabilities use server-owned feature flags
+   (default OFF). Corrections to expected existing behavior do not require a new flag,
+   per the owner's 2026-09-06 decision in ADR-0022; all verification and rollback
+   requirements still apply. `delivery_canary` still rolls out OFF → INTERNAL → ON via
    `BRAIN_BUDDY_FEATURE_FLAGS` / `BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS` at
    deploy time. The SQLite-managed flags (`voice_brain_dump`,
    `external_agent_relay`, ...) instead roll out
    OFF → SELECTED_USERS → ON through the Admin Portal at runtime, independent
    of this landing/deploy path (ADR-0019).
-7. Evidence for the landing is the selected independent-gate verdict, candidate push
-   (actor + SHA), candidate CI run, and release workflow run (its `land` and `deploy`
-   jobs), plus the bounded production journey for user-visible SHOW work — record their
-   URLs where a task requires an evidence packet. No PR object exists for SHIP/SHOW
-   landings.
+9. Evidence for the landing is the PR (with the class and, for ASK, the approval), the
+   selected independent-gate verdict on the PR head SHA, the merge-group CI run and its
+   SHA, the `main` CI run, and the release workflow run (its `land` and `deploy` jobs),
+   plus the bounded production journey for user-visible SHOW work. Record their URLs
+   where a task requires an evidence packet.
 
-ASK-class changes never land through automatic promotion. Stated honestly: while the
-landing deploy key is the **only** `restrict_updates` bypass actor, no PR merge and no
-direct human push can update `main` — a PR can carry the review evidence, but it
-cannot itself land. An ASK landing in this one-maintainer repository therefore
-requires all three of: explicit recorded approval, green required CI on the exact SHA
-being landed, and a short, audited, **temporary** ruleset intervention (record who,
-why, and when the ruleset was re-enabled) — or, if a separately accountable human
-reviewer is added in the future, a reviewed PR merged behind the required checks.
-Routine SHIP/SHOW landings are unaffected (deploy-key automatic landing). For
-bootstrap-class changes to the delivery machinery itself, see the bootstrap section
-below.
+Stated honestly: the ruleset requires 0 approvals and no landing gate runs the
+classifier any more, so the ASK approval is a recorded procedural rule, not a mechanical
+refusal. Never enqueue an ASK PR without it, and never land through a ruleset bypass.
 
-### Bootstrap of the delivery machinery (ASK)
+**Known red runs (follow-up, not a failure of the landing).** When a newer merge moves
+`main` before an older `main` CI run's release reaches it, that release fails at
+"Prove origin/main equals the tested revision" (for example runs 39015900101,
+39015104318 and 39011410547). Failing closed is correct, and the newer `main` run
+releases the newer SHA. Cancelling superseded runs instead (`concurrency`) is a separate
+ASK workflow change; until then, check that the newest `main` release succeeded rather
+than retrying the superseded one.
 
-The power to land lives **only** in the default-branch copy of
-`.github/workflows/deploy-fly-production.yml` plus the landing identity below. Two
-consequences:
+### Bootstrap and verification of `main` protection (owner, ASK)
 
-- A candidate CI run can be fully successful and still nothing auto-promotes it —
-  by design — until that release workflow (or the change to it) exists on `main`
-  and the landing identity is configured.
-- Changes to the delivery machinery itself (workflows, delivery scripts) are ASK
-  class and cannot self-land. The bootstrap path is a **reviewed PR against `main`**,
-  or an **explicitly authorized manual high-risk landing** of the exact SHA that
-  passed candidate CI.
+The power to deploy lives **only** in the default-branch copy of
+`.github/workflows/deploy-fly-production.yml`. Changes to the delivery machinery
+itself (workflows, the landing gate) are ASK class and land through the same PR path
+with recorded owner approval.
 
-The bootstrap MUST happen in this exact order:
+Agents never change GitHub settings. The owner verifies, by hand and with
+`gh api repos/maxk-lab/brain_buddy/rulesets/11196382`, before claiming the path is
+healthy — every item is a MUST:
 
-1. **Create the landing identity first**: register a dedicated **write deploy key**
-   for landing; create the GitHub `landing` environment with a **custom deployment
-   branch policy allowing only `main`**; store the key's private half as the
-   `landing` environment secret `TRUNK_LANDING_SSH_KEY`. In the same step, create
-   the GitHub `production` environment with a **custom deployment branch policy
-   allowing only `main`**; move `FLY_API_TOKEN` into it as an environment secret and
-   **delete any repository-level `FLY_API_TOKEN`**; store `BRAIN_BUDDY_ADMIN_EMAIL`,
-   `BRAIN_BUDDY_ADMIN_PASSWORD`, `BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS`, and
-   `BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS` there.
-2. Run **exact-SHA candidate CI** on the bootstrap change and let the full required
-   job set pass.
-3. Perform the **explicitly authorized manual admin fast-forward** of `main` to that
-   exact SHA (never force) **while the old ruleset still permits it** — record
-   approver, target SHA, candidate CI run URL, and reason in the evidence packet, and
-   let the resulting `main` push CI run drive the normal release path.
-4. **Immediately activate** the `main` ruleset: `restrict_updates` enabled, the
-   landing deploy key as the **only** bypass actor, and the `Full CI` and
-   `Docker Images` checks required — **before declaring the PR-less flow active**.
-5. Verify the remote configuration — every item is a MUST: ruleset active
-   (`restrict_updates`, deploy key sole bypass, required checks); `landing` **and**
-   `production` environments each restricted to branch `main`;
-   `TRUNK_LANDING_SSH_KEY` present in `landing`; `FLY_API_TOKEN`,
-   `BRAIN_BUDDY_ADMIN_EMAIL`, `BRAIN_BUDDY_ADMIN_PASSWORD`,
-   `BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS`, and `BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS`
-   present in `production`; **no
-   repository-level `FLY_API_TOKEN` remaining**; and a test candidate landing
-   end-to-end. Do **not** claim the automation is active before this remote
-   verification.
+1. The `main` ruleset `Tests` is active and requires `Full CI` and `Docker Images`
+   (strict), a pull request with every review thread resolved, and the merge queue
+   (`MERGE`, `ALLGREEN`).
+2. The ruleset blocks deletion of `main`. **Open item:** the `deletion` rule was
+   removed on 2026-10-16; the owner restores it.
+3. The bypass actors are only the intended owner accounts.
+4. The `production` environment is restricted to branch `main`, holds
+   `FLY_API_TOKEN`, `BRAIN_BUDDY_ADMIN_EMAIL`, `BRAIN_BUDDY_ADMIN_PASSWORD`,
+   `BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS`, and `BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS`,
+   and **no repository-level `FLY_API_TOKEN`** exists.
+5. The owner decides whether to delete the unused `verified-trunk-landing` deploy key
+   and the `landing` secret `TRUNK_LANDING_SSH_KEY` (see ADR-0035).
 
-Evidence for a bootstrap landing must include: the candidate CI run URL proving the
-exact SHA passed the full required job set, the authorization (actor, scope, expiry),
-and the resulting release workflow run URL.
+### Activation canary record (2026-07-22, historical)
 
-### Activation canary record (2026-07-22)
+This record documents the retired ADR-0008 trunk path and is kept as history.
 
 Bootstrap SHA `938abd4cbf9fe73ad234d4247d40fb780d0db5a6` passed exact-SHA
 candidate CI run `29961113907`, was explicitly fast-forwarded during the bounded
 bootstrap window, and passed main CI run `29961801317` plus production release and
-authenticated smoke run `29962336315`. The ruleset and environment checks in step 5
-were verified immediately afterward. The docs-only commit containing this activation
+authenticated smoke run `29962336315`. The ruleset and environment checks of the
+ADR-0008 bootstrap were verified immediately afterward. The docs-only commit containing this activation
 record is the required first end-to-end automatic candidate: its successful release
 run is the canonical evidence that the dedicated deploy key can land a fresh SHIP
 candidate while ordinary workflow tokens remain unable to update `main`.
 
 ### Required `main` protection, landing identity, and production environment (maintainer, ASK)
 
-Configure the repository so `main` accepts only verified landings. These are GitHub
+Configure the repository so `main` accepts only merge-queue landings. These are GitHub
 settings changes performed manually by the maintainer — never automated — and they
-are requirements (MUST), not recommendations. Each is also a bootstrap verification
-item (step 5 above):
+are requirements (MUST), not recommendations. Each is also a verification item in the
+section above:
 
-- The `main` ruleset MUST enable **`restrict_updates`**, with the landing **deploy
-  key as the only bypass actor**. The default `GITHUB_TOKEN` (and every workflow
-  token) then cannot push `main`; force pushes and deletions stay rejected.
-- The **`Full CI`** and **`Docker Images`** status checks MUST be required on `main`,
-  so every human/PR path merges only behind the no-skip aggregate gate.
-- The `landing` environment MUST restrict its deployments to branch `main` (custom
-  branch policy) so only default-branch `workflow_run` executions can read
-  `TRUNK_LANDING_SSH_KEY`.
+- The `main` ruleset MUST require a **pull request** (every review thread resolved)
+  and the **merge queue** (`MERGE`, `ALLGREEN`), and MUST block **deletion**. Direct
+  pushes to `main` from every actor that is not a bypass actor, including the default
+  `GITHUB_TOKEN` and every workflow token, are then rejected. The bypass actors are the
+  owner's emergency access; a landing through a bypass is an incident recorded with the
+  evidence packet below, and agents never use it.
+- The **`Full CI`** and **`Docker Images`** status checks MUST be required on `main`
+  (strict), so every PR and every merge group lands only behind the no-skip aggregate
+  gate.
+- The `landing` environment keeps its branch policy allowing only `main` for as long
+  as `TRUNK_LANDING_SSH_KEY` exists in it, although the key no longer has landing
+  power.
 - The `production` environment MUST restrict its deployments to branch `main`
   (custom branch policy) and MUST hold `FLY_API_TOKEN`, `BRAIN_BUDDY_ADMIN_EMAIL`,
   `BRAIN_BUDDY_ADMIN_PASSWORD`, `BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS`, and
@@ -228,22 +198,15 @@ item (step 5 above):
   `production` environment. (In-repo defense-in-depth: the trunk validator forbids
   candidate-controlled CI from requesting either the `landing` or the `production`
   environment.)
-- ASK-class changes: a PR carries the review evidence, but while the deploy key is
-  the sole bypass actor **no PR merge and no direct human push can update `main`**.
-  Landing an ASK change requires explicit recorded approval, green required CI on
-  the exact SHA, and a short, audited, **temporary** ruleset intervention with audit
-  evidence (who, why, when re-enabled) — never a routine path. Adding a separately
-  accountable human reviewer in the future would restore a merge-behind-required-
-  checks path without weakening the ruleset.
+- ASK-class changes land through the same PR and merge-queue path, with explicit
+  recorded owner approval on the PR for the exact head SHA before enqueueing. There
+  is no temporary ruleset intervention.
 
 ### Leftover candidate refs
 
-Deleting the candidate ref after the fast-forward is best-effort cleanup
-(`continue-on-error` in the release workflow's `land` job): `main` has already been
-fast-forwarded, so a failed deletion must never fail the run and thereby suppress the
-production deploy of an already-landed SHA. A leftover `trunk-candidate/<sha>` ref is
-inert — re-running a landing on it fails the fresh-parent check because `main` has
-moved — and is removed manually with:
+No new `trunk-candidate/<sha>` refs are pushed since ADR-0035. A leftover ref from the
+retired path is inert — a landing on it fails the fresh-parent check because `main` has
+moved, and the deploy key can no longer push `main` — and is removed manually with:
 
 ```bash
 git push origin --delete trunk-candidate/<sha>
@@ -252,12 +215,13 @@ git push origin --delete trunk-candidate/<sha>
 ### Required secrets (GitHub `landing` and `production` environments)
 
 - `TRUNK_LANDING_SSH_KEY` (**`landing` environment**, branch policy `main` only) — the
-  private half of the dedicated write deploy key the release workflow's `land` job
-  uses for the fast-forward push. No PAT secret exists and no workflow holds
-  `GITHUB_TOKEN` write; candidate-controlled CI holds no write credential at all and
-  can never read this secret. It is the only secret the `land` job may reference;
-  everything below lives in the separate `production` environment, readable only by
-  the `deploy` job.
+  private half of the `verified-trunk-landing` deploy key that the retired ADR-0008
+  path used for its fast-forward push. Since ADR-0035 it has no landing power (the
+  ruleset no longer lets the key update `main`); deleting it is an owner decision. No
+  PAT secret exists and no workflow holds `GITHUB_TOKEN` write; PR CI holds no write
+  credential at all and can never read this secret. It is the only secret the `land`
+  job may reference; everything below lives in the separate `production` environment,
+  readable only by the `deploy` job.
 - `FLY_API_TOKEN` (**`production` environment**, branch policy `main` only) — Fly
   deploy credential. It MUST exist only as a `production` environment secret; a
   repository-level `FLY_API_TOKEN` MUST NOT exist (verified at bootstrap).
@@ -281,9 +245,9 @@ git push origin --delete trunk-candidate/<sha>
   `BRAIN_BUDDY_SMOKE_EMAIL` / `BRAIN_BUDDY_SMOKE_PASSWORD` are its private process-env
   names, mapped inside the deploy step from the admin secrets — do not create GitHub
   secrets with the `BRAIN_BUDDY_SMOKE_*` names.
-- The `main` ruleset MUST keep `restrict_updates` enabled with the landing deploy key
-  as the only bypass actor and the `Full CI` + `Docker Images` checks required (see
-  the protection section above). Changing that ruleset is itself ASK-class.
+- The `main` ruleset MUST keep the pull-request, merge-queue and deletion rules and
+  the `Full CI` + `Docker Images` checks required (see the protection section above).
+  Changing that ruleset is itself ASK-class.
 
 ### Production smoke and automatic rollback
 
@@ -340,13 +304,11 @@ immediately before Fly mutation. Removing the label or closing the PR destroys o
 derived PR app and verifies absence. The workflow requires a separate preview-only
 `FLY_PREVIEW_API_TOKEN`; production credentials are not a fallback.
 
-The active production workflow is maintained on `main`. The ASK-class release shape is:
-reviewed PR -> required CI green -> land on `main` -> successful `push` CI workflow ->
-production workflow checks out and deploys that tested SHA -> smoke checks. Under the
-active ADR-0008 ruleset the "land on `main`" step is not a plain PR merge: it requires
-the audited temporary ruleset intervention described in the protection section, because
-the landing deploy key is the sole `restrict_updates` bypass actor. No operator or
-agent runs an ad-hoc Fly production deploy.
+The active production workflow is maintained on `main`. The release shape for every
+change is: reviewed PR -> required CI green -> merge queue lands the green merge-group
+commit on `main` -> successful `push` CI workflow -> production workflow checks out and
+deploys that tested SHA -> smoke checks. No operator or agent runs an ad-hoc Fly
+production deploy.
 
 ## Roles and authority
 
@@ -363,13 +325,12 @@ incident ID, expiry/single-use scope, and—where applicable—the reviewed dry-
 A task body or current PR/incident comment is acceptable if it contains those facts. A prior
 approval for a different target, an old chat message, or credential access is not.
 
-## Standard implementation and PR procedure (ASK class)
+## Standard implementation and PR procedure (every change)
 
-The PR is the review-evidence vehicle for ASK-class changes. Note (stated honestly):
-while the `main` ruleset keeps `restrict_updates` with the landing deploy key as the
-only bypass actor, the PR cannot merge — landing additionally requires the explicit
-approval, exact-SHA green CI evidence, and audited temporary ruleset intervention
-described in the protection section above.
+Under ADR-0035 the PR is the landing vehicle for every change and the review-evidence
+vehicle for ASK. It lands through the merge queue as described in the merge-queue
+landing procedure above; ASK additionally needs the recorded owner approval before
+enqueueing.
 
 1. Sync from the current `origin/main`; create an isolated worktree and uniquely owned
    feature branch. Never make product changes in the primary worktree.
@@ -455,14 +416,11 @@ first identity mismatch. Production app names are hard exclusions.
 
 ## Normal production release
 
-This section describes the ASK-class (PR-evidenced) release path. Note that while the
-`main` ruleset keeps the landing deploy key as the sole `restrict_updates` bypass, step
-2 cannot be a plain merge: landing the reviewed SHA requires the audited temporary
-ruleset intervention from the protection section above.
+This section describes the release path every change takes after its PR (ADR-0035).
 
 1. Verify the PR was reviewed and all required checks succeeded for the merge candidate.
-2. Land the reviewed, exact CI-tested SHA on `main` (via the audited ASK landing
-   procedure while the deploy key remains the sole bypass actor).
+2. Land through the merge queue, which moves `main` to the exact CI-tested merge-group
+   commit (for ASK, only after the recorded owner approval).
 3. Verify the `push` CI run on `main` succeeded. Record its URL and tested head SHA.
 4. Verify the production workflow was caused by that successful CI run and checked out the
    same SHA. No branch, local checkout, artifact, or SHA substitution is allowed.
@@ -673,6 +631,7 @@ Redactions applied:
 ## Related documentation
 
 - [ADR-0003](decisions/0003-autonomous-delivery-guardrails.md)
+- [ADR-0035](decisions/0035-merge-queue-pr-landing.md)
 - [Fly frontend review apps](fly-review-apps.md)
 - [Fly deployment runbook](fly-deployment.md)
 - [Agent delivery workflow](../AGENTS.md#agent-delivery-workflow)

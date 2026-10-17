@@ -4,6 +4,10 @@ Date: 2026-10-08
 Status: Accepted by the product owner, 2026-10-08
 Amends: ADR-0008 (which paths are ASK), ADR-0023 (which work leaves the fast lane)
 Preserves: ADR-0008 landing mechanics, exact-SHA CI, the verified deploy smoke and rollback
+Partially superseded by [ADR-0035](0035-merge-queue-pr-landing.md) (2026-10-17): the
+landing mechanics are now the PR + merge-queue path, and `submit_to_trunk.sh` is retired,
+so the consequence that it "accepts" fast-lane work no longer holds. The ASK path list is
+unchanged.
 
 ## Context
 
