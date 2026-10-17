@@ -689,7 +689,7 @@ jobs:
           python3 scripts/ci_shards.py backend-version --artifacts backend-shards \
             --output-dir backend --sha "${BRAIN_BUDDY_CANDIDATE_SHA}"
           python3 -m pip install "coverage==$(cat backend/coverage-version.txt)"
-          python3 -m unittest scripts/test_ci_shards_coverage.py -v
+          make verify-ci-shard-coverage
           python3 scripts/ci_shards.py backend-merge --artifacts backend-shards \
             --output-dir backend --sha "${BRAIN_BUDDY_CANDIDATE_SHA}"
           echo "mode=$(cat backend/mode.txt)" >> "$GITHUB_OUTPUT"

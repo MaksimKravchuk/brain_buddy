@@ -130,6 +130,11 @@ mutation-gate-backend:
 	  ( cd backend && rm -rf mutants && { mutmut run || true; } && mutmut export-cicd-stats )
 	python3 scripts/mutation_gate.py check --stats backend/mutants/mutmut-cicd-stats.json
 
+# Coverage is installed at the shard-recorded version by backend-results.
+.PHONY: verify-ci-shard-coverage
+verify-ci-shard-coverage:
+	python3 -m unittest scripts/test_ci_shards_coverage.py -v
+
 validate-ci:
 	python3 -m unittest scripts/test_check_requirement_coverage.py -v
 	python3 -m unittest scripts/test_validate_brain_buddy_design_skill.py -v
