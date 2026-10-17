@@ -19,6 +19,20 @@ enum MacSettingsTab: Int, CaseIterable, Identifiable {
     }
 }
 
+/// Keep the native Settings scene in one place so its window constraints are also exercised by
+/// native scene tests. The app owns the selection, exactly as before.
+struct MacSettingsScene<Content: View>: Scene {
+    @ViewBuilder var content: Content
+
+    var body: some Scene {
+        Settings {
+            content.environment(\.carryOnPlatform, .mac)
+        }
+        .windowResizability(.contentMinSize)
+        .defaultSize(width: MacSettingsView.width, height: MacSettingsView.idealHeight)
+    }
+}
+
 /// Design S-01: ⌘, / Settings…, no flag (028-FR-001). The selection lives in the app, so it is kept.
 struct MacSettingsView: View {
     let launch: MacLaunch
@@ -39,6 +53,9 @@ struct MacSettingsView: View {
             minWidth: Self.width, maxWidth: Self.width,
             minHeight: Self.minHeight, idealHeight: Self.idealHeight, maxHeight: .infinity)
         .background(CarryOnColorStyle.coBgGround)
+        .containerBackground(CarryOnColorStyle.coBgGround, for: .window)
+        .toolbarBackground(.regularMaterial, for: .windowToolbar)
+        .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
         .navigationTitle(selection.title)
         .onChange(of: launch.model?.agentAvailability.addAgentRequested ?? false) { _, requested in
             selection = Self.selection(current: selection, addAgentRequested: requested)
@@ -53,17 +70,18 @@ struct MacSettingsView: View {
         }
         .toolbar {
             ToolbarItem(placement: .principal) {
-                HStack(spacing: 4) { ForEach(MacSettingsTab.allCases) { tabButton($0) } }
+                HStack(spacing: CarryOnSpace.xxs) { ForEach(MacSettingsTab.allCases) { tabButton($0) } }
                     .accessibilityElement(children: .contain)
             }
+            .sharedBackgroundVisibility(.hidden)
         }
     }
 
-    /// Design S-01: 820 pt wide; M25 draws Account 620 pt tall. The window opens at the ideal height, can
-    /// be resized taller or shorter down to the minimum, and each tab scrolls instead of clipping.
-    static let width: CGFloat = 820
-    static let idealHeight: CGFloat = 620
-    static let minHeight: CGFloat = 420
+    /// M25/M29 draw an 820 × 620 pt outer window. The native toolbar adds to the content's
+    /// 420 pt minimum; each tab continues to scroll when the window is shortened.
+    static let width = CarryOnLayout.MacSettings.width
+    static let idealHeight = CarryOnLayout.MacSettings.height
+    static let minHeight = CarryOnLayout.MacSettings.minContentHeight
 
     /// The canvas's "Add new agent" request brings the Agents tab forward; the tab opens the sheet once.
     static func selection(current: MacSettingsTab, addAgentRequested: Bool) -> MacSettingsTab {
@@ -90,9 +108,9 @@ struct MacSettingsView: View {
                 Text(tab.title).font(chosen ? MacSheetFont.metaStrong : MacSheetFont.meta)
             }
             .foregroundStyle(chosen ? CarryOnColorStyle.coTextPrimary : CarryOnColorStyle.coTextSecondary)
-            .padding(.horizontal, 12).padding(.vertical, 4)
+            .frame(width: CarryOnLayout.MacSettings.tabWidth, height: CarryOnLayout.MacSettings.tabHeight)
             .background {
-                if chosen { RoundedRectangle(cornerRadius: 8, style: .continuous).fill(CarryOnColorStyle.coControlQuiet) }
+                if chosen { RoundedRectangle(cornerRadius: CarryOnRadius.sm, style: .continuous).fill(CarryOnColorStyle.coControlQuiet) }
             }
             .contentShape(Rectangle())
             .accessibilityElement(children: .ignore)

@@ -56,11 +56,9 @@ struct BrainBuddyMacApp: App {
             ProjectMenuCommands()
             TaskDetailsCommands()
         }
-        Settings {
+        MacSettingsScene {
             MacSettingsView(launch: launch, selection: $settingsTab)
-                .environment(\.carryOnPlatform, .mac)
         }
-        .windowResizability(.contentMinSize)
     }
 
     /// X-08 "default": the running copy comes to the front. The lock names its process; when that
