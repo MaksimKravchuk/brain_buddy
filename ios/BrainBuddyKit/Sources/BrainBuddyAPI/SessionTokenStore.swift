@@ -159,6 +159,38 @@ public final class InMemorySessionTokenStore: SessionTokenStore {
     public final class KeychainSessionTokenStore: SessionTokenStore {
         public static let defaultService = "app.brainbuddy.session"
 
+        #if os(macOS)
+            // File-based Mac keychains ignore the per-query authentication-UI flag.
+            // SecKeychainSetUserInteractionAllowed is process-wide. Keep every store operation
+            // serialized while changing it, including interactive sign-in writes.
+            private static let keychainLock = NSRecursiveLock()
+
+            private static func withKeychainOperation<T>(
+                interactive: Bool = false,
+                _ operation: () throws -> T
+            ) throws -> T {
+                keychainLock.lock()
+                defer { keychainLock.unlock() }
+
+                var previous = DarwinBoolean(false)
+                let readStatus = SecKeychainGetUserInteractionAllowed(&previous)
+                guard readStatus == errSecSuccess else { throw KeychainError(status: readStatus) }
+                if !interactive {
+                    let setStatus = SecKeychainSetUserInteractionAllowed(false)
+                    guard setStatus == errSecSuccess else {
+                        let restoreStatus = SecKeychainSetUserInteractionAllowed(previous.boolValue)
+                        if restoreStatus != errSecSuccess { throw KeychainError(status: restoreStatus) }
+                        throw KeychainError(status: setStatus)
+                    }
+                }
+
+                let result = Result { try operation() }
+                let restoreStatus = SecKeychainSetUserInteractionAllowed(previous.boolValue)
+                guard restoreStatus == errSecSuccess else { throw KeychainError(status: restoreStatus) }
+                return try result.get()
+            }
+        #endif
+
         public let service: String
         public let accessGroup: String?
         #if os(macOS)
@@ -230,7 +262,11 @@ public final class InMemorySessionTokenStore: SessionTokenStore {
 
 
         public func token(for serverURL: URL) throws -> String? {
+            #if os(macOS)
+                return try Self.withKeychainOperation { try sessionToken(BrainBuddyAPI.sessionScope(for: serverURL)) }
+            #else
             try sessionToken(BrainBuddyAPI.sessionScope(for: serverURL))
+            #endif
         }
 
         /// The session of one server: on macOS the highest generation's item, on iOS the one item.
@@ -268,7 +304,20 @@ public final class InMemorySessionTokenStore: SessionTokenStore {
             query[kSecReturnData as String] = true
             query[kSecMatchLimit as String] = kSecMatchLimitOne
             var result: CFTypeRef?
-            let status = SecItemCopyMatching(query as CFDictionary, &result)
+            let status: OSStatus
+            #if os(macOS)
+                do {
+                    status = try Self.withKeychainOperation {
+                        SecItemCopyMatching(query as CFDictionary, &result)
+                    }
+                } catch let error as KeychainError {
+                    return (error.status, nil)
+                } catch {
+                    return (errSecInternalComponent, nil)
+                }
+            #else
+                status = SecItemCopyMatching(query as CFDictionary, &result)
+            #endif
             return (status, result as? Data)
         }
 
@@ -283,7 +332,9 @@ public final class InMemorySessionTokenStore: SessionTokenStore {
         private func store(_ token: String, for serverURL: URL, interactive: Bool) throws {
             let scope = BrainBuddyAPI.sessionScope(for: serverURL)
             #if os(macOS)
-                try storeOnMac(token, scope: scope, interactive: interactive)
+                try Self.withKeychainOperation(interactive: interactive) {
+                    try storeOnMac(token, scope: scope, interactive: interactive)
+                }
             #else
                 try upsert(Data(token.utf8), account: scope, interactive: interactive)
             #endif
@@ -309,7 +360,7 @@ public final class InMemorySessionTokenStore: SessionTokenStore {
         public func removeToken(for serverURL: URL) throws {
             let scope = BrainBuddyAPI.sessionScope(for: serverURL)
             #if os(macOS)
-                try delete(service, accounts: sessionItems(scope).map(\.account))
+                try Self.withKeychainOperation { try delete(service, accounts: sessionItems(scope).map(\.account)) }
             #else
                 try Self.deleteAll(searchQuery(service, account: scope))
             #endif
@@ -319,7 +370,7 @@ public final class InMemorySessionTokenStore: SessionTokenStore {
         /// another service and stay.
         public func removeAllTokens() throws {
             #if os(macOS)
-                try delete(service, accounts: accounts(of: service))
+                try Self.withKeychainOperation { try delete(service, accounts: accounts(of: service)) }
             #else
                 try Self.deleteAll(searchQuery(service))
             #endif
@@ -415,7 +466,14 @@ public final class InMemorySessionTokenStore: SessionTokenStore {
             query[kSecReturnAttributes as String] = true
             query[kSecMatchLimit as String] = kSecMatchLimitAll
             var result: CFTypeRef?
-            let status = SecItemCopyMatching(query as CFDictionary, &result)
+            let status: OSStatus
+            #if os(macOS)
+                status = try Self.withKeychainOperation {
+                    SecItemCopyMatching(query as CFDictionary, &result)
+                }
+            #else
+                status = SecItemCopyMatching(query as CFDictionary, &result)
+            #endif
             switch status {
             case errSecSuccess:
                 return ((result as? [[String: Any]]) ?? []).compactMap { $0[kSecAttrAccount as String] as? String }
@@ -437,6 +495,14 @@ public final class InMemorySessionTokenStore: SessionTokenStore {
         /// build's item: one this build may not read is skipped, never sent and never removed, and
         /// its session ends by expiring on the server.
         public func pendingLogouts() throws -> [PendingLogout] {
+            #if os(macOS)
+                return try Self.withKeychainOperation { try pendingLogoutsBody() }
+            #else
+                return try pendingLogoutsBody()
+            #endif
+        }
+
+        private func pendingLogoutsBody() throws -> [PendingLogout] {
             let decoder = JSONDecoder()
             return try Set(accounts(of: pendingLogoutService)).compactMap { account in
                 try pendingLogoutData(account).flatMap { try? decoder.decode(PendingLogout.self, from: $0) }
@@ -460,12 +526,23 @@ public final class InMemorySessionTokenStore: SessionTokenStore {
 
         public func addPendingLogout(_ logout: PendingLogout) throws {
             let item = newItem(pendingLogoutService, account: logout.id.uuidString, data: try JSONEncoder().encode(logout))
-            let status = SecItemAdd(item as CFDictionary, nil)
+            let status: OSStatus
+            #if os(macOS)
+                status = try Self.withKeychainOperation { SecItemAdd(item as CFDictionary, nil) }
+            #else
+                status = SecItemAdd(item as CFDictionary, nil)
+            #endif
             guard status == errSecSuccess || status == errSecDuplicateItem else { throw KeychainError(status: status) }
         }
 
         public func removePendingLogout(_ logout: PendingLogout) throws {
-            let status = SecItemDelete(searchQuery(pendingLogoutService, account: logout.id.uuidString) as CFDictionary)
+            let query = searchQuery(pendingLogoutService, account: logout.id.uuidString)
+            let status: OSStatus
+            #if os(macOS)
+                status = try Self.withKeychainOperation { SecItemDelete(query as CFDictionary) }
+            #else
+                status = SecItemDelete(query as CFDictionary)
+            #endif
             guard status == errSecSuccess || status == errSecItemNotFound else { throw KeychainError(status: status) }
         }
 
