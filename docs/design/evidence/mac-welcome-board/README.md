@@ -25,3 +25,10 @@ within the reference's content area instead of cropping to the content block.
 
 This bounded record does not accept main window chrome, the other board screens,
 CI, release or production behavior.
+
+The first CI run `39022389469` executed all 457 Mac tests and found two snapshot
+issues, both confined to rasterization of the small brand mark in the local 1x
+references (about 1,230 pixels out of 3,077,640). The exact CI-emitted light/dark 1x
+images were reviewed and imported unchanged. Layout, text and controls match; no
+comparison tolerance was widened. The local 2x baselines remain unchanged. A fresh
+exact-head CI run must pass; the first failed run is not a pass.
