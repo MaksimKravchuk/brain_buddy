@@ -1,6 +1,9 @@
 import AppKit
 import AVFoundation
 import BrainBuddyDesign
+import Combine
+import BrainBuddyMacCore
+import Speech
 import SwiftUI
 // `@preconcurrency`, documented as research R2 asks: WhisperKit 0.18.0 declares `WhisperKit` as an
 // `open class` with no `Sendable` conformance and no isolation, so every `await` on it from an actor
@@ -14,32 +17,104 @@ struct VoiceCaptureError: LocalizedError {
     let message: String
     var errorDescription: String? { message }
 
-    static let modelMissing = VoiceCaptureError(message: "The local speech model is missing from this app.")
+    static let modelMissing = VoiceCaptureError(message: "Whisper isn't downloaded. Download it in Settings › Voice.")
     static let microphone = VoiceCaptureError(message: "The microphone could not start recording.")
     static let busy = VoiceCaptureError(message: "Wait for the current transcription to finish.")
+    static let notAllowed = VoiceCaptureError(message: VoiceSettingsCopy.speechNotAllowed)
+    static let unavailable = VoiceCaptureError(
+        message: "Speech recognition for this language isn't available on this Mac right now.")
 }
 
-/// The only place WhisperKit runs (research R2): the model loads once, on first use, and
-/// transcribes one recording at a time on this Mac. Nothing leaves the device.
+/// Apple's speech recognition, on this Mac only (037-FR-002): `requiresOnDeviceRecognition`, so a
+/// language the Mac cannot recognise offline is refused instead of being sent anywhere.
+enum AppleSpeech {
+    /// The locales Apple recognises on device on this Mac ("en-US", "ru-RU", …), read at run time
+    /// because the list differs between Macs and macOS versions.
+    static func onDeviceLocales() -> [String] {
+        SFSpeechRecognizer.supportedLocales()
+            .filter { SFSpeechRecognizer(locale: $0)?.supportsOnDeviceRecognition == true }
+            .map(\.identifier)
+            .sorted()
+    }
+
+    /// Asks once; afterwards answers from the setting the person chose.
+    static func authorize() async -> Bool {
+        switch SFSpeechRecognizer.authorizationStatus() {
+        case .authorized: return true
+        case .notDetermined:
+            return await withCheckedContinuation { continuation in
+                SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0 == .authorized) }
+            }
+        default: return false
+        }
+    }
+
+    /// Transcribes the recording at `audio` in `locale`, on this Mac.
+    static func transcribe(audio: URL, locale: String) async throws -> String {
+        guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: locale)),
+              recognizer.isAvailable, recognizer.supportsOnDeviceRecognition
+        else { throw VoiceCaptureError.unavailable }
+        let request = SFSpeechURLRecognitionRequest(url: audio)
+        request.requiresOnDeviceRecognition = true
+        request.shouldReportPartialResults = false
+        request.addsPunctuation = true
+        let once = ResumeOnce()
+        return try await withCheckedThrowingContinuation { continuation in
+            once.task = recognize(recognizer, request: request) { result in
+                guard once.claim() else { return }
+                continuation.resume(with: result)
+            }
+        }
+    }
+
+    /// Speech calls the block on its own queue, so it only hands the answer on. `ResumeOnce` holds
+    /// the task until the one answer is delivered.
+    private static func recognize(
+        _ recognizer: SFSpeechRecognizer, request: SFSpeechURLRecognitionRequest,
+        deliver: @escaping @Sendable (Result<String, Error>) -> Void
+    ) -> SFSpeechRecognitionTask {
+        recognizer.recognitionTask(with: request) { result, error in
+            if let result, result.isFinal {
+                deliver(.success(result.bestTranscription.formattedString))
+            } else if let error {
+                deliver(.failure(error))
+            }
+        }
+    }
+}
+
+/// Lets the recognition callback resume its continuation exactly once.
+///
+/// `@unchecked Sendable` is safe because `done` and `task` are touched only while holding `lock`.
+private final class ResumeOnce: @unchecked Sendable {
+    private let lock = NSLock()
+    private var done = false
+    private var heldTask: SFSpeechRecognitionTask?
+
+    var task: SFSpeechRecognitionTask? {
+        get { lock.withLock { heldTask } }
+        set { lock.withLock { heldTask = done ? nil : newValue } }
+    }
+
+    func claim() -> Bool {
+        lock.withLock {
+            guard !done else { return false }
+            done = true
+            heldTask = nil
+            return true
+        }
+    }
+}
+
+/// The only place WhisperKit transcribes (research R2): the downloaded model loads once, on first
+/// use, and transcribes one recording at a time on this Mac. Nothing leaves the device; the model
+/// is read from disk and never fetched here (`download: false`; the download is `WhisperDownload`).
 actor VoiceTranscriber {
     private var whisper: WhisperKit?
     private var isTranscribing = false
 
     /// Whether the next `transcribe` loads the model first.
     var needsModel: Bool { whisper == nil }
-
-    /// The bundled model and tokenizer folders, or `nil` when the app was built without them.
-    nonisolated static func bundledModel(in bundle: Bundle = .main) -> (model: URL, tokenizer: URL)? {
-        guard let resources = bundle.resourceURL else { return nil }
-        let speech = resources.appendingPathComponent("Whisper", isDirectory: true)
-        let model = speech.appendingPathComponent("openai_whisper-base", isDirectory: true)
-        let tokenizer = speech.appendingPathComponent("whisper-base", isDirectory: true)
-        let files = FileManager.default
-        guard files.fileExists(atPath: model.path),
-              files.fileExists(atPath: tokenizer.appendingPathComponent("tokenizer.json").path)
-        else { return nil }
-        return (model, tokenizer)
-    }
 
     /// Transcribes the recording at `audio`; `language` is a Whisper language code, or `nil` to detect it.
     func transcribe(audio: URL, language: String?, model: URL, tokenizer: URL) async throws -> String {
@@ -68,12 +143,45 @@ final class VoiceCaptureModel: ObservableObject {
     @Published var transcript = ""
     @Published var error: String?
 
+    /// The chips and the engine behind each (037-FR-003, -004); rebuilt when Whisper comes or goes.
+    @Published private(set) var plan: VoiceLanguagePlan
+
     private var recorder: AVAudioRecorder?
     private var recordingURL: URL?
     private let transcriber = VoiceTranscriber()
+    private let whisper: WhisperDownload
+    private let appleLocales: [String]
+    private var watch: AnyCancellable?
 
-    func start() async {
+    init(whisper: WhisperDownload = .shared) {
+        self.whisper = whisper
+        let locales = AppleSpeech.onDeviceLocales()
+        appleLocales = locales
+        plan = Self.plan(appleLocales: locales, whisperReady: whisper.state == .downloaded)
+        // `WhisperDownload` publishes only on the main actor.
+        watch = whisper.$state.dropFirst().sink { [weak self] state in
+            MainActor.assumeIsolated { self?.whisperChanged(state) }
+        }
+    }
+
+    private func whisperChanged(_ state: WhisperDownload.State) {
+        plan = Self.plan(appleLocales: appleLocales, whisperReady: state == .downloaded)
+    }
+
+    private static func plan(appleLocales: [String], whisperReady: Bool) -> VoiceLanguagePlan {
+        VoiceLanguagePlan(
+            preferredLanguages: Locale.preferredLanguages, appleLocales: appleLocales,
+            whisperLanguages: whisperReady ? Constants.languageCodes : [])
+    }
+
+    func start(language: String) async {
         error = nil
+        // 037-FR-005: a language nothing can transcribe here is never recorded.
+        guard let engine = plan.engine(for: language) else { return }
+        if engine == .apple, !(await AppleSpeech.authorize()) {
+            error = VoiceSettingsCopy.speechNotAllowed
+            return
+        }
         let permitted = await AVCaptureDevice.requestAccess(for: .audio)
         guard permitted else {
             error = "Microphone access is required to record."
@@ -108,7 +216,6 @@ final class VoiceCaptureModel: ObservableObject {
         recording = false
         recordingURL = nil
         transcribing = true
-        preparingModel = await transcriber.needsModel
         error = nil
         defer {
             transcribing = false
@@ -116,11 +223,21 @@ final class VoiceCaptureModel: ObservableObject {
             try? FileManager.default.removeItem(at: url)
         }
         do {
-            guard let bundled = VoiceTranscriber.bundledModel() else { throw VoiceCaptureError.modelMissing }
-            transcript = try await transcriber.transcribe(
-                audio: url, language: language == "auto" ? nil : language,
-                model: bundled.model, tokenizer: bundled.tokenizer
-            )
+            switch plan.engine(for: language) {
+            case .apple:
+                guard let locale = plan.appleLocale(for: language, preferredLanguages: Locale.preferredLanguages)
+                else { throw VoiceCaptureError.unavailable }
+                transcript = try await AppleSpeech.transcribe(audio: url, locale: locale)
+            case .whisper:
+                guard let model = whisper.files.modelFolder else { throw VoiceCaptureError.modelMissing }
+                preparingModel = await transcriber.needsModel
+                transcript = try await transcriber.transcribe(
+                    audio: url, language: language == VoiceLanguagePlan.auto ? nil : language,
+                    model: model, tokenizer: whisper.files.tokenizerFolder
+                )
+            case nil:
+                throw VoiceCaptureError.modelMissing
+            }
         } catch {
             self.error = error.localizedDescription
         }
@@ -144,15 +261,26 @@ final class VoiceCaptureModel: ObservableObject {
 /// The voice sheet in Carry On (board "11 Voice capture"): `MacVoiceCaptureCard` over this model.
 struct VoiceCaptureView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openSettings) private var openSettings
     @StateObject private var model = VoiceCaptureModel()
-    @State private var language = "ru"
+    @State private var language = ""
     let onUseAsTask: ((String) -> Void)?
 
-    private static let languages = [
-        MacChoice(value: "ru", title: "Russian"),
-        MacChoice(value: "en", title: "English"),
-        MacChoice(value: "auto", title: "Auto"),
-    ]
+    private var languages: [MacChoice<String>] {
+        model.plan.chips.map { MacChoice(value: $0, title: VoiceLanguagePlan.title(for: $0)) }
+    }
+
+    /// V-01c: the chosen language needs Whisper, which is not downloaded.
+    private var needsWhisper: MacVoiceNote? {
+        guard !language.isEmpty, model.plan.engine(for: language) == nil else { return nil }
+        return MacVoiceNote(
+            text: VoiceSettingsCopy.needsWhisper(VoiceLanguagePlan.title(for: language)),
+            action: VoiceSettingsCopy.openSettings,
+            perform: {
+                VoiceSettingsRoute.request()
+                openSettings()
+            })
+    }
 
     private var phase: MacVoicePhase {
         if model.recording { return .recording }
@@ -173,13 +301,14 @@ struct VoiceCaptureView: View {
 
     var body: some View {
         MacVoiceCaptureCard(
-            phase: phase, languages: Self.languages, language: $language, error: model.error,
+            phase: phase, languages: languages, language: $language, error: model.error,
             hasTranscript: !model.transcript.isEmpty, canUseTranscript: !cleanTranscript.isEmpty,
-            onRecord: { Task { await model.start() } },
+            onRecord: { Task { await model.start(language: language) } },
             onStop: { Task { await model.stopAndTranscribe(language: language) } },
             onDiscardRecording: { model.discard() },
             onUseAsTask: useAsTask,
-            onClose: { dismiss() }
+            onClose: { dismiss() },
+            canRecord: needsWhisper == nil, note: needsWhisper
         ) {
             TextEditor(text: $model.transcript)
                 .font(MacCaptureFont.field)
@@ -189,7 +318,7 @@ struct VoiceCaptureView: View {
                 .accessibilityLabel("Editable transcript")
         } more: {
             Menu {
-                Button("Record again") { model.discard(); Task { await model.start() } }
+                Button("Record again") { model.discard(); Task { await model.start(language: language) } }
                 Button("Copy transcript") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(model.transcript, forType: .string)
@@ -202,6 +331,11 @@ struct VoiceCaptureView: View {
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
+        }
+        .onAppear { language = model.plan.initial }
+        // A chip that went away (Auto after Whisper was removed) falls back to the first usable one.
+        .onChange(of: model.plan) { _, plan in
+            if !plan.chips.contains(language) { language = plan.initial }
         }
         .onDisappear { model.cancel() }
     }

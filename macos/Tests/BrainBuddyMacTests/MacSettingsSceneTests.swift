@@ -28,18 +28,18 @@
             .failed(kind: .server, reference: "ref-2"),
         ]
 
-        @Test("028-FR-002 the tab bar has Account, Agents, Sync in that order, each with its own glyph")
+        @Test("028-FR-002 037-FR-006 the tab bar has Account, Agents, Sync, Voice in that order, each with its own glyph")
         func tabsInOrder() {
-            #expect(MacSettingsTab.allCases.map(\.title) == ["Account", "Agents", "Sync"])
+            #expect(MacSettingsTab.allCases.map(\.title) == ["Account", "Agents", "Sync", "Voice"])
             #expect(MacSettingsTab.allCases.map(\.title) == AccountSettingsCopy.tabNames)
-            #expect(MacSettingsTab.allCases.map(\.icon) == [.account, .agents, .sync])
+            #expect(MacSettingsTab.allCases.map(\.icon) == [.account, .agents, .sync, .voice])
             #expect(MacSettingsTab.allCases.first == .account, "the window opens on Account")
         }
 
         @Test("028-FR-002 each Settings tab has its own accessible name, never a shared one")
         func the028_FR_002_tabAccessibilityNamesAreDistinct() {
             let names = MacSettingsTab.allCases.map(\.accessibilityName)
-            #expect(names == ["Account", "Agents", "Sync"])
+            #expect(names == ["Account", "Agents", "Sync", "Voice"])
             #expect(Set(names).count == MacSettingsTab.allCases.count)
         }
 
@@ -130,6 +130,27 @@
             #expect(router.surface == surface)
             #expect(router.presentationSerial == serial)
             #expect(router.focus?.serial == focus)
+        }
+
+        @Test("037-FR-006 Settings › Voice offers one button per Whisper state")
+        func the037_FR_006_voiceTabActions() {
+            #expect(VoiceSettingsContent.actionTitle(for: .notDownloaded) == "Download")
+            #expect(VoiceSettingsContent.actionTitle(for: .downloading(fraction: 0.4)) == "Cancel")
+            #expect(VoiceSettingsContent.actionTitle(for: .downloaded) == "Remove")
+            #expect(VoiceSettingsContent.actionTitle(for: .failed("offline")) == "Try again")
+            #expect(VoiceSettingsContent.percent(0.429) == 42)
+            #expect(VoiceSettingsContent.percent(1.4) == 100)
+        }
+
+        @Test("037-FR-005 the voice sheet's Download in Settings brings Voice forward, once, from any tab")
+        func the037_FR_005_voiceRouteSelectsVoice() {
+            for tab in MacSettingsTab.allCases {
+                #expect(MacSettingsView.selection(current: tab, voiceTabRequested: true) == .voice)
+                #expect(MacSettingsView.selection(current: tab, voiceTabRequested: false) == tab)
+            }
+            VoiceSettingsRoute.request()
+            #expect(VoiceSettingsRoute.consume())
+            #expect(!VoiceSettingsRoute.consume(), "a request is read once")
         }
     }
 #endif

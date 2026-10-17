@@ -25,6 +25,8 @@ enum MacBoardIcon: Hashable, Sendable {
     case history
     /// Settings tabs (spec 028): a person, a robot head with an antenna, two circling arrows.
     case account, agents, sync
+    /// Settings › Voice (spec 037): the board's mic, as on the toolbar's voice button (`MacMicGlyph`).
+    case voice
     /// Agents on the board (M22–M24, DSAgents): All runs, each agent row and a run's mark in Waiting for.
     /// `<rect x="4" y="6" width="16" height="12" rx="4"/><circle cx="9.5" cy="12" r="1.2"/><circle cx="14.5" cy="12" r="1.2"/><path d="M12 3v3"/>`
     case agentRun
@@ -160,6 +162,9 @@ struct MacBoardIconShape: Shape {
             addCircleArc(into: &path, centerX: 12, centerY: 12, radius: 7, from: Double.pi, to: Double.pi / 4)
             path.addLine(to: point(19, 15))
             path.addPath(polyline([(19, 19), (19, 15), (15, 15)]))
+        case .voice:
+            path.addPath(
+                MacMicGlyph().path(in: CGRect(origin: point(0, 0), size: CGSize(width: 24 * scale, height: 24 * scale))))
         }
         return path
     }

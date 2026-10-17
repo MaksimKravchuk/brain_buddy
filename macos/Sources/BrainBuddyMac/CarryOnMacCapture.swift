@@ -396,6 +396,13 @@ enum MacVoicePhase: Sendable, Equatable {
     var isWorking: Bool { self == .preparingModel || self == .transcribing }
 }
 
+/// A line under the voice sheet's language chips with one action (037 V-01c).
+struct MacVoiceNote {
+    let text: String
+    let action: String
+    let perform: () -> Void
+}
+
 /// The voice sheet: the round voice button (Record, or Stop & transcribe while listening) with its
 /// status, the language, the editable transcript and the draft actions. 420 wide, padding 14,
 /// radius 16. `transcript` is the editor; `more` the transcript's menu.
@@ -412,6 +419,9 @@ struct MacVoiceCaptureCard<Transcript: View, More: View>: View {
     let onDiscardRecording: () -> Void
     let onUseAsTask: (() -> Void)?
     let onClose: () -> Void
+    /// False while the chosen language has no recogniser on this Mac (037 V-01c).
+    let canRecord: Bool
+    let note: MacVoiceNote?
     let transcript: Transcript
     let more: More
 
@@ -419,7 +429,7 @@ struct MacVoiceCaptureCard<Transcript: View, More: View>: View {
         phase: MacVoicePhase, languages: [MacChoice<String>], language: Binding<String>, error: String?,
         hasTranscript: Bool, canUseTranscript: Bool, surface: MacCaptureSurfaceKind = .glass,
         onRecord: @escaping () -> Void, onStop: @escaping () -> Void, onDiscardRecording: @escaping () -> Void,
-        onUseAsTask: (() -> Void)?, onClose: @escaping () -> Void,
+        onUseAsTask: (() -> Void)?, onClose: @escaping () -> Void, canRecord: Bool = true, note: MacVoiceNote? = nil,
         @ViewBuilder transcript: () -> Transcript, @ViewBuilder more: () -> More
     ) {
         self.phase = phase
@@ -434,6 +444,8 @@ struct MacVoiceCaptureCard<Transcript: View, More: View>: View {
         self.onDiscardRecording = onDiscardRecording
         self.onUseAsTask = onUseAsTask
         self.onClose = onClose
+        self.canRecord = canRecord
+        self.note = note
         self.transcript = transcript()
         self.more = more()
     }
@@ -445,6 +457,13 @@ struct MacVoiceCaptureCard<Transcript: View, More: View>: View {
                 .disabled(phase != .idle)
                 .accessibilityLabel("Language")
                 .padding(.top, 14)
+            if let note, phase == .idle {
+                VStack(alignment: .leading, spacing: 6) {
+                    MacSheetStatus(text: note.text, tone: .secondary, font: MacCaptureFont.status)
+                    Button(note.action, action: note.perform).buttonStyle(.macText)
+                }
+                .padding(.top, 12)
+            }
             if phase == .recording {
                 HStack(spacing: 8) {
                     Button("Stop & transcribe", action: onStop)
@@ -501,7 +520,7 @@ struct MacVoiceCaptureCard<Transcript: View, More: View>: View {
                 MacVoiceButtonFace(live: phase == .recording, size: 36)
             }
             .buttonStyle(.plain)
-            .disabled(phase.isWorking)
+            .disabled(phase.isWorking || (phase == .idle && !canRecord))
             .accessibilityLabel(phase == .recording ? "Stop & transcribe" : "Record")
             .help(phase == .recording ? "Stop & transcribe" : "Record")
             Text(phase.status)

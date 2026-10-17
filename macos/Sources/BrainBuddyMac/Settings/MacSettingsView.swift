@@ -4,7 +4,7 @@ import BrainBuddyMacCore
 import SwiftUI
 
 enum MacSettingsTab: Int, CaseIterable, Identifiable {
-    case account, agents, sync
+    case account, agents, sync, voice
 
     var id: Int { rawValue }
     var title: String { AccountSettingsCopy.tabNames[rawValue] }
@@ -15,6 +15,7 @@ enum MacSettingsTab: Int, CaseIterable, Identifiable {
         case .account: .account
         case .agents: .agents
         case .sync: .sync
+        case .voice: .voice
         }
     }
 }
@@ -32,6 +33,7 @@ struct MacSettingsView: View {
                 case .account: AccountSettingsTab(sync: sync, openMainWindow: openMainWindow)
                 case .agents: AgentsSettingsTab(sync: sync, availability: launch.model?.agentAvailability)
                 case .sync: SyncSettingsTab(controller: sync)
+                case .voice: VoiceSettingsTab(whisper: .shared)
                 }
             }
         }
@@ -50,6 +52,10 @@ struct MacSettingsView: View {
             selection = Self.selection(
                 current: selection, addAgentRequested: launch.model?.agentAvailability.addAgentRequested ?? false)
             showRequestedAgentsTab()
+            showRequestedVoiceTab()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: VoiceSettingsRoute.notification)) { _ in
+            showRequestedVoiceTab()
         }
         .toolbar {
             ToolbarItem(placement: .principal) {
@@ -78,6 +84,15 @@ struct MacSettingsView: View {
 
     static func selection(current: MacSettingsTab, agentsTabRequested: Bool) -> MacSettingsTab {
         agentsTabRequested ? .agents : current
+    }
+
+    /// The voice sheet's "Download in Settings…" brings Voice forward (037-FR-005).
+    private func showRequestedVoiceTab() {
+        selection = Self.selection(current: selection, voiceTabRequested: VoiceSettingsRoute.consume())
+    }
+
+    static func selection(current: MacSettingsTab, voiceTabRequested: Bool) -> MacSettingsTab {
+        voiceTabRequested ? .voice : current
     }
 
     private func tabButton(_ tab: MacSettingsTab) -> some View {

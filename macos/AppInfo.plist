@@ -12,5 +12,6 @@
     <key>CFBundleVersion</key><string>1</string>
     <key>LSMinimumSystemVersion</key><string>26.0</string>
     <key>NSMicrophoneUsageDescription</key><string>Brain Buddy records speech locally so you can review its transcript.</string>
+    <key>NSSpeechRecognitionUsageDescription</key><string>Brain Buddy turns your recording into text on this Mac. It is never sent anywhere.</string>
 </dict>
 </plist>
