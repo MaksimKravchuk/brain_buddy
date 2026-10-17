@@ -65,6 +65,20 @@ caches under each package's `.build`; full logs are retained locally under the p
 The default SwiftPM `Executed 0 tests`/XCTest summary alone is not the Swift Testing
 result; the counts above come from the final Swift Testing lines as well.
 
+## Integration base after the host run
+
+While the run was in progress, main advanced to
+`c867ad0f091e39f92f84de01c030c8a16e32d128` with the BrainBuddyAgents package extraction.
+The evidence/test PR was rebased onto that main. The manual results above remain tied
+to the original product/app SHA, not relabelled as a manual pass for the new build.
+The backend sources did not change between those bases. Rebased Mac/package tests are
+separate integration evidence; the new BrainBuddyAgents test target is now applicable.
+
+Independent review found a locale-specific `Today 10:21` assertion in the new tests.
+It now derives the expected time using the same Foundation format as the shipped view;
+no locale preference is changed. This fixes the assertion, but does not make the captured
+manager date strings locale-independent. Final CI must verify the baselines on its host.
+
 ## Real app setup
 
 The app was launched with both `BRAINBUDDY_MAC_DATA_DIR` and `CFFIXED_USER_HOME`

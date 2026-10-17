@@ -3,6 +3,7 @@
     import BrainBuddyCore
     import BrainBuddyPersistence
     import BrainBuddyWorkspace
+    import BrainBuddyAgents
     import BrainBuddyAPI
     import BrainBuddyDesign
     import Foundation
@@ -65,7 +66,7 @@
             #expect(model.rows.map(\.status) == ["Tested ready", "Tested ready", "Stale"])
             #expect(model.details?.skills == "Web research, bookings, email drafts")
             #expect(model.details?.lastContact == Self.now)
-            #expect(AgentDetailsView.contact(Self.now, now: Self.now) == "Today 10:21")
+            #expect(AgentDetailsView.contact(Self.now, now: Self.now) == "Today \(Self.now.formatted(.dateTime.hour().minute()))")
             return controller
         }
 
