@@ -202,9 +202,17 @@ struct TaskInspector: View {
                 onCommand(.move(.someday))
             }
         }
-        notes(label: "Note")
+        if writingFirstStep { notes(label: "Note") }
+        // Keep extras mounted so Back preserves unfinished input and retry IDs. Their TextFields
+        // disable correctly; the native Note TextEditor above must be omitted when not authoring.
         TaskDetailExtras(task: task, model: model, editorDirty: editorDirty, onDirtyChange: onExtrasDirtyChange)
-        properties
+            .frame(height: writingFirstStep ? nil : 0, alignment: .top)
+            .opacity(writingFirstStep ? 1 : 0)
+            .clipped()
+            .disabled(!writingFirstStep)
+            .allowsHitTesting(writingFirstStep)
+            .accessibilityHidden(!writingFirstStep)
+        if writingFirstStep { properties }
     }
 
     /// Board 13.
@@ -474,7 +482,7 @@ struct TaskInspector: View {
             if writingFirstStep {
                 MacInspectorActionBar(actions: [
                     .primary("Make it the next step") { onCommand(.move(.next)) },
-                    .quiet("Back") { writingFirstStep = false },
+                    .quiet("Back", perform: returnFromFirstStep),
                 ])
             } else {
                 MacInspectorActionBar(
@@ -534,6 +542,11 @@ struct TaskInspector: View {
 
     private func writeTheFirstStep() {
         writingFirstStep = true
+        fieldFocus = .title
+    }
+
+    private func returnFromFirstStep() {
+        writingFirstStep = false
         fieldFocus = .title
     }
     // presentation-region-end
