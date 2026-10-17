@@ -203,6 +203,11 @@ public enum CarryOnLayout {
         public static let stepSize: Double = 22
         public static let stepLineHeight: Double = 1.25
     }
+    public enum MacWelcome {
+        public static let fieldHeight: Double = 44
+        public static let micSize: Double = 30
+        public static let hintWidth: Double = 69
+    }
     public enum LandingTip {
         public static let paddingY: Double = 16
         public static let paddingX: Double = 18
@@ -473,6 +478,9 @@ public enum CarryOnTokenTable {
         "layout.first-run.step-field-gap": CarryOnLayout.FirstRun.stepFieldGap,
         "layout.first-run.step-size": CarryOnLayout.FirstRun.stepSize,
         "layout.first-run.step-line-height": CarryOnLayout.FirstRun.stepLineHeight,
+        "layout.mac-welcome.field-height": CarryOnLayout.MacWelcome.fieldHeight,
+        "layout.mac-welcome.mic-size": CarryOnLayout.MacWelcome.micSize,
+        "layout.mac-welcome.hint-width": CarryOnLayout.MacWelcome.hintWidth,
         "layout.landing-tip.padding-y": CarryOnLayout.LandingTip.paddingY,
         "layout.landing-tip.padding-x": CarryOnLayout.LandingTip.paddingX,
         "layout.landing-tip.radius": CarryOnLayout.LandingTip.radius,

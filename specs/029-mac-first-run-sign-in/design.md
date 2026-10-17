@@ -44,12 +44,14 @@ alert.
 ## Layout (from the board)
 
 - **Window**: 1280 × 800 reference; `bg-ground`; glass sidebar as today.
-- **F-01 welcome block**: centred in the Inbox content column, max width 560 pt. Mark +
+- **F-01 welcome block**: horizontally centred and top-anchored in the Inbox content column,
+  max width 560 pt, with the board's 12 pt inset below the native toolbar. Mark +
   "Carry On" (serif 44), 28 pt gap, "What feels heaviest?" (serif 36, `text-primary`),
   12 pt gap, the instruction line (`text-secondary`, 15 pt), 24 pt gap, the capture field
-  (existing `CarryOnMacCapture` field, focus ring `focus-ring`, mic button inside on the
-  trailing edge), 20 pt gap, two hint rows (chip on `surface-token` with the shortcut or
-  the mic glyph, then `text-secondary` text), 24 pt gap, the "No account needed" line
+  (white `surface-card` field, 44 pt high, focus ring `focus-ring` drawn outside the field,
+  30 pt `voice-bg` mic button inside on the trailing edge), 20 pt gap, two hint rows (69 × 26 pt
+  chip on `chip-bg` with the shortcut or the mic glyph, then `text-primary` text), 24 pt gap,
+  the "No account needed" line
   (`text-secondary`). In the typed state (M02) the two lines "Goes to Inbox, as you wrote
   it" (`text-secondary`) and "Return to add · Esc to skip" (`text-secondary`, 12 pt) sit
   4 pt under the field; the hint rows stay.
