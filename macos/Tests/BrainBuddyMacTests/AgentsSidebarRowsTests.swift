@@ -46,5 +46,14 @@
                     AgentSidebarRow(id: "c2", name: "Home server", trailing: "Stale"),
                 ])
         }
+
+        @Test("030_FR_040 arrowing onto an agent row opens it, and the row already showing is left alone")
+        func the030_FR_040_selectionOpensAgentDestination() {
+            let agent = WorkspaceDestination.agentRuns(.agent("conn_1"))
+            #expect(WorkspaceDestination.opened(bySelecting: .agentRuns(.all), current: .list(.waiting)) == .agentRuns(.all))
+            #expect(WorkspaceDestination.opened(bySelecting: agent, current: .agentRuns(.all)) == agent)
+            #expect(WorkspaceDestination.opened(bySelecting: agent, current: agent) == nil)
+            #expect(WorkspaceDestination.opened(bySelecting: nil, current: agent) == nil)
+        }
     }
 #endif

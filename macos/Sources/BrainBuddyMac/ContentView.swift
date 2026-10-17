@@ -356,7 +356,7 @@ struct WorkspaceView: View {
     @ViewBuilder
     private var routedCanvas: some View {
         if case .agentRuns(let filter) = model.destination {
-            AgentRunsCanvas(model: model, filter: filter, selectedTaskID: selectedTaskID, onSelect: selectRun)
+            AgentRunsCanvas(model: model, filter: filter, selectedTaskID: selectedTaskID, onSelect: selectRun, onOpen: openRun)
                 .onChange(of: selectedTaskID.flatMap { model.task($0) }) { _, task in
                     if let task, taskForm?.taskID != task.id { taskForm = TaskAutosave(task: task) }
                 }
@@ -367,6 +367,12 @@ struct WorkspaceView: View {
 
     private func selectRun(_ run: AgentRunItem) {
         if let id = model.stepID(forServerID: run.taskServerID) { requestNavigation(.task(id)) }
+    }
+
+    /// Return on a run row: select the step and hand focus to the inspector's run section (030-FR-040).
+    private func openRun(_ run: AgentRunItem) {
+        selectRun(run)
+        model.agentRuns.requestInspectorFocus()
     }
 
     @ToolbarContentBuilder
@@ -417,7 +423,7 @@ struct WorkspaceView: View {
     // MARK: Sidebar
 
     private var sidebar: some View {
-        List {
+        List(selection: sidebarSelection) {
             MacSidebarBrand()
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
@@ -435,6 +441,13 @@ struct WorkspaceView: View {
         .listStyle(.sidebar)
         .navigationTitle("BrainBuddy")
         .safeAreaInset(edge: .bottom) { footer }
+    }
+
+    /// Arrow keys move the List selection; choosing a row opens its destination (030-FR-040).
+    private var sidebarSelection: Binding<WorkspaceDestination?> {
+        Binding(
+            get: { model.destination },
+            set: { if let next = WorkspaceDestination.opened(bySelecting: $0, current: model.destination) { requestNavigation(.destination(next)) } })
     }
 
     /// G-01, between Lists and Dates: All runs and the agents of the listed runs (board M22, DSAgents).
@@ -737,6 +750,7 @@ struct WorkspaceView: View {
         .accessibilityLabel(count.map { "\(title), \($0) open tasks" } ?? (attention ? "\(title), needs you" : title))
         .buttonStyle(.plain)
         .listRowBackground(Color.clear)
+        .tag(destination)
     }
 
     // MARK: Projects
@@ -1453,7 +1467,7 @@ struct WorkspaceView: View {
                 AgentRunRow(
                     item: run, style: .waiting, now: Date(),
                     selected: selectedTaskID != nil && selectedTaskID == model.stepID(forServerID: run.taskServerID),
-                    onSelect: { selectRun(run) })
+                    onSelect: { selectRun(run) }, onOpen: { openRun(run) })
             }
             sectionHeader(AgentsCopy.waitingPeople, top: 14)
         }

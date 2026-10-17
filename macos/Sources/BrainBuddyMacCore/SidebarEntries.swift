@@ -84,6 +84,15 @@ package enum WorkspaceDestination: Hashable, Sendable {
     }
 }
 
+extension WorkspaceDestination {
+    /// The sidebar List's selection moved by keyboard (030-FR-040): the destination to open, or nil when
+    /// nothing is chosen or it is already showing.
+    package static func opened(bySelecting selection: WorkspaceDestination?, current: WorkspaceDestination) -> WorkspaceDestination? {
+        guard let selection, selection != current else { return nil }
+        return selection
+    }
+}
+
 package enum HistoryState: String, Hashable, Sendable {
     case completed, cancelled
 
