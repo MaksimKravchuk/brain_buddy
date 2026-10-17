@@ -51,10 +51,11 @@ alert.
   (white `surface-card` field, 44 pt high, focus ring `focus-ring` drawn outside the field,
   30 pt `voice-bg` mic button inside on the trailing edge), 20 pt gap, two hint rows (69 × 26 pt
   chip on `chip-bg` with the shortcut or the mic glyph, then `text-primary` text), 24 pt gap,
-  the "No account needed" line
-  (`text-secondary`). In the typed state (M02) the two lines "Goes to Inbox, as you wrote
-  it" (`text-secondary`) and "Return to add · Esc to skip" (`text-secondary`, 12 pt) sit
-  4 pt under the field; the hint rows stay.
+  the "No account needed" line (`text-secondary`).
+- **M02 typed capture**: keep the 36 pt "What feels heaviest?" heading and the centred 560 pt
+  block. Hide the brand, instruction, hints, no-account line, and mic button. The focused white
+  `surface-card` field is 64 pt high. Four pt below it, put "Goes to Inbox, as you wrote it"
+  (`text-secondary`) at left and "Return to add · Esc to skip" (`text-secondary`, 12 pt) at right.
 - **F-02**: the Inbox list header "1 thing to sort"; the row selected (`surface-selected`).
   The inspector is the existing 380 pt panel: caption "Inbox · 1 of 1" (`text-secondary`),
   the item text (`text-primary`), "What is the first step you could take?" (serif 24),

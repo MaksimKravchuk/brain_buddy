@@ -28,11 +28,27 @@
             .frame(width: 1030, height: 747, alignment: .top)
             .background(CarryOnColorStyle.coBgGround)
 
-            assertHostedSnapshot(content, appearance: appearance)
+            assertHostedSnapshot(content, appearance: appearance, state: "empty")
+        }
+
+        @Test("029-FR-006 M02 typed welcome matches the board", arguments: Appearance.allCases)
+        func typedWelcome(appearance: Appearance) {
+            let content = WelcomeInboxView(
+                text: .constant("the garage is a mess and Sam needs the van back"),
+                hotkeyAvailable: true, speechAvailable: true, errorText: nil,
+                onSubmit: {}, onSkip: {}, onMic: {}
+            )
+            .environment(\.carryOnPlatform, .mac)
+            .environment(\.colorScheme, appearance.scheme)
+            .frame(width: 1030, height: 747, alignment: .top)
+            .background(CarryOnColorStyle.coBgGround)
+
+            assertHostedSnapshot(content, appearance: appearance, state: "typed")
         }
 
         private func assertHostedSnapshot(
-            _ content: some View, appearance: Appearance, sourceLocation: SourceLocation = #_sourceLocation
+            _ content: some View, appearance: Appearance, state: String,
+            sourceLocation: SourceLocation = #_sourceLocation
         ) {
             let width: CGFloat = 1030
             _ = NSApplication.shared
@@ -73,7 +89,7 @@
             let image = Image(decorative: cgImage, scale: 2)
             assertMacSnapshot(
                 image.frame(width: width, height: size.height),
-                named: "mac-welcome-empty-\(appearance.rawValue)-\(profile)",
+                named: "mac-welcome-\(state)-\(appearance.rawValue)-\(profile)",
                 scheme: appearance.scheme, width: width, sourceLocation: sourceLocation)
         }
     }
