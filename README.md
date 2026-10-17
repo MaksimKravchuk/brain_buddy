@@ -14,7 +14,7 @@ See [Product direction: executable next actions](docs/product-direction.md) for 
 ## Highlights
 - **Interactive canvas** powered by React Flow with undo/redo, optimistic updates, and large-graph tuning for 200+ nodes.
 - **GTD task tracker** with inbox/next/waiting/someday lists, due dates, projects, tags, and voice brain-dump capture that drafts tasks from speech.
-- **FastAPI backend** persisting trees on the filesystem with LRU caching and version history snapshots; task data lives in SQLite (`tasks.sqlite3`) under the same data dir.
+- **FastAPI backend** persisting trees on the filesystem with version history snapshots; task data lives in SQLite (`tasks.sqlite3`) under the same data dir.
 - **AI validation pipeline** with provider abstraction and mock provider for offline workflows.
 - **Operational polish** including correlation-ID tracing, optional API key guardrails, and expanded troubleshooting guides.
 - **Data safety by default** with 5s local autosave, exit warnings, and explicit consent gating before any AI request.

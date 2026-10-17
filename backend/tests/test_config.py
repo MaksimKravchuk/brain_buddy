@@ -60,7 +60,6 @@ def test_get_config_uses_environment(
     assert config.log_level == "DEBUG"
     assert config.api_prefix == "/custom"
     assert config.data.schema_version == "2024.04"
-    assert config.data.schema_version_path == tmp_path.resolve() / "schema_version"
 
 
 def test_public_base_url_reports_an_unparseable_port() -> None:

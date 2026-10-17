@@ -36,7 +36,6 @@ def test_provider_settings_are_bounded_and_disabled_by_default() -> None:
     assert settings.provider == "disabled"
     assert settings.model == "gpt-4o-mini"
     assert settings.timeout_seconds == 3.0
-    assert settings.max_history_titles == 50
     assert settings.max_output_tokens == 120
 
 

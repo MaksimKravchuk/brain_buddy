@@ -102,7 +102,8 @@ def test_reconcile_repairs_missing_then_stale_resources(api_client) -> None:
     _store("k-comment", "create_comment:task_parent", comment.id, comment)
 
     # Repair: every missing resource is recreated from its record.
-    service._reconcile_idempotent_results(owner_id=owner)
+    for record in repo.list_idempotency_for_owner(owner_id=owner):
+        service._reconcile_idempotent_result(owner_id=owner, key=record.key)
     assert repo.get_project_for_owner("project_ghost", owner_id=owner).name == (
         "Ghost Project"
     )
