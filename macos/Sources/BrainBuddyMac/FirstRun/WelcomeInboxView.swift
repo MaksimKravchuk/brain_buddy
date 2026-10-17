@@ -20,32 +20,45 @@ struct WelcomeInboxView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 12) {
-                CarryOnMark(size: 44)
-                Text(FirstRunCopy.appName).font(Self.serif(44)).foregroundStyle(.coTextPrimary)
+            if !typed {
+                HStack(spacing: 12) {
+                    CarryOnMark(size: 44)
+                    Text(FirstRunCopy.appName).font(Self.serif(44)).foregroundStyle(.coTextPrimary)
+                }
             }
             Text(FirstRunCopy.heading)
                 .font(Self.serif(36))
                 .foregroundStyle(.coTextPrimary)
                 .padding(.top, 28)
                 .accessibilityAddTraits(.isHeader)
-            Text(FirstRunCopy.intro)
-                .font(MacRowFont.action(size: 15, weight: 400, relativeTo: .body))
-                .foregroundStyle(.coTextSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 12)
+            if !typed {
+                Text(FirstRunCopy.intro)
+                    .font(MacRowFont.action(size: 15, weight: 400, relativeTo: .body))
+                    .foregroundStyle(.coTextSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 12)
+            }
             field.padding(.top, 24)
             if let errorText { MacCaptureNote(text: errorText, danger: true, topPadding: 4) }
             if typed {
-                // F-01.02: the two lines sit 4 pt under the field.
-                MacCaptureNote(text: FirstRunCopy.typingLine, topPadding: 4)
-                MacCaptureNote(text: FirstRunCopy.typingKeys, topPadding: 0)
-            }
-            VStack(alignment: .leading, spacing: 10) { hints }.padding(.top, 20)
-            Text(FirstRunCopy.noAccount)
-                .font(MacRowFont.title)
+                // F-01.02: typing replaces the introductory content and hints with these notes.
+                HStack(alignment: .top) {
+                    Text(FirstRunCopy.typingLine)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Text(FirstRunCopy.typingKeys)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+                .font(MacCaptureFont.meta)
                 .foregroundStyle(.coTextSecondary)
-                .padding(.top, 24)
+                .padding(.top, 4)
+            }
+            if !typed {
+                VStack(alignment: .leading, spacing: 10) { hints }.padding(.top, 20)
+                Text(FirstRunCopy.noAccount)
+                    .font(MacRowFont.title)
+                    .foregroundStyle(.coTextSecondary)
+                    .padding(.top, 24)
+            }
         }
         .frame(maxWidth: 560, alignment: .leading)
         .padding(.horizontal, 28)
@@ -71,7 +84,7 @@ struct WelcomeInboxView: View {
                 .focused($fieldFocused)
                 .onSubmit(onSubmit)
                 .accessibilityLabel(FirstRunCopy.heading)
-            if speechAvailable {
+            if speechAvailable && !typed {
                 Button(action: onMic) {
                     MacVoiceButtonFace(live: false, size: CarryOnLayout.MacWelcome.micSize)
                 }
@@ -80,7 +93,7 @@ struct WelcomeInboxView: View {
             }
         }
         .padding(.horizontal, 12)
-        .frame(height: CarryOnLayout.MacWelcome.fieldHeight)
+        .frame(height: typed ? CarryOnLayout.MacWelcome.typedFieldHeight : CarryOnLayout.MacWelcome.fieldHeight)
         .background(CarryOnColorStyle.coSurfaceCard, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay {
             if fieldFocused {

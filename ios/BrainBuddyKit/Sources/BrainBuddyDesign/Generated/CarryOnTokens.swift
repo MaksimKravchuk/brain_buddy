@@ -205,6 +205,7 @@ public enum CarryOnLayout {
     }
     public enum MacWelcome {
         public static let fieldHeight: Double = 44
+        public static let typedFieldHeight: Double = 64
         public static let micSize: Double = 30
         public static let hintWidth: Double = 69
     }
@@ -479,6 +480,7 @@ public enum CarryOnTokenTable {
         "layout.first-run.step-size": CarryOnLayout.FirstRun.stepSize,
         "layout.first-run.step-line-height": CarryOnLayout.FirstRun.stepLineHeight,
         "layout.mac-welcome.field-height": CarryOnLayout.MacWelcome.fieldHeight,
+        "layout.mac-welcome.typed-field-height": CarryOnLayout.MacWelcome.typedFieldHeight,
         "layout.mac-welcome.mic-size": CarryOnLayout.MacWelcome.micSize,
         "layout.mac-welcome.hint-width": CarryOnLayout.MacWelcome.hintWidth,
         "layout.landing-tip.padding-y": CarryOnLayout.LandingTip.paddingY,
