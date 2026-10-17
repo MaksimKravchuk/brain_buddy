@@ -1,10 +1,15 @@
 #if canImport(SwiftUI) && os(macOS)
+    import AppKit
+    import BrainBuddyCore
+    import BrainBuddyPersistence
+    import BrainBuddyWorkspace
     import BrainBuddyDesign
     import BrainBuddyDesignTestSupport
     import SwiftUI
     import Testing
 
     @testable import BrainBuddyMac
+    @testable import BrainBuddyMacCore
 
     /// The Mac task inspector against its approved renders, light and dark: the boards' Next
     /// action, Inbox "What is it?", Waiting for, Someday, Done, Not now popover and empty inspector,
@@ -84,6 +89,82 @@
                             trailingNote: "Skip")
                     }))
             assertMacSnapshot(view, named: "mac-inspector-inbox-\(appearance.rawValue)", scheme: appearance.scheme, width: 380)
+        }
+
+        /// Unlike the component-only board fixture above, this hosts the shipped inspector.
+        @Test("021_FR_009 M16 ordinary Inbox exposes only clarification choices and footer", arguments: Appearance.allCases)
+        func ordinaryInbox(appearance: Appearance) async throws {
+            CarryOnFonts.register()
+            let folder = TemporaryFolder()
+            let clock = TestClock()
+            let task = TaskRecord(
+                id: "inbox-m16", title: "the garage is a mess and Sam needs the van back",
+                details: "Preserved context", state: .inbox, tagIDs: ["calls"],
+                dueDate: CalendarDay(year: 2026, month: 11, day: 2), orderKey: 0,
+                createdAt: clock.now, updatedAt: clock.now,
+                subtasks: [SubtaskRecord(id: "inside-m16", title: "Preserved step", orderKey: 0)],
+                comments: [CommentRecord(id: "comment-m16", body: "Preserved comment", createdAt: clock.now)])
+            let workspace = Workspace(
+                store: InMemoryDocumentStore(document: StoreDocument(generation: 1, base: GTDState(tasks: [task.id: task]))),
+                sync: nil, now: clock.provider)
+            await workspace.load()
+            let model = BrainBuddyModel(workspace: workspace, localStateStore: MacLocalStateStore(directory: folder.url), now: clock.provider)
+            let view = TaskInspector(
+                task: task, model: model, title: .constant(task.title), details: .constant(task.details ?? ""),
+                waitingFor: .constant(""), projectID: .constant(task.projectID), tagIDs: .constant(task.tagIDs),
+                dueDate: .constant(task.dueDate), problem: nil, editorDirty: false,
+                inboxPosition: (1, 4), nextInboxID: "inbox-next", onCommand: { _ in },
+                onFocusChange: { _ in }, onExtrasDirtyChange: { _ in })
+                .environment(\.carryOnPlatform, .mac).environment(\.colorScheme, appearance.scheme)
+                .frame(width: 380, height: 620)
+            let host = NSHostingView(rootView: view)
+            host.appearance = NSAppearance(named: appearance == .dark ? .darkAqua : .aqua)
+            let size = NSSize(width: 380, height: 620)
+            let window = NSWindow(
+                contentRect: NSRect(origin: NSPoint(x: -10_000, y: -10_000), size: size),
+                styleMask: [.borderless], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.contentView = host
+            defer { window.close() }
+            host.frame = NSRect(origin: .zero, size: size)
+            host.layoutSubtreeIfNeeded()
+            // Let AppKit commit the newly inserted SwiftUI subtree before caching its display.
+            await withCheckedContinuation { continuation in
+                DispatchQueue.main.async { continuation.resume() }
+            }
+            host.layoutSubtreeIfNeeded()
+            host.displayIfNeeded()
+            let nativeViews = descendants(host)
+            #expect(!nativeViews.compactMap { $0 as? NSTextView }.contains { $0.string == task.details }, "M16 omits the Note editor")
+            #expect(!nativeViews.contains { $0 is NSPopUpButton || $0 is NSDatePicker }, "M16 omits generic property editors")
+            let extraEditors = nativeViews.compactMap { $0 as? NSTextField }.filter {
+                ["New step", "Write a comment"].contains($0.placeholderString ?? "")
+            }
+            #expect(extraEditors.count == 2 && extraEditors.allSatisfy { !$0.isEnabled && !$0.canBecomeKeyView })
+            #expect(workspace.task(task.id) == task, "Rendering must preserve all stored metadata")
+            let scale = window.backingScaleFactor
+            #expect(scale == 1 || scale == 2)
+            let bitmap = try #require(NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: Int(size.width * 2), pixelsHigh: Int(size.height * 2),
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+            bitmap.size = size
+            host.cacheDisplay(in: host.bounds, to: bitmap)
+            let brightness = stride(from: 0, to: bitmap.pixelsHigh, by: 10).flatMap { y in
+                stride(from: 0, to: bitmap.pixelsWide, by: 10).compactMap { x in
+                    bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB)?.redComponent
+                }
+            }
+            try #require((brightness.max() ?? 0) - (brightness.min() ?? 0) > 0.2, "Native inspector capture must contain rendered content")
+            let image = try #require(bitmap.cgImage)
+            assertMacSnapshot(
+                Image(decorative: image, scale: 2).frame(width: 380, height: 620),
+                named: "mac-inspector-inbox-ordinary-\(appearance.rawValue)-native\(Int(scale))x",
+                scheme: appearance.scheme, width: 380)
+        }
+
+        private func descendants(_ view: NSView) -> [NSView] {
+            [view] + view.subviews.flatMap(descendants)
         }
 
         @Test("The Waiting for inspector renders as approved", arguments: Appearance.allCases)
