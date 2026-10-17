@@ -28,13 +28,13 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from app.exceptions import NotFoundError
 from app.utils.time import utcnow
 
 from .a2a.client import A2A_TASK_NOT_FOUND
-from .domain import observation_is_suspended
+from .domain import TERMINAL_REPORTED_STATES, observation_is_suspended
 
 if TYPE_CHECKING:  # pragma: no cover - imported for typing only
     from .service import AgentRelayService
@@ -364,6 +364,36 @@ class AgentObserver:
         except NotFoundError:
             return True
         return run.exchange_state != "interrupted"
+
+    def reconciliation_outcome(
+        self, owner_id: str, run_id: str
+    ) -> Literal["settled", "abandoned", "uncertain"]:
+        """How an earlier lookup's uncertainty stands now, from local state only.
+
+        No network call: the user's own **Check again** and **Stop run** already
+        act on the run, so the run row is where their decision is recorded.
+
+        - ``settled``: the run is gone, or its exchange is no longer
+          ``interrupted`` (a check adopted or resent it, which closed it).
+        - ``abandoned``: still ``interrupted``, but the user stopped the run, so
+          there is nothing left to confirm. A stop leaves the exchange as it was
+          and records the agent's answer on the run: a terminal reported state,
+          or a task the agent no longer holds.
+        - ``uncertain``: still ``interrupted`` and still waiting on the user.
+        """
+
+        try:
+            run = self.service.agent_repo.get_run(run_id, owner_id=owner_id)
+        except NotFoundError:
+            return "settled"
+        if run.exchange_state != "interrupted":
+            return "settled"
+        if (
+            run.reported_state in TERMINAL_REPORTED_STATES
+            or run.agent_task_missing_at is not None
+        ):
+            return "abandoned"
+        return "uncertain"
 
     # --- the observation lane -----------------------------------------------
 

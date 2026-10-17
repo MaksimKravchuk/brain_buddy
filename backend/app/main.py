@@ -405,7 +405,7 @@ def _install_durable_scheduler(
     )
     handoff.assign(Responsibility.PRIVACY_RETENTION, owned)
     observer = container.agent_observer
-    agent.register(AgentObservationAdapter(observer, gate))
+    agent.register(AgentObservationAdapter(observer, gate, container.job_repository))
     handoff.assign(Responsibility.AGENT_OBSERVATION, owned)
     agent.register(
         AgentRecoveryAdapter(observer, gate, container.job_repository, now=now)

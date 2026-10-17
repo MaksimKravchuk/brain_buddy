@@ -38,6 +38,7 @@ from app.modules.tasks.jobs.execution import (
     current_writer_origin,
 )
 from app.modules.tasks.jobs.worker import JobContext, JobRegistry, JobWorker
+from app.schemas.agents import AgentCheckDeliveryRequest
 from app.schemas.tasks import TaskCreateRequest, TaskUpdateRequest
 from tests.allure_evidence import check_equal
 
@@ -101,7 +102,9 @@ class Rig:
         return observer
 
     def observation(self, observer: AgentObserver | None = None) -> Any:
-        return AgentObservationAdapter(observer or self.make_observer(), self.gate)
+        return AgentObservationAdapter(
+            observer or self.make_observer(), self.gate, self.jobs
+        )
 
     def recovery(self, observer: AgentObserver | None = None) -> AgentRecoveryAdapter:
         return AgentRecoveryAdapter(
@@ -378,7 +381,7 @@ def test_026_SC_007_a_running_scheduler_thread_blocks_the_handoff(rig: Rig) -> N
     assert observer.start() is True
 
     with pytest.raises(SchedulerOverlapError):
-        AgentObservationAdapter(observer, rig.gate)
+        AgentObservationAdapter(observer, rig.gate, rig.jobs)
     with pytest.raises(SchedulerOverlapError):
         observer.observe_due()
 
@@ -741,3 +744,129 @@ def test_026_SC_007_a_recovery_lookup_after_the_lease_is_lost_writes_nothing(
     assert record is not None
     assert record.status is not JobStatus.SUCCEEDED
     assert rig.a2a.calls_to("SendMessage") == []
+
+
+# --- parked lookups follow the user's decision (issue #516) ------------------
+
+
+def park_lookup(rig: Rig, run_id: str) -> str:
+    """Run the sweep, then a lookup the agent cannot answer: the job is parked."""
+
+    worker = rig.worker(rig.recovery())
+    worker.ensure_schedules(due_now=True)
+    worker.run_once()
+    job_id = rig.lookup_job_id(run_id)
+    rig.a2a.script("ListTasks", A2AResult(ok=True, correlation_id="c"))
+    worker.run_once()
+    assert status_of(rig, job_id) is JobStatus.RECONCILIATION_REQUIRED
+    return job_id
+
+
+def status_of(rig: Rig, job_id: str) -> JobStatus:
+    record = rig.jobs.get(job_id)
+    assert record is not None
+    return record.status
+
+
+def run_observation_pass(rig: Rig) -> None:
+    worker = rig.worker(rig.observation())
+    worker.ensure_schedules(due_now=True)
+    assert worker.run_once()
+
+
+def check_again_finds_the_task(rig: Rig, run_id: str) -> None:
+    rig.a2a.script(
+        "ListTasks",
+        A2AResult(ok=True, correlation_id="c", tasks=(agent_task("t-found", run_id),)),
+    )
+    rig.service.check_delivery(
+        run_id,
+        AgentCheckDeliveryRequest(),
+        owner_id=OWNER,
+        idempotency_key="idem-check",
+    )
+    assert rig.exchange_of(run_id) == "closed"
+
+
+def test_026_SC_007_a_parked_lookup_the_user_settled_by_checking_again_succeeds(
+    rig: Rig,
+) -> None:
+    run_id = rig.open_exchange("exchange-a")
+    job_id = park_lookup(rig, run_id)
+    check_again_finds_the_task(rig, run_id)
+    lookups = len(rig.a2a.calls_to("ListTasks"))
+
+    run_observation_pass(rig)
+
+    assert status_of(rig, job_id) is JobStatus.SUCCEEDED
+    # The reconcile pass only reads local state: no lookup, and never a send.
+    assert len(rig.a2a.calls_to("ListTasks")) == lookups
+    assert rig.a2a.calls_to("SendMessage") == []
+
+
+def test_026_SC_007_a_parked_lookup_for_a_run_that_is_gone_succeeds(
+    rig: Rig,
+) -> None:
+    run_id = rig.open_exchange("exchange-a")
+    job_id = park_lookup(rig, run_id)
+    rig.repo.delete_all_for_owner(owner_id=OWNER)
+
+    run_observation_pass(rig)
+
+    assert status_of(rig, job_id) is JobStatus.SUCCEEDED
+
+
+def test_014_AC_032_a_parked_lookup_for_a_run_stopped_while_interrupted_fails(
+    rig: Rig,
+) -> None:
+    run_id = rig.open_exchange("exchange-a")
+    job_id = park_lookup(rig, run_id)
+    rig.a2a.script(
+        "CancelTask",
+        A2AResult(
+            ok=True,
+            correlation_id="c",
+            task=observed_task("t1", run_id, "TASK_STATE_CANCELED"),
+        ),
+    )
+    rig.service.cancel_run(run_id, owner_id=OWNER, idempotency_key="idem-cancel")
+    assert rig.exchange_of(run_id) == "interrupted"
+
+    run_observation_pass(rig)
+
+    assert status_of(rig, job_id) is JobStatus.FAILED
+    assert rig.a2a.calls_to("SendMessage") == []
+
+
+def test_026_SC_007_a_parked_lookup_for_a_run_awaiting_the_user_stays_parked(
+    rig: Rig,
+) -> None:
+    run_id = rig.open_exchange("exchange-a")
+    job_id = park_lookup(rig, run_id)
+
+    run_observation_pass(rig)
+    rig.recovery().boot_sweep()
+
+    assert status_of(rig, job_id) is JobStatus.RECONCILIATION_REQUIRED
+    assert rig.exchange_of(run_id) == "interrupted"
+
+
+def test_014_AC_032_a_run_interrupted_again_after_a_settled_lookup_gets_a_new_one(
+    rig: Rig,
+) -> None:
+    run_id = rig.open_exchange("exchange-a")
+    first_job = park_lookup(rig, run_id)
+    check_again_finds_the_task(rig, run_id)
+    # The same run is caught mid-exchange by a second restart.
+    reopened = rig.repo.get_run(run_id, owner_id=OWNER)
+    rig.repo.save_run(
+        reopened.model_copy(
+            update={"exchange_state": "open", "revision": reopened.revision + 1}
+        )
+    )
+
+    rig.recovery().boot_sweep()
+
+    assert status_of(rig, first_job) is JobStatus.SUCCEEDED
+    assert rig.exchange_of(run_id) == "interrupted"
+    assert rig.lookup_job_id(run_id) != first_job

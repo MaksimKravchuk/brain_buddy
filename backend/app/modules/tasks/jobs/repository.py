@@ -534,6 +534,17 @@ class JobRepository(SQLiteRepositorySupport):
             ).fetchone()
         return None if row is None else self._record(row)
 
+    def list_reconciliation_required(self, job_type: str) -> list[JobRecord]:
+        """Every parked job of one type, oldest first."""
+
+        with self._owned_connection() as conn:
+            rows = conn.execute(
+                f"SELECT {_COLUMNS} FROM jobs "  # noqa: S608 - module constant only
+                "WHERE job_type = ? AND status = ? ORDER BY created_at, id",
+                (job_type, JobStatus.RECONCILIATION_REQUIRED.value),
+            ).fetchall()
+        return [self._record(row) for row in rows]
+
     # --- helpers -------------------------------------------------------------
 
     @staticmethod
