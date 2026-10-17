@@ -49,7 +49,8 @@ struct WelcomeInboxView: View {
         }
         .frame(maxWidth: 560, alignment: .leading)
         .padding(.horizontal, 28)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.top, CarryOnSpace.sm)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background {
             // F-01.07: Esc skips, empty or typed. Invisible, so only its shortcut shows.
             Button("Skip", action: onSkip)
@@ -72,18 +73,20 @@ struct WelcomeInboxView: View {
                 .accessibilityLabel(FirstRunCopy.heading)
             if speechAvailable {
                 Button(action: onMic) {
-                    Image(systemName: "mic").foregroundStyle(.coTextSecondary)
+                    MacVoiceButtonFace(live: false, size: CarryOnLayout.MacWelcome.micSize)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Speak")
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(CarryOnColorStyle.coFieldBg, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .frame(height: CarryOnLayout.MacWelcome.fieldHeight)
+        .background(CarryOnColorStyle.coSurfaceCard, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay {
             if fieldFocused {
-                RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(CarryOnColorStyle.coFocusRing, lineWidth: 2)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(CarryOnColorStyle.coFocusRing, lineWidth: CarryOnLayout.FocusRing.width)
+                    .padding(-(CarryOnLayout.FocusRing.offset + CarryOnLayout.FocusRing.width))
             }
         }
     }
@@ -106,10 +109,9 @@ struct WelcomeInboxView: View {
             chip
                 .font(MacCaptureFont.chip)
                 .foregroundStyle(.coTextPrimary)
-                .padding(.horizontal, 10)
-                .frame(minHeight: 26)
-                .background(CarryOnColorStyle.coSurfaceToken, in: Capsule())
-            Text(words).font(MacRowFont.title).foregroundStyle(.coTextSecondary)
+                .frame(width: CarryOnLayout.MacWelcome.hintWidth, height: CarryOnLayout.Chip.macHeight)
+                .background(CarryOnColorStyle.coChipBg, in: Capsule())
+            Text(words).font(MacRowFont.title).foregroundStyle(.coTextPrimary)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(spoken)
