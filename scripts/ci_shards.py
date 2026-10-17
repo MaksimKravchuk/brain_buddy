@@ -331,17 +331,21 @@ def _merge_coverage(files: list[Path], output_dir: Path, version: str | None) ->
             dest = expected.setdefault(filename, {})
             for line, contexts in line_map.items():
                 dest.setdefault(line, set()).update(contexts)
+    output_dir = output_dir.resolve()
+    files = [path.resolve() for path in files]
     target = output_dir / ".coverage"
     target.unlink(missing_ok=True)
-    combined = coverage.Coverage(data_file=str(target))
-    combined.combine(data_paths=[str(path) for path in files], strict=True, keep=True)
-    combined.load()
-    actual = _context_map(combined)
-    if actual != expected:
-        raise ValueError("combined coverage contexts differ from shard union")
     previous_cwd = Path.cwd()
     try:
+        # Coverage must map relative database names in the reporting workspace.
         os.chdir(output_dir)
+        combined = coverage.Coverage(data_file=str(target), source=["app"])
+        combined.set_option("run:relative_files", True)
+        combined.combine(data_paths=[str(path) for path in files], strict=True, keep=True)
+        combined.load()
+        actual = _context_map(combined)
+        if actual != expected:
+            raise ValueError("combined coverage contexts differ from shard union")
         combined.xml_report(outfile="coverage.xml")
     finally:
         os.chdir(previous_cwd)
