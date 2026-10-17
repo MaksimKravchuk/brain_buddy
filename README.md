@@ -162,17 +162,8 @@ the optional Hermes managed-delivery mode additionally follow ADR-0010 and
 ## Documentation
 
 - `docs/mcp.md` — GPT task tools and MCP connection setup.
-- `docs/architecture_overview.md`
-- `docs/api_usage.md`
-- `docs/troubleshooting.md`
-- `docs/contributing.md`
-- `docs/performance_report_phase5.md`
-- `docs/deployment_smoke.md`
-- `docs/infrastructure_runbook.md`
-- `docs/release_checklist.md`
-- `docs/pilot_dataset.json`
 
 Historical requirements, contracts, and the phased roadmap remain under `requirements/`.
 
 ## Contributing
-Guidelines, branching strategy, and review expectations are documented in `docs/contributing.md`. We welcome issue reports captured via `docs/troubleshooting.md#reporting`.
+Contributor guidelines, commit and pull-request conventions, and the delivery workflow are documented in `AGENTS.md`.
