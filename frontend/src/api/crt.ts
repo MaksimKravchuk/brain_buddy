@@ -260,5 +260,3 @@ export const crtApi = {
     });
   }
 };
-
-export const crtClient = crtApi;

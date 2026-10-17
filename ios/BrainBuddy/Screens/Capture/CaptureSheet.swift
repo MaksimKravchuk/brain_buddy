@@ -38,6 +38,7 @@ struct CaptureSheet: View {
     @State private var showsNotes = false
     @State private var isShowingCalendar = false
     @State private var isConfirmingDiscard = false
+    @State private var isShowingVoice = false
     /// Set once Add has added the task and the sheet is closing, so a second
     /// tap during the dismissal can't add it again.
     @State private var isClosing = false
@@ -101,6 +102,10 @@ struct CaptureSheet: View {
             await workspace.prepareCapturePreview(draft)
             if Task.isCancelled { return }
             previewHold.record(workspace.capturePreview(draft), isReady: workspace.capturePreviewReadiness(draft) == .ready)
+        }
+        .sheet(isPresented: $isShowingVoice) {
+            // Added steps already carry the toast; closing this sheet too ends the capture.
+            VoiceCaptureSheet(workspace: workspace) { dismiss() }
         }
         .confirmationDialog("Discard this task?", isPresented: $isConfirmingDiscard, titleVisibility: .visible) {
             Button("Discard", role: .destructive) { dismiss() }
@@ -311,11 +316,20 @@ struct CaptureSheet: View {
 
     // MARK: Add
 
-    /// The floating glass bar. Add is on the trailing side; the board's voice
-    /// button on the leading side is not built (the app has no voice capture).
+    /// The floating glass bar. Add is on the trailing side; the voice button
+    /// on the leading side opens the on-device voice brain dump.
     private func actionBar(_ preview: CapturePreview) -> some View {
         let isEnabled = preview.isValid && !isClosing && !isSaving
         return BBGlassActionBar {
+            Button {
+                isShowingVoice = true
+            } label: {
+                VoiceButtonFace(live: false, size: 50)
+            }
+            .buttonStyle(.plain)
+            .disabled(isClosing || isSaving)
+            .accessibilityLabel(VoiceBrainDumpCopy.talk)
+            .accessibilityHint("Opens voice capture. What you say becomes steps for your Inbox.")
             Spacer(minLength: 0)
             Button {
                 add(keepOpen: false)

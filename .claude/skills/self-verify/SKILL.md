@@ -70,8 +70,7 @@ base branch's — the floor ratchets upward only. Currently **line ≥ 98.47%**,
 
 Single test: `cd backend && pytest tests/test_tree_service.py::test_create_tree -v`
 
-Clear the LRU cache between tests; use the `api_client` / service fixtures
-from `conftest.py`.
+Use the `api_client` / service fixtures from `conftest.py`.
 
 ## Frontend
 

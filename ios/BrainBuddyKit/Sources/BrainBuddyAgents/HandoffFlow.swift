@@ -2,9 +2,11 @@ import BrainBuddyAPI
 import Foundation
 import Observation
 
-/// The three calls a hand-off makes (030-FR-015, 030-FR-017). `BrainBuddyAPIClient` is the production remote.
+/// The calls a hand-off makes (030-FR-014, 030-FR-015, 030-FR-017). `BrainBuddyAPIClient` is the production
+/// remote. Opening the sheet tests each listed-ready agent again, so a stopped agent is not offered.
 public protocol HandoffRemote: Sendable {
     func agentConnections() async throws(APIError) -> [AgentConnectionDTO]
+    func testAgentConnection(id: String, idempotencyKey: UUID) async throws(APIError) -> AgentConnectionDTO
     func previewAgentHandoff(
         taskID: String, connectionID: String, includeDetails: Bool, supportingItems: [AgentContextItemDTO]
     ) async throws(APIError) -> AgentManifestDTO
@@ -81,19 +83,66 @@ public final class HandoffFlow {
         return false
     }
 
-    /// The sheet opened: ready agents only, the first selected and previewed.
+    /// The sheet opened: agents listed ready are tested again, and only those still ready are offered, the
+    /// first selected and previewed. A stored "ready" can outlive the agent's process (manual check A-17).
     public func start() async {
         phase = .loadingAgents
         guard await availability.confirmOnline() else { return phase = .failed(.offline) }
         let owner = availability.ownerID
         do throws(APIError) {
-            let ready = try await remote.agentConnections().filter(\.readyForHandoff).map(HandoffAgent.init)
+            let listed = try await remote.agentConnections().filter(\.readyForHandoff)
             guard owner == availability.ownerID else { return }
+            let tested = await Self.retest(listed, remote)
+            guard owner == availability.ownerID else { return }
+            let failures = tested.compactMap { result -> APIError? in
+                if case .failure(let error) = result { return error }
+                return nil
+            }
+            // Every test failed for want of a connection: say offline rather than "no ready agent".
+            if !tested.isEmpty, failures.count == tested.count, failures.allSatisfy(\.isNetwork) {
+                return phase = .failed(.offline)
+            }
+            // A test that fails otherwise means the agent cannot be reached: it is not offered.
+            let ready = tested.compactMap { result -> HandoffAgent? in
+                guard case .success(let connection) = result, connection.readyForHandoff else { return nil }
+                return HandoffAgent(connection)
+            }
             agents = ready
             guard let first = ready.first else { return phase = .noReadyAgent }
             await select(first.id)
         } catch {
             await fail(error, owner: owner)
+        }
+    }
+
+    /// Tests every agent at once, each with its own key; the answers keep the list's order.
+    private nonisolated static func retest(
+        _ connections: [AgentConnectionDTO], _ remote: any HandoffRemote
+    ) async -> [Result<AgentConnectionDTO, APIError>] {
+        await withTaskGroup(
+            of: (Int, Result<AgentConnectionDTO, APIError>).self,
+            returning: [Result<AgentConnectionDTO, APIError>].self
+        ) { group in
+            for (index, connection) in connections.enumerated() {
+                let id = connection.id
+                group.addTask {
+                    let answer = await HandoffFlow.test(id, remote)
+                    return (index, answer)
+                }
+            }
+            var answers: [(Int, Result<AgentConnectionDTO, APIError>)] = []
+            for await answer in group { answers.append(answer) }
+            return answers.sorted { $0.0 < $1.0 }.map(\.1)
+        }
+    }
+
+    private nonisolated static func test(
+        _ id: String, _ remote: any HandoffRemote
+    ) async -> Result<AgentConnectionDTO, APIError> {
+        do throws(APIError) {
+            return .success(try await remote.testAgentConnection(id: id, idempotencyKey: UUID()))
+        } catch {
+            return .failure(error)
         }
     }
 

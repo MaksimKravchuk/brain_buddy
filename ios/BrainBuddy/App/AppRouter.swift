@@ -34,6 +34,10 @@ enum AppRoute: Hashable {
     case review
     /// Beta performance diagnostics (`PerformanceDiagnostics`).
     case performance
+    /// The signed-in account (spec 033, board 25).
+    case account
+    /// How you sign in (spec 033, board 26).
+    case signInMethods
 }
 
 /// Where a capture started, so the sheet can preselect the list and due date

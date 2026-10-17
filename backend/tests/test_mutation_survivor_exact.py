@@ -34,7 +34,6 @@ from app.schemas.api import (
     VersionCreateRequest,
 )
 from app.schemas.domain import TreeDocument, TreeVersionRef
-from app.services.tree_service import TreeService
 from app.services.version_service import VersionService
 
 # ---------------------------------------------------------------------------
@@ -1965,156 +1964,20 @@ def test_prepare_metadata_block_omits_layout_and_owner_when_none(
 
 
 # ---------------------------------------------------------------------------
-# _remove_tree_state — cache and index removal
+# _remove_tree_state — index removal
 # ---------------------------------------------------------------------------
 
 
-def test_remove_tree_state_clears_cache_and_index(tree_service) -> None:
+def test_remove_tree_state_clears_index(tree_service) -> None:
     tree = tree_service.create_tree(
         TreeCreateRequest(name="Remove state"), owner_id="owner"
     )
 
-    # Tree should be in cache
-    assert tree_service._cache_get(tree.id) is not None
-
     tree_service._remove_tree_state(tree.id)
 
-    assert tree_service._cache_get(tree.id) is None
     # Index should not contain the tree
     entries = tree_service.index_repo.load_all()
     assert all(entry.id != tree.id for entry in entries)
-
-
-# ---------------------------------------------------------------------------
-# _store_and_clone — returns deep copy
-# ---------------------------------------------------------------------------
-
-
-def test_store_and_clone_returns_independent_copy(tree_service) -> None:
-    from app.schemas.domain import TreeDocument
-
-    timestamp = datetime(2026, 1, 1, tzinfo=UTC)
-    tree = TreeDocument(
-        id="clone_tree",
-        title="Clone",
-        owner_id="owner",
-        created_at=timestamp,
-        updated_at=timestamp,
-        nodes=[],
-        relations=[],
-    )
-
-    clone = tree_service._store_and_clone(tree)
-
-    assert clone.id == tree.id
-    # Mutating clone should not affect cache
-    clone.title = "Modified"
-    cached = tree_service._cache_get(tree.id)
-    assert cached is not None
-    assert cached.title == "Clone"
-
-
-# ---------------------------------------------------------------------------
-# _cache_store — LRU eviction
-# ---------------------------------------------------------------------------
-
-
-def test_cache_store_evicts_lru_when_full(tree_service) -> None:
-    from app.schemas.domain import TreeDocument
-
-    timestamp = datetime(2026, 1, 1, tzinfo=UTC)
-    # Fill cache to max (default 16)
-    for i in range(16):
-        tree = TreeDocument(
-            id=f"cache_{i}",
-            title=f"T{i}",
-            owner_id="owner",
-            created_at=timestamp,
-            updated_at=timestamp,
-            nodes=[],
-            relations=[],
-        )
-        tree_service._cache_store(tree)
-
-    # All 16 should be in cache
-    for i in range(16):
-        assert tree_service._cache_get(f"cache_{i}") is not None
-
-    # Add one more → should evict cache_0 (LRU)
-    extra = TreeDocument(
-        id="cache_16",
-        title="T16",
-        owner_id="owner",
-        created_at=timestamp,
-        updated_at=timestamp,
-        nodes=[],
-        relations=[],
-    )
-    tree_service._cache_store(extra)
-
-    assert tree_service._cache_get("cache_0") is None
-    assert tree_service._cache_get("cache_16") is not None
-
-
-def test_cache_store_evicts_oldest_entry_first(tree_service) -> None:
-    service = TreeService(
-        tree_service.tree_repo, tree_service.index_repo, cache_maxsize=2
-    )
-    timestamp = datetime(2026, 1, 1, tzinfo=UTC)
-
-    for identifier in ("first", "second", "third"):
-        service._cache_store(
-            TreeDocument(
-                id=identifier,
-                title=identifier,
-                owner_id="owner",
-                created_at=timestamp,
-                updated_at=timestamp,
-                nodes=[],
-                relations=[],
-            )
-        )
-
-    assert list(service._cache) == ["second", "third"]
-    assert service._cache_get("first") is None
-    assert service._cache_get("second") is not None
-    assert service._cache_get("third") is not None
-
-
-def test_cache_get_refreshes_entry_before_lru_eviction(tree_service) -> None:
-    service = TreeService(
-        tree_service.tree_repo, tree_service.index_repo, cache_maxsize=2
-    )
-    timestamp = datetime(2026, 1, 1, tzinfo=UTC)
-
-    for identifier in ("first", "second"):
-        service._cache_store(
-            TreeDocument(
-                id=identifier,
-                title=identifier,
-                owner_id="owner",
-                created_at=timestamp,
-                updated_at=timestamp,
-                nodes=[],
-                relations=[],
-            )
-        )
-
-    assert service._cache_get("first") is not None
-    service._cache_store(
-        TreeDocument(
-            id="third",
-            title="third",
-            owner_id="owner",
-            created_at=timestamp,
-            updated_at=timestamp,
-            nodes=[],
-            relations=[],
-        )
-    )
-
-    assert list(service._cache) == ["first", "third"]
-    assert service._cache_get("second") is None
 
 
 # ---------------------------------------------------------------------------
@@ -2356,6 +2219,9 @@ def test_mutate_tree_bumps_equal_timestamp_once_and_returns_a_defensive_copy(
     assert result.metadata["updated_at"] == expected_updated_at
     assert saved[0].updated_at == expected_updated_at
     assert result is not saved[0]
+    # Deep, not shallow: a callback that keeps the saved document must not
+    # share mutable state with what the caller gets back.
+    assert result.metadata is not saved[0].metadata
 
 
 # ---------------------------------------------------------------------------
@@ -2366,7 +2232,7 @@ def test_mutate_tree_bumps_equal_timestamp_once_and_returns_a_defensive_copy(
 def test_update_tree_uses_actor_owner_and_publishes_independent_state(
     tree_service,
 ) -> None:
-    from app.schemas.api import NodeResponse, TreeMetadata, TreeUpdateRequest
+    from app.schemas.api import NodeResponse, TreeMetadata
 
     original = tree_service.create_tree(
         TreeCreateRequest(name="Initial"), owner_id="owner"
@@ -2393,7 +2259,7 @@ def test_update_tree_uses_actor_owner_and_publishes_independent_state(
     )
 
     updated = tree_service.update_tree(original.id, payload, owner_id="owner")
-    cached = tree_service._cache_get(original.id)
+    stored = tree_service.get_tree(original.id)
     index_entry = next(
         entry for entry in tree_service.index_repo.load_all() if entry.id == original.id
     )
@@ -2405,11 +2271,8 @@ def test_update_tree_uses_actor_owner_and_publishes_independent_state(
         "owner_id": "owner",
     }
     assert updated.nodes[0].id == "kept-node"
-    assert cached is not None
-    assert cached.title == "Updated"
+    assert stored.title == "Updated"
     assert index_entry.title == "Updated"
-    assert updated.nodes[0] is not cached.nodes[0]
-    assert updated.metadata is not cached.metadata
 
 
 # ---------------------------------------------------------------------------
@@ -2653,17 +2516,16 @@ def test_generate_ai_feedback_uses_half_node_relation_gap_threshold(
 
 
 # ---------------------------------------------------------------------------
-# TreeService — derived state removal, cache ownership, metadata merging
+# TreeService — derived state removal, metadata merging
 # ---------------------------------------------------------------------------
 
 
-def test_remove_stale_tree_state_is_idempotent_for_uncached_and_unindexed_trees(
+def test_remove_stale_tree_state_is_idempotent_for_unindexed_trees(
     tree_service,
 ) -> None:
     """Account-purge retries must survive state that is already gone."""
 
-    # Never cached and never indexed: both the cache pop and the index delete
-    # have to tolerate a miss rather than raise.
+    # Never indexed: the index delete has to tolerate a miss rather than raise.
     tree_service.remove_stale_tree_state("tree_never_created")
 
     tree = tree_service.create_tree(TreeCreateRequest(name="Stale"), owner_id="owner")
@@ -2671,7 +2533,6 @@ def test_remove_stale_tree_state_is_idempotent_for_uncached_and_unindexed_trees(
     tree_service.remove_stale_tree_state(tree.id)
 
     assert tree_service.list_trees(owner_id="owner") == []
-    assert tree_service._cache_get(tree.id) is None
 
 
 def test_build_tree_metadata_defaults_version_to_one_when_metadata_omits_it(
@@ -2745,157 +2606,10 @@ def test_sync_index_carries_the_tree_description_into_the_index_entry(
     ]
 
 
-def test_cache_maxsize_floor_is_one_entry_not_two(tree_service) -> None:
-    service = TreeService(
-        tree_service.tree_repo, tree_service.index_repo, cache_maxsize=1
-    )
-    first = tree_service.create_tree(TreeCreateRequest(name="First"), owner_id="owner")
-    second = tree_service.create_tree(
-        TreeCreateRequest(name="Second"), owner_id="owner"
-    )
-
-    service.get_tree(first.id)
-    service.get_tree(second.id)
-
-    assert service._cache_get(first.id) is None
-    assert service._cache_get(second.id) is not None
-
-
-# ---------------------------------------------------------------------------
-# TreeService — no caller-visible object may alias cached state
-# ---------------------------------------------------------------------------
-
-
 def _node_payload(label: str = "Original") -> NodeResponse:
     return NodeResponse(
         id="node_a", label=label, type="child", position=Position(x=1, y=2)
     )
-
-
-def test_get_tree_warms_the_cache_and_returns_an_independent_deep_copy(
-    tree_service,
-) -> None:
-    tree = tree_service.create_tree(
-        TreeCreateRequest(name="Cached", nodes=[_node_payload()]), owner_id="owner"
-    )
-
-    # A second service over the same storage starts with a cold cache, so the
-    # read itself is what has to populate it.
-    cold = TreeService(tree_service.tree_repo, tree_service.index_repo)
-    returned = cold.get_tree(tree.id)
-
-    cached = cold._cache_get(tree.id)
-    assert cached is not None
-    assert returned is not cached
-    assert returned.nodes[0] is not cached.nodes[0]
-
-    returned.nodes[0].label = "Tampered by the caller"
-    assert cold._cache_get(tree.id).nodes[0].label == "Original"
-
-
-def test_create_tree_returns_a_copy_the_caller_cannot_corrupt_the_cache_through(
-    tree_service,
-) -> None:
-    created = tree_service.create_tree(
-        TreeCreateRequest(name="Clone", nodes=[_node_payload()]), owner_id="owner"
-    )
-
-    cached = tree_service._cache_get(created.id)
-    assert cached is not None
-    assert created.nodes[0] is not cached.nodes[0]
-
-    created.nodes[0].label = "Tampered by the caller"
-    assert tree_service._cache_get(created.id).nodes[0].label == "Original"
-
-
-def test_mutate_tree_returns_a_copy_the_caller_cannot_corrupt_the_cache_through(
-    tree_service,
-) -> None:
-    tree = tree_service.create_tree(
-        TreeCreateRequest(name="Mutated", nodes=[_node_payload()]), owner_id="owner"
-    )
-
-    updated = tree_service.mutate_tree(
-        tree.id, lambda current: current.model_copy(update={"title": "Renamed"})
-    )
-
-    cached = tree_service._cache_get(tree.id)
-    assert cached is not None
-    assert updated.nodes[0] is not cached.nodes[0]
-
-    updated.nodes[0].label = "Tampered by the caller"
-    assert tree_service._cache_get(tree.id).nodes[0].label == "Original"
-
-
-def test_update_tree_does_not_alias_caller_node_objects_into_stored_state(
-    tree_service,
-) -> None:
-    tree = tree_service.create_tree(
-        TreeCreateRequest(name="Aliasing", nodes=[_node_payload()]), owner_id="owner"
-    )
-
-    payload_position = Position(x=10, y=20)
-    payload = TreeUpdateRequest(
-        name="Renamed",
-        metadata=TreeMetadata(
-            version=1,
-            created_at=tree.created_at,
-            updated_at=tree.updated_at,
-            layout=None,
-            owner_id="owner",
-        ),
-        nodes=[
-            NodeResponse(
-                id="node_a", label="Kept", type="child", position=payload_position
-            )
-        ],
-        relations=[],
-    )
-
-    tree_service.update_tree(tree.id, payload, owner_id="owner")
-
-    cached = tree_service._cache_get(tree.id)
-    assert cached is not None
-    assert cached.nodes[0].position is not payload_position
-
-    payload_position.x = 999.0
-    assert tree_service._cache_get(tree.id).nodes[0].position.x == 10
-
-
-def test_update_tree_does_not_alias_nested_caller_metadata_into_stored_state(
-    tree_service,
-) -> None:
-    tree = tree_service.create_tree(TreeCreateRequest(name="Layout"), owner_id="owner")
-
-    pan = {"x": 0, "y": 0}
-    payload = TreeUpdateRequest(
-        name="Renamed",
-        metadata=TreeMetadata(
-            version=1,
-            created_at=tree.created_at,
-            updated_at=tree.updated_at,
-            layout={"zoom": 2, "pan": pan},
-            owner_id="owner",
-        ),
-        nodes=[],
-        relations=[],
-    )
-
-    tree_service.update_tree(tree.id, payload, owner_id="owner")
-
-    cached = tree_service._cache_get(tree.id)
-    assert cached is not None
-    assert cached.metadata["layout"] == {"zoom": 2, "pan": {"x": 0, "y": 0}}
-    # Validating ``layout`` rebuilds the outer dict but keeps the dicts nested
-    # inside it, so the service's own deep copy is the only thing standing
-    # between a caller's object and stored tree state.
-    assert cached.metadata["layout"]["pan"] is not pan
-
-    pan["x"] = 999
-    assert tree_service._cache_get(tree.id).metadata["layout"]["pan"] == {
-        "x": 0,
-        "y": 0,
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -2970,33 +2684,6 @@ def test_create_version_stores_a_deep_copy_of_the_live_tree(
 
     source.nodes[0].label = "Tampered after the snapshot"
     assert version.tree.nodes[0].label == "Original"
-
-
-def test_restore_version_does_not_alias_the_loaded_snapshot_into_cached_state(
-    version_service, tree_service, monkeypatch
-) -> None:
-    tree = tree_service.create_tree(
-        TreeCreateRequest(name="Restore copy", nodes=[_node_payload()]),
-        owner_id="owner",
-    )
-    version = version_service.create_version(tree.id, VersionCreateRequest(label="v1"))
-
-    captured: dict[str, object] = {}
-    load_version = version_service.load_version
-
-    def spy(tree_id: str, version_id: str):
-        document = load_version(tree_id, version_id)
-        captured["snapshot"] = document
-        return document
-
-    monkeypatch.setattr(version_service, "load_version", spy)
-
-    version_service.restore_version(tree.id, version.id)
-
-    snapshot = captured["snapshot"]
-    cached = tree_service._cache_get(tree.id)
-    assert cached is not None
-    assert cached.nodes[0] is not snapshot.tree.nodes[0]
 
 
 def test_restore_version_appends_a_ref_carrying_the_full_snapshot_metadata(

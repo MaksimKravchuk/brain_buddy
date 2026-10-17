@@ -788,21 +788,6 @@ public struct RustWorkspaceReviewFormCount: Sendable {
     public let projectionGeneration: String
 }
 
-public struct RustWorkspaceSourceIdentityRequest: Sendable {
-    public let entityType: String
-    public let canonicalID: String
-    public init(entityType: String, canonicalID: String) {
-        self.entityType = entityType
-        self.canonicalID = canonicalID
-    }
-}
-
-public struct RustWorkspaceSourceIdentityBinding: Sendable {
-    public let entityType: String
-    public let canonicalID: String
-    public let sourceID: String?
-}
-
 public enum RustWorkspaceStoreStatus: Equatable, Sendable {
     case ready
     case readOnlyRecovery(found: Int64)
@@ -1052,14 +1037,6 @@ public final class RustWorkspaceRuntime: Sendable {
         }
     }
 
-    public func captureLegacyReview() async throws -> RustWorkspaceLegacyReview {
-        try await offActor { workspace in
-            let source = try workspace.captureLegacyReview()
-            return RustWorkspaceLegacyReview(token: source.token, review: source.review, aliases: source.aliases,
-                sourceCounts: source.sourceCounts, alreadyActive: source.alreadyActive)
-        }
-    }
-
     /// The importer already owns the verified source document. Only immutable
     /// token/count metadata crosses this port; no private legacy body does.
     public func captureLegacyReviewMetadata() async throws -> RustWorkspaceLegacyReviewMetadata {
@@ -1153,15 +1130,6 @@ public final class RustWorkspaceRuntime: Sendable {
 
     public func syncStatus() async throws -> Data {
         try await offActor { workspace in try workspace.syncStatus() }
-    }
-
-    public func reverseIdentities(_ requests: [RustWorkspaceSourceIdentityRequest]) async throws -> [RustWorkspaceSourceIdentityBinding] {
-        let items = requests.map { BridgeSourceIdentityRequest(entityType: $0.entityType, canonicalId: $0.canonicalID) }
-        return try await offActor { workspace in
-            try workspace.reverseIdentities(items: items).map {
-                RustWorkspaceSourceIdentityBinding(entityType: $0.entityType, canonicalID: $0.canonicalId, sourceID: $0.sourceId)
-            }
-        }
     }
 
     public func loadReviewForm(_ key: String, now: Date) async throws -> RustWorkspaceReviewFormLoaded {

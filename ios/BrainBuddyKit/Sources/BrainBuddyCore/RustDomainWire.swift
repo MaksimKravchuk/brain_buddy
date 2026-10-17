@@ -51,11 +51,6 @@ extension Dictionary where Key == String, Value == Any {
         return value
     }
 
-    func optionalCounter(_ key: String) -> Int? {
-        guard let text = self[key] as? String else { return nil }
-        return Int(text)
-    }
-
     func object(_ key: String) throws -> WireObject {
         guard let value = self[key] as? WireObject else { throw RustDomainError.malformedResult }
         return value

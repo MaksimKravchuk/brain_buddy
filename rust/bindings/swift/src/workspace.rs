@@ -118,17 +118,6 @@ pub struct BridgeIdentityBinding {
 }
 
 #[derive(Clone, Debug, uniffi::Record)]
-pub struct BridgeSourceIdentityRequest {
-    pub entity_type: String,
-    pub canonical_id: String,
-}
-#[derive(Clone, Debug, uniffi::Record)]
-pub struct BridgeSourceIdentityBinding {
-    pub entity_type: String,
-    pub canonical_id: String,
-    pub source_id: Option<String>,
-}
-#[derive(Clone, Debug, uniffi::Record)]
 pub struct BridgeReviewForm {
     pub text: String,
     pub saved_at: String,
@@ -197,14 +186,6 @@ pub struct BridgeLegacyReviewMetadata {
     pub already_active: bool,
 }
 
-#[derive(Clone, Debug, uniffi::Record)]
-pub struct BridgeLegacyReviewCapture {
-    pub token: Vec<u8>,
-    pub review: Vec<u8>,
-    pub aliases: Vec<u8>,
-    pub source_counts: Vec<u8>,
-    pub already_active: bool,
-}
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct BridgeLegacyReviewPrepared {
     pub token: Vec<u8>,
@@ -1462,35 +1443,6 @@ impl BridgeWorkspace {
         })?)
     }
 
-    pub fn reverse_identities(
-        &self,
-        items: Vec<BridgeSourceIdentityRequest>,
-    ) -> Result<Vec<BridgeSourceIdentityBinding>, BridgeError> {
-        let typed = items
-            .iter()
-            .map(|item| {
-                Ok((
-                    bb_protocol::catalog::EntityType::from_wire(&item.entity_type)
-                        .ok_or_else(|| Failure::new("INVALID_REQUEST", Some("entity_type")))?,
-                    item.canonical_id.clone(),
-                ))
-            })
-            .collect::<Result<Vec<_>, Failure>>()?;
-        Ok(self.with_store(|store| {
-            let sources = bb_client::reverse_workspace_identities(store, &typed)
-                .map_err(form_query_failure)?;
-            Ok(items
-                .into_iter()
-                .zip(sources)
-                .map(|(item, source_id)| BridgeSourceIdentityBinding {
-                    entity_type: item.entity_type,
-                    canonical_id: item.canonical_id,
-                    source_id,
-                })
-                .collect())
-        })?)
-    }
-
     pub fn load_review_form(
         &self,
         key: String,
@@ -1609,19 +1561,6 @@ impl BridgeWorkspace {
             let capture = bb_client::capture_legacy_review(store).map_err(review_failure)?;
             Ok(BridgeLegacyReviewMetadata {
                 token: to_json(&capture.token)?,
-                source_counts: to_json(&capture.source_counts)?,
-                already_active: capture.already_active,
-            })
-        })?)
-    }
-
-    pub fn capture_legacy_review(&self) -> Result<BridgeLegacyReviewCapture, BridgeError> {
-        Ok(self.with_store(|store| {
-            let capture = bb_client::capture_legacy_review(store).map_err(review_failure)?;
-            Ok(BridgeLegacyReviewCapture {
-                token: to_json(&capture.token)?,
-                review: to_json(&capture.review)?,
-                aliases: to_json(&capture.aliases)?,
                 source_counts: to_json(&capture.source_counts)?,
                 already_active: capture.already_active,
             })

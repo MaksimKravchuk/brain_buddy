@@ -6853,7 +6853,7 @@ class TestKeyRotationPreservesAtMostOnce:
 
         clock.advance(IDENTIFIER_RETENTION + timedelta(hours=1))
         setup.agent_repo.purge_expired_idempotency(owner_id=OWNER, now=clock())
-        assert setup.agent_repo.expire_due_identifiers(now=clock()) == 1
+        assert len(setup.agent_repo.expire_due_identifier_runs(now=clock())) == 1
 
         retired = self._pushable_service(tmp_path, clock, retired_ring(), a2a_client)
 
@@ -8313,7 +8313,7 @@ class TestDisconnectAndBoundedEvidence:
         ).read_text(encoding="utf-8")
 
         assert "expire_due_content" in doc
-        assert "expire_due_identifiers" in doc
+        assert "expire_due_identifier_runs" in doc
         assert "purge_expired_audit" in doc
         assert "30" in doc and "90" in doc
         assert "relay/relay.json" in doc
