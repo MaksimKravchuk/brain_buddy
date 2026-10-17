@@ -544,4 +544,31 @@ struct VoiceBrainDumpModelTests {
                  VoiceBrainDumpCopy.talkAgain, VoiceBrainDumpCopy.adding]
             == ["Starting…", "Listening", "Finishing…", "Tap to talk again", "Adding…"])
     }
+
+    @Test("031-SC-001 three actions said with pauses become three Inbox tasks with one tap, offline and signed out")
+    func sc001_three_actions_one_tap() async {
+        let workspace = await loadedWorkspace()
+        let speech = FakeSpeech()
+        let ids = StepIDs()
+        let model = VoiceBrainDumpModel(
+            speech: speech, extractor: SentenceStepExtractor(), port: workspace, language: .russian,
+            makeID: { ids.make() }, sleep: { _ in })
+        await model.start()
+
+        // On-device recognition starts over after each pause; the transcript keeps every utterance.
+        var transcript = SpeechTranscript()
+        for (result, ends) in [("Купить", false), ("Купить молоко", true), ("Позвонить маме", true),
+                               ("Записаться", false), ("Записаться к врачу", false)]
+        {
+            speech.say(transcript.receive(result, endsUtterance: ends))
+            await model.pendingRead?.value
+        }
+        #expect(model.steps.map(\.title) == ["Купить молоко", "Позвонить маме", "Записаться к врачу"])
+
+        // The one tap: the add button stops listening and adds every listed step.
+        await model.add()
+        #expect(model.phase == .saved(count: 3))
+        let inbox = workspace.state.tasks.values.filter { $0.state == .inbox }.map(\.title)
+        #expect(Set(inbox) == ["Купить молоко", "Позвонить маме", "Записаться к врачу"])
+    }
 }
