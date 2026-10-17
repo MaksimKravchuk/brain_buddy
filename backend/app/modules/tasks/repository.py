@@ -77,7 +77,6 @@ class TaskRepository(ReviewRepositoryMixin, SQLiteRepositorySupport, BaseReposit
         super().__init__(root)
         self.db_path = self.resolve("tasks.sqlite3")
         self._initialize_database()
-        self._migrate_legacy_json_once()
         self._mark_detached_archives()
 
     @contextmanager
@@ -288,59 +287,6 @@ class TaskRepository(ReviewRepositoryMixin, SQLiteRepositorySupport, BaseReposit
                 """)
             self._initialize_review_tables(conn, utcnow())
             initialize(conn)
-
-    def _migrate_legacy_json_once(self) -> None:
-        with self._owned_connection() as conn:
-            seen = conn.execute(
-                "SELECT 1 FROM migration_ledger WHERE id = ?", ("legacy-json-v1",)
-            ).fetchone()
-            if seen is not None:
-                return
-            conn.execute("BEGIN IMMEDIATE")
-            try:
-                counts = {"projects": 0, "tags": 0, "tasks": 0}
-                for path in self.resolve("projects").glob("*/*.json"):
-                    project = self.load_model(path, ProjectDocument)
-                    project = project.model_copy(
-                        update={
-                            "name": display_project_name(project.name),
-                            "normalized_name": project.normalized_name
-                            or normalize_task_name(project.name),
-                        }
-                    )
-                    self._upsert_project(conn, project)
-                    counts["projects"] += 1
-                for path in self.resolve("contexts").glob("*/*.json"):
-                    tag = self.load_model(path, TagDocument)
-                    tag = tag.model_copy(
-                        update={
-                            "name": display_tag_name(tag.name),
-                            "normalized_name": tag.normalized_name
-                            or normalize_task_name(tag.name, strip_tag_prefix=True),
-                            "state": (
-                                "deleted" if tag.state == "archived" else tag.state
-                            ),
-                        }
-                    )
-                    self._upsert_tag(conn, tag)
-                    counts["tags"] += 1
-                for path in self.resolve("tasks").glob("*/*.json"):
-                    task = self.load_model(path, TaskDocument)
-                    task = task.model_copy(update={"tag_ids": task.tag_ids})
-                    self._upsert_task(conn, task)
-                    counts["tasks"] += 1
-                conn.execute(
-                    "INSERT INTO migration_ledger (id, migrated_at, payload) VALUES (?, ?, ?)",
-                    (
-                        "legacy-json-v1",
-                        utcnow().isoformat(),
-                        json.dumps(counts, sort_keys=True),
-                    ),
-                )
-                conn.commit()
-            except BaseException:
-                conn.rollback()
-                raise
 
     def _mark_detached_archives(self) -> None:
         """Flag archives made before spec 021 (data-model E1, research R12).

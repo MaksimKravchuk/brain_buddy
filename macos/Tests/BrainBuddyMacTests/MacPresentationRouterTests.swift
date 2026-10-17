@@ -16,7 +16,6 @@ struct MacPresentationRouterTests {
             (.openSyncDetails(from: .statusWords), .syncDetails(.statusWords)),
             (.openSyncDetails(from: .toolbarItem), .syncDetails(.toolbarItem)),
             (.signOut, .signOutConfirmation),
-            (.launchNotice(.upgrade), .upgradeNotice),
             (.launchNotice(.alreadyOpen), .alreadyOpen),
             (.launchNotice(.unreadableWorkspace), .unreadableWorkspace),
         ]

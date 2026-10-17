@@ -87,7 +87,6 @@ from app.services import (
 )
 from app.services.auth_apple_lifecycle import AuthAppleLifecycle
 from app.services.auth_mail_service import AuthMailService
-from app.services.auth_migration import AuthMigration
 from app.services.auth_provider_service import AuthProviderService
 from app.services.auth_secret_box import AuthSecretBox
 from app.services.auth_service import ACCOUNT_DELETION_GRACE
@@ -144,7 +143,6 @@ class Container:
     agent_relay_service: AgentRelayService
     agent_observer: AgentObserver
     task_title_autocomplete_service: TaskTitleAutocompleteService
-    auth_migration: AuthMigration
     modern_auth_service: ModernAuthService
     cli_auth_service: CliAuthService
     review_service: ReviewService
@@ -403,9 +401,6 @@ def build_container(
         else DisabledNavigatorProvider()
     )
     data_root = config.data_dir
-    auth_migration = AuthMigration(data_root, None)
-    auth_migration.resume_cleanup()
-    auth_migration.cleanup_expired_backup()
     tree_repo = TreeRepository(data_root)
     index_repo = IndexRepository(data_root)
     version_repo = VersionRepository(data_root)
@@ -733,7 +728,6 @@ def build_container(
         feature_flag_repo=feature_flag_repo,
         crt_command_repo=crt_command_repo,
         auth_service=auth_service,
-        auth_migration=auth_migration,
         reserved_emails=config.admin.operator_emails,
         deletion_grace=deletion_grace,
     )
@@ -812,7 +806,6 @@ def build_container(
         agent_relay_service=agent_relay_service,
         agent_observer=agent_observer,
         task_title_autocomplete_service=task_title_autocomplete_service,
-        auth_migration=auth_migration,
         modern_auth_service=modern_auth_service,
         cli_auth_service=CliAuthService(
             auth_service=auth_service,

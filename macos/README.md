@@ -61,8 +61,8 @@ and sign in again (`docs/native-macos-app.md`).
 
 - Swift 6.2 (`swift-tools-version: 6.2`, Swift 6 language mode), macOS 26 and Xcode 26.
 - `Package.swift` depends on WhisperKit (`argmax-oss-swift`, pinned in `Package.resolved`) and on
-  the local kit by path. Three targets: `BrainBuddyMacCore` (Foundation only: the upgrade
-  import, `mac-local.json`, the single-instance lock, `WorkspaceHost` and the window's model),
+  the local kit by path. Three targets: `BrainBuddyMacCore` (Foundation only: `mac-local.json`,
+  the single-instance lock, `WorkspaceHost` and the window's model),
   the `BrainBuddyMac` app, and `BrainBuddyMacTests`.
 - `swift build` also builds the kit. CI builds and tests with
   `--only-use-versions-from-resolved-file`, so a change to the remote dependencies needs a
@@ -90,34 +90,30 @@ cd macos
 swift test
 ```
 
-The suites are Swift Testing (`OfflineWorkspaceTests`, `LegacyStoreImporterTests`,
-`MacLocalStateTests`, `SingleInstanceGuardTests`, `LegacyCookieCleanupTests`,
+The suites are Swift Testing (`OfflineWorkspaceTests`,
+`MacLocalStateTests`, `SingleInstanceGuardTests`,
 `UnreadableWorkspaceTests`, `MacLaunchTests`, and for sync `MacSyncFlowTests`,
 `SyncStatusLineModelTests`, `SyncStatusPopoverModelTests`, `SyncTriggerSourceTests`,
 `MacPresentationRouterTests`, `MacPresentationGuardTests`, `MacPrivacyGuardTests`,
 `MacKeychainTests`) plus the XCTest `WeeklyReviewRowTests`. `MacKeychainTests` creates and
 deletes a temporary keychain of its own and never touches the login keychain; it fails rather
-than skips when it cannot. The legacy-store fixtures are synthetic, in
-`Tests/BrainBuddyMacTests/Resources/`. In a restricted workspace, add
+than skips when it cannot. In a restricted workspace, add
 `--disable-sandbox` and set `CLANG_MODULE_CACHE_PATH` and `SWIFT_MODULE_CACHE_PATH` to folders
 under `macos/.build` first. The kit's own tests run with `sh ios/scripts/swift-linux.sh test`.
 
 ## Files on this Mac
 
 Everything lives in `~/Library/Application Support/BrainBuddyMac/` (mode 0700):
-`store.json` (the workspace), `mac-local.json` (review marks, the import record, the sidebar's
-disclosure state; no titles, names or notes), `.instance.lock` (one running copy per folder) and,
-after an upgrade, the previous version's file renamed to `local-gtd.backup-<UTC>.json`. The
+`store.json` (the workspace), `mac-local.json` (review marks, the sidebar's disclosure state;
+no titles, names or notes) and `.instance.lock` (one running copy per folder). The
 session token is in the login keychain (service `app.brainbuddy.mac.session`), not in this folder.
 See `docs/data-retention.md` for how long each is kept.
 
-### Upgrading from the pre-sync app
+### The pre-sync app's file
 
-On the first launch after the update, `local-gtd.json` is carried over into `store.json`
-(contracts/mac-legacy-import.md): read, written to a staging file, verified against the
-original, and only then renamed into place; the original is renamed to the dated backup, never
-edited or deleted. A file that cannot be read, a file from a newer version, or a carry-over that
-does not match leaves the original exactly as it was and says so once (design X-05). A
+The one-time carry-over of the pre-sync app's `local-gtd.json` into `store.json` was retired
+(ADR-0030: no real users, so nothing to carry over); the app no longer reads, renames or deletes that
+file or its backup. A
 `store.json` that cannot be read shows "We couldn't open your tasks" with "Try again" and
 "Start fresh…"; it is never overwritten.
 
@@ -132,9 +128,8 @@ BRAINBUDDY_MAC_DATA_DIR=/tmp/bb-dry-run .build/BrainBuddyMac.app/Contents/MacOS/
 ```
 
 While the variable is set the app uses only that folder (an absolute path to an existing folder;
-anything else stops the launch instead of falling back to the real folder), leaves the old
-browser cookies and HTTP cache alone, and makes no Keychain call until a sign-in the person
-starts. Do not sign in during a dry run.
+anything else stops the launch instead of falling back to the real folder) and makes no
+Keychain call until a sign-in the person starts. Do not sign in during a dry run.
 
 The [offline QA record](offline-qa-2026-09-26.md) describes the pre-sync live journeys checked
 with network access denied to the app process; the [local extraction

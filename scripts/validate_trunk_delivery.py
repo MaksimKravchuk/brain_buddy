@@ -512,7 +512,6 @@ def _check(
 ROLLBACK_KNOWN_FEATURE_FLAGS = frozenset(
     {
         "delivery_canary",
-        "mobile_task_classification",
         "voice_brain_dump",
         "external_agent_relay",
     }
@@ -525,9 +524,8 @@ ROLLBACK_KNOWN_FEATURE_FLAGS = frozenset(
 #: omission is the OFF state every image agrees on. Changing this string is an
 #: ASK-class rollout decision.
 #:
-#: ADR-0019 (2026-08-15): `voice_brain_dump`/`mobile_task_classification`/
-#: `external_agent_relay` are now managed live through the admin portal's
-#: SQLite store, and `admin_portal` no longer exists as a flag (DD-14, DD-15)
+#: ADR-0019 (2026-08-15): `voice_brain_dump`/`external_agent_relay` are now
+#: managed live through the admin portal's SQLite store, and `admin_portal` no longer exists as a flag (DD-14, DD-15)
 #: — staging either would be inert on an already-migrated volume, so
 #: `delivery_canary` is the only entry left.
 AUTHORIZED_STAGED_FEATURE_FLAGS = "delivery_canary=internal"

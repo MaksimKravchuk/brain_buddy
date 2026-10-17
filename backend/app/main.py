@@ -81,10 +81,6 @@ def _run_privacy_maintenance_sweep(
         logger.warning("Authentication metadata cleanup deferred")
 
     try:
-        container.auth_migration.cleanup_expired_backup()
-    except Exception:  # noqa: BLE001 - a sweep failure must not kill the loop
-        logger.warning("Authentication backup cleanup deferred")
-    try:
         container.cli_auth_service.cleanup()
     except Exception:  # noqa: BLE001 - coarse diagnostics never contain grant data
         logger.warning("CLI authorization cleanup deferred")

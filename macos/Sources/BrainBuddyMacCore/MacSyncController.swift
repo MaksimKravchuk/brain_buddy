@@ -69,7 +69,7 @@ package final class MacSyncController {
         self.calendar = calendar
         self.log = log
         self.defaultServer = defaultServer
-        signOut = SignOutFlow(workspace: host.workspace, importer: host.importer, now: now, calendar: calendar, log: log)
+        signOut = SignOutFlow(workspace: host.workspace, now: now, calendar: calendar, log: log)
         line = SyncStatusLineModel(snapshot: host.workspace.syncSnapshot, now: now(), device: .mac, calendar: calendar)
     }
 
@@ -112,7 +112,7 @@ package final class MacSyncController {
     package func popoverContent() -> SyncPopoverContent {
         SyncPopoverModel.content(
             snapshot: workspace.syncSnapshot, issues: workspace.issues, state: workspace.state,
-            files: host.importer.upgradeFiles(), discarded: discards.ids, recovery: recoveryCondition, now: now(),
+            discarded: discards.ids, recovery: recoveryCondition, now: now(),
             device: .mac, calendar: calendar
         )
     }
