@@ -40,6 +40,17 @@ panel, so widening the sidebar cannot displace it. An accessibility-hidden clear
 native toolbar reservation uses that same width to keep commands above the canvas.
 Inspector state, actions, content and unsaved-edit routing are unchanged.
 
+An Escape check on `465966f1` then caught the new parent exit handler consuming
+the first-step child's existing Not yet shortcut: its panel closed while the
+persisted outcome stayed `inProgress`. Removing that parent handler restores the
+existing child cancel actions. On the corrected binary, Escape from the focused
+first-step field ends first run and exposes ordinary Inbox details; the parent's
+fresh-profile read-back is `firstRun.outcome = notYet`. A second Escape closes
+ordinary details through the existing guard. [Before](m03-escape-before.png) and
+[after both Escape actions](m03-escape-after.png) retain the actual native evidence.
+The existing Not yet model regression checks the persisted outcome; native input
+verification covers dispatch from the focused field.
+
 Owner-approved command relocation: File retains New step (Command-N), Quick Open
 (Command-O), Quick Capture (Control-Option-Shift-B), Voice to task draft, New tag,
 New project and Review projects. Edit > Find > Search tasks (Command-F) retains full
@@ -64,14 +75,20 @@ no window for drag events. The native regression verifies the enforced minimum a
 moves the real split divider at 1188pt and 1280pt through both inspector variants;
 all editable fields stay inside the window and toolbar actions precede the panel.
 
-Validation: 463 Mac tests in 50 suites pass after 48.619 seconds. The shared kit
+Validation: 463 Mac tests in 50 suites pass after 48.802 seconds. The shared kit
 passes 1,508 tests in 154 suites after 52.913 seconds with the current geometry tokens.
-The cleaned native viewport regression passes both cases after 9.561 seconds. The
+Focused persisted Not yet and native pane checks pass two tests in two suites
+after 9.577 seconds. The
 chrome suite includes actual native split/item
 placement assertions and light/dark hosted snapshots. Hosted button snapshots cover
 visible label ink and inherited app tint; these live app captures are the glass
-compositor authority. Actual native1x baselines remain a first-CI record/review/replay
-gate; no simulated 1x raster or snapshot tolerance was added.
+compositor authority. Ten native1x references were captured by actual CI run
+[39028041452](https://github.com/maxk-lab/brain_buddy/actions/runs/39028041452)
+at source `465966f15d3018684feb5f30c9dfabf76f179ec3`, artifact `macos-app-logs-1`.
+The parent reviewed every light/dark Welcome, first-run sidebar, normal sidebar,
+populated Tags sidebar and button-strip image, then imported the exact artifact
+bytes. That run reported ten missing references; native1x replay on the updated
+candidate remains a CI gate. No simulated raster or snapshot tolerance was added.
 
 This record accepts only the bounded local chrome correction. Exact-SHA independent
 QA, CI, rebase, release and production evidence remain separate parent-owned gates.

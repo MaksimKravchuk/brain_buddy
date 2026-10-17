@@ -303,7 +303,6 @@ struct WorkspaceView: View {
                         .frame(width: inspectorWidth)
                         .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("workspace-inspector")
-                        .onExitCommand { inspectorPresented.wrappedValue = false }
                 }
             }
             .navigationSplitViewColumnWidth(min: detailMinimumWidth,
