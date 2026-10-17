@@ -15,7 +15,7 @@ import threading
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, ClassVar, TypeVar
 from weakref import WeakValueDictionary
@@ -43,7 +43,6 @@ from .domain import (
     AgentRunEventDocument,
     project_run_for_access,
 )
-from .headers import validate_auth_header_name
 from .secrets import fingerprint_key_id, key_id_from_sealed
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
@@ -171,7 +170,7 @@ _TERMINAL_PLACEHOLDERS = ", ".join("?" for _ in _TERMINAL_STATES)
 def _decoded_payload(raw: str) -> dict[str, Any] | None:
     """One stored payload as a mapping, or ``None`` when it is not one.
 
-    Three startup migrations walk raw rows, and each has to survive a payload
+    The startup migrations walk raw rows, and each has to survive a payload
     that is not JSON or not an object — a row a different image, or a partial
     write, left behind. Deciding that once means a corrupt row is skipped the
     same way everywhere, instead of aborting whichever pass happens to reach it
@@ -478,12 +477,10 @@ class AgentRepository(BaseRepository):
                     conn.rollback()
                     raise
             self._migrate_a2a_wire_contract(conn)
-            self._migrate_legacy_invalid_connections(conn)
             # Deliberately outside the ledger and run on *every* startup: a
             # wire-less row can be created during a 007-image interlude between
             # two 014 boots, and it would otherwise sit unreadable until someone
-            # noticed. Idempotent, exactly like
-            # `_migrate_legacy_invalid_connections` above.
+            # noticed. Idempotent.
             self._supersede_bespoke_connections(conn)
 
     # --- the A2A wire migration (spec 014, FR-012, SC-010) -----------------
@@ -606,9 +603,8 @@ class AgentRepository(BaseRepository):
         rewritten = 0
         for row in rows:
             payload = _decoded_payload(row["payload"])
-            # An unreadable row is the quarantine migration's job. Taking it
-            # here would supersede and quarantine the same row on one startup
-            # and lose which of the two actually happened to it.
+            # An unreadable row is left exactly as found: rewriting it would
+            # destroy a credential nobody can read back.
             if payload is None or payload.get("wire") == "a2a":
                 continue
             self._write_superseded_connection(conn, row, payload, now=now)
@@ -731,145 +727,8 @@ class AgentRepository(BaseRepository):
             ),
         )
 
-    def migration_rewrite_count(self, name: str) -> int | None:
-        """How many rows a ledgered migration rewrote, or ``None`` if unrun."""
-
-        with self._connection() as conn:
-            row = conn.execute(
-                "SELECT rewritten_rows FROM agent_schema_migrations WHERE name = ?",
-                (name,),
-            ).fetchone()
-        return None if row is None else row["rewritten_rows"]
-
     def _migration_boundary(self, stage: str) -> None:
         """Deterministic interleaving/failure-injection seam for atomicity tests."""
-
-    @staticmethod
-    def _quarantine_record(
-        owner_id: str, connection_id: str
-    ) -> AgentConnectionDocument:
-        """The secret-free record an unreadable legacy row is replaced with.
-
-        Deliberately a pure function of the row's coordinates: two startups that
-        both decide to quarantine the same row write byte-identical payloads, so
-        a redundant repair is invisible rather than a spurious change.
-        """
-
-        quarantine_time = datetime(1970, 1, 1, tzinfo=UTC)
-        return AgentConnectionDocument(
-            id=connection_id,
-            owner_id=owner_id,
-            name="Connection requires reconfiguration",
-            endpoint_url="https://reconfigure.invalid/",
-            status="untested",
-            last_test_error_code="legacy_invalid_connection_requires_reconfiguration",
-            created_at=quarantine_time,
-            updated_at=quarantine_time,
-        )
-
-    @staticmethod
-    def _migrate_legacy_invalid_header_connections(
-        conn: sqlite3.Connection,
-    ) -> None:
-        """Repair legacy header-only failures without consuming corrupt rows."""
-
-        rows = conn.execute(
-            "SELECT owner_id, id, payload FROM agent_connections"
-        ).fetchall()
-        for row in rows:
-            payload = _decoded_payload(row["payload"])
-            if payload is None:
-                continue
-            if "auth_header_name" not in payload:
-                # A bearer connection under the A2A wire stores no header name at
-                # all (data-model.md §1). Absence is the healthy shape, not the
-                # legacy failure this repair exists for — treating it as one
-                # would reset every 014 bearer connection on every startup.
-                continue
-            raw_header = payload.get("auth_header_name")
-            if isinstance(raw_header, str):
-                try:
-                    validate_auth_header_name(raw_header)
-                except ValueError:
-                    pass
-                else:
-                    continue
-            legacy_revision = _bumped_revision(payload)
-            payload.pop("auth_header_name", None)
-            payload.update(
-                credential=None,
-                capabilities={"streaming": False, "push_notifications": False},
-                status="untested",
-                last_test_error_code=(
-                    "legacy_invalid_auth_header_requires_reconfiguration"
-                ),
-                last_contact_at=None,
-                last_tested_at=None,
-                scope_verified_at=None,
-                first_dispatch_at=None,
-                revision=legacy_revision,
-                updated_at=datetime.now(UTC).isoformat(),
-            )
-            conn.execute(
-                "UPDATE agent_connections SET status = ?, payload = ? "
-                "WHERE owner_id = ? AND id = ?",
-                (
-                    "untested",
-                    json.dumps(payload, sort_keys=True, separators=(",", ":")),
-                    row["owner_id"],
-                    row["id"],
-                ),
-            )
-
-    def _migrate_legacy_invalid_connections(self, conn: sqlite3.Connection) -> None:
-        """Replace unreadable legacy rows with a secret-free remediation record.
-
-        Discovery, the quarantine verdict, and the write all happen inside one
-        ``BEGIN IMMEDIATE``. Reading first and writing second would leave a
-        window in which another startup repairs or replaces a row: this one
-        would still be holding the verdict it formed against the payload that
-        row *used* to have, and would overwrite a healthy connection with a
-        quarantine stub. Taking the write lock before the SELECT makes the
-        snapshot the migration reasons about the same one it mutates.
-
-        Nothing survives a failure: the transaction rolls back whole, so a
-        startup that dies mid-scan leaves the legacy rows exactly as they were.
-        Re-running is safe and reaches the same verdict, because the scan
-        re-reads under its own lock and the quarantine record is deterministic.
-        """
-
-        self._migration_boundary("before_transaction")
-        conn.execute("BEGIN IMMEDIATE")
-        try:
-            self._migrate_legacy_invalid_header_connections(conn)
-            rows = conn.execute(
-                "SELECT owner_id, id, payload FROM agent_connections"
-            ).fetchall()
-            for row in rows:
-                try:
-                    AgentConnectionDocument.model_validate(json.loads(row["payload"]))
-                except TypeError, ValueError:
-                    pass
-                else:
-                    continue
-                quarantine = self._quarantine_record(
-                    str(row["owner_id"]), str(row["id"])
-                )
-                conn.execute(
-                    "UPDATE agent_connections SET status = ?, payload = ? "
-                    "WHERE owner_id = ? AND id = ?",
-                    (
-                        quarantine.status,
-                        self._connection_payload(quarantine),
-                        row["owner_id"],
-                        row["id"],
-                    ),
-                )
-                self._migration_boundary("quarantined")
-            conn.commit()
-        except BaseException:
-            conn.rollback()
-            raise
 
     @staticmethod
     def _payload(model: BaseModel) -> str:

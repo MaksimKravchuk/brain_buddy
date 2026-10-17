@@ -180,7 +180,6 @@ package final class BrainBuddyModel {
         return FirstRunLaunchFacts(
             hasAccount: workspace.account != nil,
             workspaceWrittenBefore: localState.workspaceFirstWrittenAt != nil,
-            legacyImportBroughtTasks: localState.legacyImport?.state == .completed,
             openTaskCount: counted ? tasks.filter(\.isOpen).count : nil,
             projectCount: counted ? workspace.state.projects.count : nil,
             hasInboxItem: tasks.contains { $0.state == .inbox }

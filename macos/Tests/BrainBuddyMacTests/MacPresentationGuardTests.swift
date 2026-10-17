@@ -24,7 +24,6 @@ struct MacPresentationGuardTests {
         "BrainBuddyMac/MacPresentationRouter+SwiftUI.swift": "the router's SwiftUI side, the only place X-02, X-03 and X-04 are attached",
         "BrainBuddyMac/SignInSheet.swift": "X-03, opened by the person",
         "BrainBuddyMac/SignOutConfirmation.swift": "X-04, opened by the person",
-        "BrainBuddyMac/UpgradeNotice.swift": "X-05, a launch notice",
         "BrainBuddyMac/UnreadableWorkspaceView.swift": "X-09, a launch notice, and its person-started confirmation",
         "BrainBuddyMac/ProjectReviewView.swift": "the Project review's confirmation",
         "BrainBuddyMac/QuickCaptureView.swift": "the quick-capture panel",

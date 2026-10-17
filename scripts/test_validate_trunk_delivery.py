@@ -570,7 +570,6 @@ class DeployContractTest(unittest.TestCase):
             frozenset(
                 {
                     "delivery_canary",
-                    "mobile_task_classification",
                     "voice_brain_dump",
                     "external_agent_relay",
                 }

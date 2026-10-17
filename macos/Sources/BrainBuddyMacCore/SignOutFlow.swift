@@ -38,8 +38,7 @@ package enum SignOutGuard {
 /// records the session as a pending logout before anything is removed, removes the token and logs
 /// out only after the local removal succeeded, and on a failure withdraws the pending logout and
 /// resumes: the person is still signed in, as "Couldn't sign out" says. This flow adds the Mac's
-/// rules around it: the count shown is the count removed, the backup sentence, and what follows a
-/// sign-out (data-model E8).
+/// rules around it: the count shown is the count removed, and what follows a sign-out.
 @MainActor
 @Observable
 package final class SignOutFlow {
@@ -51,7 +50,6 @@ package final class SignOutFlow {
         package var reviewDrafts: Int
         package var offline: Bool
         package var sessionEnded: Bool
-        package var backup: SignOutBackupNote?
         package var text: SyncCopyText
         /// "Sign out and remove" when changes would be removed, else "Sign out".
         package var confirmTitle: String
@@ -78,7 +76,6 @@ package final class SignOutFlow {
     package private(set) var isSigningOut = false
 
     @ObservationIgnored private let workspace: Workspace
-    @ObservationIgnored private let importer: LegacyImportCoordinator?
     @ObservationIgnored private let now: @Sendable () -> Date
     @ObservationIgnored private let calendar: Calendar
     @ObservationIgnored private let log: any MacLogSink
@@ -86,11 +83,10 @@ package final class SignOutFlow {
     @ObservationIgnored package var didSignOut: (@MainActor () -> Void)?
 
     package init(
-        workspace: Workspace, importer: LegacyImportCoordinator?, now: @escaping @Sendable () -> Date = { Date() },
+        workspace: Workspace, now: @escaping @Sendable () -> Date = { Date() },
         calendar: Calendar = .current, log: any MacLogSink = SystemMacLog()
     ) {
         self.workspace = workspace
-        self.importer = importer
         self.now = now
         self.calendar = calendar
         self.log = log
@@ -102,15 +98,14 @@ package final class SignOutFlow {
         let unsent = workspace.pendingChangeCount
         let issues = workspace.issues.count
         let reviewDrafts = workspace.unsavedReviewDraftCount
-        let backup = backupNote(initialUploadRemaining: snapshot.initialUploadRemaining)
         let text = SyncCopy.signOutConfirmation(
             unsent: unsent, offline: !snapshot.isOnline, sessionEnded: snapshot.sessionEnded, issues: issues,
-            reviewDrafts: reviewDrafts, backup: backup, device: .mac, now: now(), calendar: calendar
+            reviewDrafts: reviewDrafts, backup: nil, device: .mac, now: now(), calendar: calendar
         )
         return Prompt(
             unsent: unsent, issues: issues, reviewDrafts: reviewDrafts, offline: !snapshot.isOnline,
             sessionEnded: snapshot.sessionEnded,
-            backup: backup, text: text, confirmTitle: unsent > 0 ? SignOutCopy.signOutAndRemove : SignOutCopy.signOut,
+            text: text, confirmTitle: unsent > 0 ? SignOutCopy.signOutAndRemove : SignOutCopy.signOut,
             changes: workspace.pendingChanges
         )
     }
@@ -149,7 +144,6 @@ package final class SignOutFlow {
         }
         isSigningOut = true
         defer { isSigningOut = false }
-        let initialUpload = workspace.syncSnapshot.initialUploadRemaining
         do {
             try await workspace.signOut(removing: shown.changes)
         } catch WorkspaceError.unsyncedChanges {
@@ -163,29 +157,11 @@ package final class SignOutFlow {
             return .failed
         }
         prompt = nil
-        // Data-model E7.1 and E8: the sign-out is recorded, the backup goes when it is due, staging
-        // files go. Best effort: a sidecar that can't be written now is caught up at the next launch.
-        var backupRemoved = false
-        if let importer {
-            do {
-                backupRemoved = try importer.didSignOut(initialUploadRemaining: initialUpload)
-            } catch {
-                log.log(.sync, "sign-out retention check failed class=\(String(describing: type(of: error)))")
-            }
-        }
-        log.log(.sync, "sign-out done removedChanges=\(shown.unsent) backupRemoved=\(backupRemoved)")
+        log.log(.sync, "sign-out done removedChanges=\(shown.unsent)")
         didSignOut?()
         return .signedOut
     }
 
     /// "OK" on "Couldn't sign out".
     package func dismissFailure() { failure = nil }
-
-    /// `signOutBackup` while the backup stays after this sign-out, `signOutBackupRemoved` when this
-    /// sign-out deletes it (data-model E8), nil without a backup.
-    private func backupNote(initialUploadRemaining: Int) -> SignOutBackupNote? {
-        guard let importer, let backup = importer.backup() else { return nil }
-        if importer.backupWillBeRemovedAtSignOut(initialUploadRemaining: initialUploadRemaining) { return .removed }
-        return .kept(until: backup.keptUntil)
-    }
 }

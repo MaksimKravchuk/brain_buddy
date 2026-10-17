@@ -13,7 +13,7 @@ import { AdminFeatureFlagsSection } from "../AdminFeatureFlagsSection";
 import { focusFirstAvailable } from "../flagFocus";
 
 const VOICE = "voice_brain_dump";
-const MOBILE = "mobile_task_classification";
+const MOBILE = "weekly_review";
 
 function flag(overrides: Partial<AdminFeatureFlagState> = {}): AdminFeatureFlagState {
   return {

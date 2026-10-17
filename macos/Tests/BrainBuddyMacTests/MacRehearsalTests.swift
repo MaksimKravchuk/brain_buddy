@@ -15,7 +15,7 @@ import Testing
     import FoundationModels
 #endif
 
-// The Mac half of the automated pilot rehearsal (spec 026, slice S3): the legacy-fixture import (Q06), the
+// The Mac half of the automated pilot rehearsal (spec 026, slice S3): the
 // Mac launch with its Rust host against a local backend (Q01/Q09 probe). Opt-in, like the kit's
 // `Rehearsal` suites:
 //
@@ -93,160 +93,12 @@ struct MacRehearsalTests {
         return MacLaunch(
             environment: MacLaunchEnvironment(
                 configuration: configuration, tokenStore: tokenStore, transport: CountingTransport(),
-                cookieJar: FakeCookieJar(), responseCache: FakeResponseCache(), now: TestClock().provider,
+                now: TestClock().provider,
                 makeID: SequentialIDs().provider, log: CapturingMacLog(),
                 rustRuntime: try .mac(configuration, tokenStore: tokenStore, transports: transports), rustPilot: switchBox))
     }
 
-    // MARK: Q06: field-by-field import of the legacy fixtures
-
-    private struct Shape: Hashable {
-        var text: String
-    }
-
-    /// One task as a comparable line: every field the import must carry, projects and tags by name.
-    private static func line(_ task: TaskRecord, projects: [ProjectID: ProjectRecord], tags: [TagID: TagRecord]) -> String {
-        func instant(_ date: Date?) -> String { date.map { String(Int($0.timeIntervalSince1970)) } ?? "-" }
-        let fields: [String] = [
-            task.title, task.details ?? "-", task.state.rawValue, task.lastOpenList?.rawValue ?? "-",
-            task.waitingFor ?? "-", task.dueDate?.isoString ?? "-", task.projectID.flatMap { projects[$0]?.name } ?? "-",
-            task.tagIDs.compactMap { tags[$0]?.name }.sorted().joined(separator: ","),
-            task.subtasks.sorted { $0.orderKey < $1.orderKey }.map { "\($0.title):\($0.state.rawValue)" }.joined(separator: ";"),
-            task.comments.map(\.body).joined(separator: ";"), instant(task.createdAt), instant(task.waitingSince),
-            instant(task.completedAt), instant(task.cancelledAt),
-        ]
-        return fields.joined(separator: " | ")
-    }
-
-    /// What the Rust-backed workspace shows: every task with its children, projects and tags.
-    private static func read(_ workspace: Workspace) async -> (tasks: [String], orders: [String: [String]], projects: [String], tags: [String]) {
-        var projectRecords: [ProjectID: ProjectRecord] = [:]
-        for archived in [false, true] {
-            await workspace.prepareProjects(archived: archived)
-            var guardPages = 0
-            repeat {
-                for summary in workspace.projects(archived: archived) { projectRecords[summary.id] = summary.project }
-                if workspace.projectsPageState(archived: archived).hasNext { await workspace.nextProjectsPage(archived: archived) } else { break }
-                guardPages += 1
-            } while guardPages < 50
-        }
-        var tagRecords: [TagID: TagRecord] = [:]
-        await workspace.prepareTags()
-        var tagPages = 0
-        repeat {
-            for summary in workspace.tags() { tagRecords[summary.id] = summary.tag }
-            if workspace.tagsPageState().hasNext { await workspace.nextTagsPage() } else { break }
-            tagPages += 1
-        } while tagPages < 50
-
-        var seen: [TaskID: TaskRecord] = [:]
-        var orders: [String: [String]] = [:]
-        let destinations: [(String, Destination)] = OpenList.allCases.map { ($0.rawValue, .list($0)) }
-            + HistoryKind.allCases.map { ($0.rawValue, .history($0)) }
-            // Inbox shows only projectless tasks: a task in a project is reached through its project.
-            + projectRecords.keys.map { ("project:\($0.rawValue)", .project($0)) }
-        for (name, destination) in destinations {
-            await workspace.prepareList(destination)
-            var order: [String] = []
-            var pages = 0
-            repeat {
-                for task in workspace.list(destination).sections.flatMap(\.tasks) {
-                    seen[task.id] = task
-                    order.append(task.title)
-                }
-                if workspace.listPageState(destination).hasNext { await workspace.nextListPage(destination) } else { break }
-                pages += 1
-            } while pages < 200
-            orders[name] = order
-        }
-        var lines: [String] = []
-        for id in seen.keys {
-            await workspace.prepareTaskDetail(id)
-            let detailed = workspace.taskDetail(id) ?? seen[id]!
-            lines.append(line(detailed, projects: projectRecords, tags: tagRecords))
-        }
-        let projectLines = projectRecords.values.map { "\($0.name) | \($0.state.rawValue) | \($0.color ?? "-") | \($0.desiredOutcome ?? "-")" }
-        let tagLines = tagRecords.values.map { "\($0.name) | \($0.state.rawValue)" }
-        return (lines.sorted(), orders, projectLines.sorted(), tagLines.sorted())
-    }
-
-    @Test("Q06 legacy fixtures import into the Rust store field by field (populated, awkward)")
-    func q06LegacyImportFieldByField() async throws {
-        let recorder = MacRecorder("Q06-import", "legacy-populated and legacy-awkward import, field by field")
-        for fixture in ["legacy-populated", "legacy-awkward"] {
-            // The oracle: the Mac's own 021 importer on the same bytes with the same clock and ids.
-            let oracleFolder = TemporaryFolder()
-            try Fixture.install(fixture, in: oracleFolder)
-            _ = try LegacyImportCoordinator.forTest(oracleFolder).run()
-            let expectedState = try storedState(oracleFolder)
-            let expected = expectedState.tasks.values
-                .map { Self.line($0, projects: expectedState.projects, tags: expectedState.tags) }.sorted()
-            let expectedProjects = expectedState.projects.values
-                .map { "\($0.name) | \($0.state.rawValue) | \($0.color ?? "-") | \($0.desiredOutcome ?? "-")" }.sorted()
-            let expectedTags = expectedState.tags.values.map { "\($0.name) | \($0.state.rawValue)" }.sorted()
-
-            let folder = TemporaryFolder()
-            let original = try Fixture.install(fixture, in: folder)
-            let run = try launch(folder, pilot: true)
-            await run.run { _ in }
-            guard let host = run.host, host.workspace.isRustSelected, host.workspace.isRustBound else {
-                recorder.expect(false, "\(fixture): the launch did not select the Rust runtime (importFailed=\(run.importFailed))")
-                continue
-            }
-            let actual = await Self.read(host.workspace)
-            recorder.observe("\(fixture).tasks", "expected=\(expected.count) actual=\(actual.tasks.count)")
-            recorder.observe("\(fixture).projects", "expected=\(expectedProjects.count) actual=\(actual.projects.count)")
-            recorder.observe("\(fixture).tags", "expected=\(expectedTags.count) actual=\(actual.tags.count)")
-            let missing = Set(expected).subtracting(actual.tasks)
-            let extra = Set(actual.tasks).subtracting(expected)
-            recorder.observe("\(fixture).taskMismatches", "missing=\(missing.count) extra=\(extra.count)")
-            // Synthetic fixture content only: title, state and last open list identify a task.
-            let brief = { (lines: Set<String>) in lines.map { $0.components(separatedBy: " | ").prefix(4).joined(separator: "/") }.sorted().joined(separator: "; ") }
-            if !missing.isEmpty { recorder.observe("\(fixture).missing", brief(missing)) }
-            if !extra.isEmpty { recorder.observe("\(fixture).extra", brief(extra)) }
-            if let first = missing.first, let other = extra.first {
-                let a = first.components(separatedBy: " | "), b = other.components(separatedBy: " | ")
-                let names = ["title", "details", "state", "lastOpenList", "waitingFor", "due", "project", "tags", "subtasks", "comments", "created", "waitingSince", "completed", "cancelled"]
-                let differing = zip(zip(a, b), names).filter { $0.0.0 != $0.0.1 }.map(\.1)
-                recorder.observe("\(fixture).firstMismatchFields", differing.joined(separator: ","))
-            }
-            recorder.expect(missing.isEmpty && extra.isEmpty && expected.count == actual.tasks.count, "\(fixture): tasks differ field by field")
-            recorder.expect(expectedProjects == actual.projects, "\(fixture): projects differ")
-            recorder.expect(expectedTags == actual.tags, "\(fixture): tags differ")
-            // Order inside each list (manual order) survives the import.
-            for list in OpenList.allCases {
-                let want = GTDQueries.list(.list(list), options: ListOptions(), in: expectedState, today: CalendarDay(date: TestClock.importTime))
-                    .sections.flatMap(\.tasks).map(\.title)
-                recorder.expect(want == actual.orders[list.rawValue], "\(fixture): the \(list.rawValue) list order changed")
-            }
-            // The retired files are kept, never modified.
-            recorder.expect(folder.bytes(LegacyFileNames.legacy) == nil || folder.bytes(LegacyFileNames.legacy) == original,
-                            "\(fixture): the previous version's file was changed")
-            await host.workspace.closeRuntime()
-        }
-        recorder.finish()
-    }
-
-    @Test("Q06 corrupt and newer-version fixtures leave the original untouched and open an empty Rust workspace")
-    func q06UnreadableFixturesStayIntact() async throws {
-        let recorder = MacRecorder("Q06-unreadable", "legacy-corrupt and legacy-newer: failure leaves the original intact")
-        for fixture in ["legacy-corrupt", "legacy-newer"] {
-            let folder = TemporaryFolder()
-            let original = try Fixture.install(fixture, in: folder)
-            let run = try launch(folder, pilot: true)
-            await run.run { _ in }
-            recorder.expect(folder.bytes(LegacyFileNames.legacy) == original, "\(fixture): the original was modified")
-            recorder.observe("\(fixture).phase", run.host == nil ? (run.importFailed ? "importFailed" : "launching") : "ready")
-            if let host = run.host {
-                await host.workspace.prepareList(.list(.inbox))
-                let tasks = OpenList.allCases.reduce(0) { $0 + host.workspace.list(.list($1)).sections.flatMap(\.tasks).count }
-                recorder.observe("\(fixture).tasksShown", tasks)
-                recorder.expect(tasks == 0, "\(fixture): tasks appeared from an unreadable file")
-                await host.workspace.closeRuntime()
-            }
-        }
-        recorder.finish()
-    }
+    // MARK: Q06: faults
 
     @Test("Q06 not automated here: low disk and a competing widget writer during the import")
     func q06FaultsNotAutomated() {
@@ -273,12 +125,12 @@ struct MacRehearsalTests {
 
         // Pilot off: the legacy runtime, no selection written (WorkspaceHost selection, FR-025).
         let off = try launch(TemporaryFolder(), pilot: false)
-        await off.run { _ in }
+        await off.run()
         recorder.expect(off.host?.workspace.isRustSelected == false, "the pilot-off launch selected the Rust runtime")
 
         let run = try launch(folder, pilot: true, tokenStore: tokens,
                              transports: RustSyncTransportProvider(tokenStore: tokens, identity: WorkspaceHost.clientIdentity))
-        await run.run { _ in }
+        await run.run()
         guard let host = run.host, host.workspace.isRustSelected else {
             recorder.expect(false, "the pilot-on launch did not select the Rust runtime")
             recorder.finish()

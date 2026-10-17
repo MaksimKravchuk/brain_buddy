@@ -7,6 +7,24 @@ import Synchronization
     import Glibc
 #endif
 
+/// The names the Mac gives its own files, all in the Mac's folder.
+package enum MacFileNames {
+    package static let store = "store.json"
+
+    /// `yyyyMMdd'T'HHmmss'Z'` in UTC, safe in a file name.
+    package static func stamp(_ date: Date) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let parts = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
+        func pad(_ value: Int?, _ width: Int) -> String {
+            let digits = String(value ?? 0)
+            return String(repeating: "0", count: max(0, width - digits.count)) + digits
+        }
+        return pad(parts.year, 4) + pad(parts.month, 2) + pad(parts.day, 2) + "T" + pad(parts.hour, 2)
+            + pad(parts.minute, 2) + pad(parts.second, 2) + "Z"
+    }
+}
+
 /// A file operation that failed. It names the operation and the `errno`, never a path or a file
 /// name, so it can be logged by class (FR-030).
 package struct MacFileError: Error, Hashable, Sendable, CustomStringConvertible {
@@ -69,8 +87,7 @@ package enum MacFileFaults {
 }
 
 /// The POSIX steps the Mac's own files need: durable atomic writes, exclusive renames that never
-/// replace a file, and the two kinds of lock (`flock` for the 021 files, `lockf` for the pre-021
-/// store's protocol).
+/// replace a file, and the `flock` lock the Mac's files take.
 package enum MacFiles {
     package static func exists(_ url: URL) -> Bool {
         access(url.path, F_OK) == 0
@@ -266,44 +283,5 @@ package final class FileLock: Sendable {
     package func release() {
         _ = flock(descriptor, LOCK_UN)
         close(descriptor)
-    }
-}
-
-/// The pre-021 store's lock: `lockf` on `.local-gtd.json.lock`, which an older copy of the app
-/// takes around each of its writes (`LocalGTDStore.mutate`). Holding it keeps that copy from
-/// writing while the import reads and renames its file.
-package protocol LegacyStoreLocking: Sendable {
-    func acquire(_ lockURL: URL) throws -> any LegacyStoreLockHold
-}
-
-package protocol LegacyStoreLockHold: Sendable {
-    func release()
-}
-
-package struct LockfLegacyStoreLocking: LegacyStoreLocking {
-    package init() {}
-
-    package func acquire(_ lockURL: URL) throws -> any LegacyStoreLockHold {
-        let descriptor = open(lockURL.path, O_CREAT | O_RDWR | O_CLOEXEC, mode_t(0o600))
-        guard descriptor >= 0 else { throw MacFileError("open legacy lock") }
-        var result: Int32
-        repeat {
-            result = lockf(descriptor, F_LOCK, 0)
-        } while result != 0 && errno == EINTR
-        guard result == 0 else {
-            let error = MacFileError("legacy lock")
-            close(descriptor)
-            throw error
-        }
-        return LockfHold(descriptor: descriptor)
-    }
-
-    private struct LockfHold: LegacyStoreLockHold {
-        let descriptor: Int32
-
-        func release() {
-            _ = lockf(descriptor, F_ULOCK, 0)
-            close(descriptor)
-        }
     }
 }

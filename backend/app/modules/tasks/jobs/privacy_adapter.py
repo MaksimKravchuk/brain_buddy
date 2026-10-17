@@ -70,7 +70,6 @@ PRIVACY_RESPONSIBILITY: Final = MaintenanceResponsibility(
     failure_mode="isolate",
     left_with_legacy=(
         "ModernAuthService.cleanup_expired_metadata",
-        "AuthMigration.cleanup_expired_backup",
         "CliAuthService.cleanup",
         "CrtCommandService.reconcile_pending_commands",
         "ReviewService.run_maintenance_sweep",

@@ -99,7 +99,7 @@ def test_010_FR_001_rows_round_trip_modes_and_cohorts(tmp_path: Path) -> None:
     _set_mode(repo, "voice_brain_dump", FlagMode.SELECTED_USERS)
     _add_user(repo, "voice_brain_dump", "user_alpha")
     _add_user(repo, "voice_brain_dump", "user_beta")
-    _set_mode(repo, "mobile_task_classification", FlagMode.ON)
+    _set_mode(repo, "weekly_review", FlagMode.ON)
 
     overlay = FeatureFlagOverrideRepository(tmp_path / "data").read()
 
@@ -109,7 +109,7 @@ def test_010_FR_001_rows_round_trip_modes_and_cohorts(tmp_path: Path) -> None:
         "user_alpha",
         "user_beta",
     )
-    assert overlay.flags["mobile_task_classification"].mode is FlagMode.ON
+    assert overlay.flags["weekly_review"].mode is FlagMode.ON
     assert overlay.flags["external_agent_relay"].mode is FlagMode.OFF
 
 
@@ -315,6 +315,130 @@ def test_020_FR_042_existing_store_upgrade_adds_weekly_review_off(
     )
 
 
+# ---------------------------------------------------------------------------
+# A retired flag's leftover row (mobile_task_classification, retired 2026-10-16)
+# ---------------------------------------------------------------------------
+
+RETIRED_ROW = "mobile_task_classification"
+
+
+def _plant_retired_row(tmp_path: Path, selected_users: str = '["acct_kept"]') -> None:
+    with sqlite3.connect(_sqlite_db_path(tmp_path)) as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO feature_flags (flag, mode, selected_users) "
+            "VALUES (?, 'selected_users', ?)",
+            (RETIRED_ROW, selected_users),
+        )
+        conn.commit()
+
+
+def _retired_row_cohort(tmp_path: Path) -> str:
+    with sqlite3.connect(_sqlite_db_path(tmp_path)) as conn:
+        row = conn.execute(
+            "SELECT selected_users FROM feature_flags WHERE flag = ?", (RETIRED_ROW,)
+        ).fetchone()
+    return str(row[0])
+
+
+def test_010_FR_004_a_retired_flag_row_is_ignored_and_does_not_degrade_the_store(
+    tmp_path: Path,
+) -> None:
+    """An existing database that still holds the retired row reads healthy and
+    every managed flag keeps its stored value; the retired name is not exposed."""
+
+    repo = _repo(tmp_path)
+    _set_mode(repo, "voice_brain_dump", FlagMode.SELECTED_USERS)
+    _add_user(repo, "voice_brain_dump", "user_retained")
+    _set_mode(repo, "weekly_review", FlagMode.ON)
+    _plant_retired_row(tmp_path)
+
+    for overlay in (
+        repo.read(),
+        FeatureFlagOverrideRepository(tmp_path / "data").read(),
+    ):
+        assert overlay.degraded is False
+        assert set(overlay.flags) == set(MANAGED_FLAGS)
+        assert RETIRED_ROW not in overlay.flags
+        assert overlay.flags["voice_brain_dump"] == FlagOverride(
+            mode=FlagMode.SELECTED_USERS, selected_users=("user_retained",)
+        )
+        assert overlay.flags["weekly_review"].mode is FlagMode.ON
+
+
+def test_010_FR_004_a_retired_flag_cannot_be_written_but_its_row_is_left_alone(
+    tmp_path: Path,
+) -> None:
+    """The retired name is refused like any unknown name, and an ordinary write
+    neither fails because of the leftover row nor touches it."""
+
+    repo = _repo(tmp_path)
+    _plant_retired_row(tmp_path)
+
+    with pytest.raises(DegradedRuntimeFlagsError):
+        _set_mode(repo, RETIRED_ROW, FlagMode.ON)
+
+    _set_mode(repo, "weekly_review", FlagMode.ON)
+
+    assert repo.read().flags["weekly_review"].mode is FlagMode.ON
+    assert _retired_row_cohort(tmp_path) == '["acct_kept"]'
+
+
+def test_010_FR_004_an_older_store_with_the_retired_row_still_upgrades(
+    tmp_path: Path,
+) -> None:
+    """The upgrade path recognizes an old store whether or not the retired row
+    is still in it, and adds the later default-OFF rows."""
+
+    repo = _repo(tmp_path)
+    _set_mode(repo, "voice_brain_dump", FlagMode.ON)
+    _plant_retired_row(tmp_path)
+    with sqlite3.connect(_sqlite_db_path(tmp_path)) as conn:
+        conn.execute(
+            "DELETE FROM feature_flags WHERE flag IN (?, ?)",
+            ("crt_canvas", "weekly_review"),
+        )
+        conn.commit()
+
+    upgraded = FeatureFlagOverrideRepository(tmp_path / "data").read()
+
+    assert upgraded.degraded is False
+    assert upgraded.flags["crt_canvas"] == FlagOverride(mode=FlagMode.OFF)
+    assert upgraded.flags["weekly_review"] == FlagOverride(mode=FlagMode.OFF)
+    assert upgraded.flags["voice_brain_dump"].mode is FlagMode.ON
+
+
+def test_010_FR_007_erasure_reaches_a_retired_flag_rows_cohort(
+    tmp_path: Path,
+) -> None:
+    """A retired row is ignored on read but may still name an account, so
+    scrubbing a purged account removes it there too without being counted as a
+    managed-flag change."""
+
+    repo = _repo(tmp_path)
+    _plant_retired_row(tmp_path, '["acct_kept", "acct_purged"]')
+
+    removed = repo.scrub_user("acct_purged")
+
+    assert removed == 0
+    assert json.loads(_retired_row_cohort(tmp_path)) == ["acct_kept"]
+    assert repo.read().degraded is False
+
+
+def test_010_FR_007_erasure_clears_an_unreadable_retired_flag_row_cohort(
+    tmp_path: Path,
+) -> None:
+    """A retired row whose cohort cannot be parsed is cleared rather than left
+    holding data erasure cannot inspect."""
+
+    repo = _repo(tmp_path)
+    _plant_retired_row(tmp_path, "not json")
+
+    repo.scrub_user("acct_purged")
+
+    assert json.loads(_retired_row_cohort(tmp_path)) == []
+    assert repo.read().degraded is False
+
+
 @pytest.mark.parametrize(
     "existing_store", [False, True], ids=["fresh", "five-row-upgrade"]
 )
@@ -363,7 +487,6 @@ def test_012_FR_009_fresh_store_forces_autocomplete_off_despite_environment(
     assert overlay.degraded is False
     assert set(overlay.flags) == {
         "voice_brain_dump",
-        "mobile_task_classification",
         "external_agent_relay",
         "task_title_autocomplete",
         "crt_canvas",
@@ -589,7 +712,7 @@ def test_010_SC_008_warning_repeats_only_after_a_healthy_read_resets_it(
         with sqlite3.connect(db_path) as conn:
             conn.execute(
                 "DELETE FROM feature_flags WHERE flag = ?",
-                ("mobile_task_classification",),
+                ("external_agent_relay",),
             )
             conn.commit()
         repo.read()
@@ -714,9 +837,7 @@ def test_010_FR_001_mutation_signature_cannot_carry_member_content(
 # Constructor contract asserted here follows plan.md's Changed Surfaces table
 # and "Migration is one-time, transactional, and isolated inside the
 # repository" paragraph: `FeatureFlagOverrideRepository(root, *,
-# legacy_states=None, legacy_internal_users=None, resolve_account_id=None)`,
-# with the legacy JSON path still implicit under `root` (unchanged from the
-# pre-correction repository's own `{root}/feature-flags/runtime.json`).
+# legacy_states=None, legacy_internal_users=None, resolve_account_id=None)`.
 # ---------------------------------------------------------------------------
 
 
@@ -737,46 +858,22 @@ def _sqlite_repo(
     )
 
 
-def _write_legacy_json(tmp_path: Path, payload: dict[str, Any]) -> Path:
-    path = tmp_path / "data" / "feature-flags" / "runtime.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    return path
-
-
 # ---------------------------------------------------------------------------
-# Migration preference rule, per flag (010-FR-001, DD-15)
+# Environment seeding, per flag (010-FR-001, DD-15)
 # ---------------------------------------------------------------------------
 
 
-def test_010_FR_001_migration_prefers_a_well_formed_legacy_json_entry_over_env(
+def test_010_FR_001_migration_seeds_from_the_environment_baseline(
     tmp_path: Path,
 ) -> None:
-    """The legacy JSON overlay's entry wins for a flag it ever covered (DD-15)."""
-
-    _write_legacy_json(
-        tmp_path, {"voice_brain_dump": {"mode": "on", "selected_users": []}}
-    )
+    """The environment baseline supplies each flag's first value."""
 
     repo = _sqlite_repo(
         tmp_path,
-        legacy_states={"voice_brain_dump": FeatureFlagState.OFF},
+        legacy_states={"external_agent_relay": FeatureFlagState.ON},
     )
 
-    assert repo.read().flags["voice_brain_dump"].mode is FlagMode.ON
-
-
-def test_010_FR_001_migration_seeds_from_env_when_no_legacy_entry_exists(
-    tmp_path: Path,
-) -> None:
-    """With no legacy JSON entry for a flag, the environment baseline supplies it."""
-
-    repo = _sqlite_repo(
-        tmp_path,
-        legacy_states={"mobile_task_classification": FeatureFlagState.ON},
-    )
-
-    assert repo.read().flags["mobile_task_classification"].mode is FlagMode.ON
+    assert repo.read().flags["external_agent_relay"].mode is FlagMode.ON
 
 
 def test_010_FR_001_migration_resolves_internal_stage_and_skips_unresolved_emails(
@@ -789,51 +886,16 @@ def test_010_FR_001_migration_resolves_internal_stage_and_skips_unresolved_email
 
     repo = _sqlite_repo(
         tmp_path,
-        legacy_states={"mobile_task_classification": FeatureFlagState.INTERNAL},
+        legacy_states={"external_agent_relay": FeatureFlagState.INTERNAL},
         legacy_internal_users=frozenset(
             {"resolvable@example.com", "ghost@example.com"}
         ),
         resolve_account_id=lambda email: resolved.get(email),
     )
 
-    entry = repo.read().flags["mobile_task_classification"]
+    entry = repo.read().flags["external_agent_relay"]
     assert entry.mode is FlagMode.SELECTED_USERS
     assert entry.selected_users == ("acct_resolvable",)
-
-
-def test_010_FR_001_external_agent_relay_always_seeds_from_env_never_legacy_json(
-    tmp_path: Path,
-) -> None:
-    """`external_agent_relay` always comes from the environment baseline: the
-    pre-correction overlay never wrote it, so a key present in a legacy
-    document under that name must not be read by migration (DD-15)."""
-
-    _write_legacy_json(
-        tmp_path, {"external_agent_relay": {"mode": "on", "selected_users": []}}
-    )
-
-    repo = _sqlite_repo(
-        tmp_path,
-        legacy_states={"external_agent_relay": FeatureFlagState.OFF},
-    )
-
-    assert repo.read().flags["external_agent_relay"].mode is FlagMode.OFF
-
-
-def test_010_FR_001_a_malformed_legacy_entry_falls_back_to_the_env_baseline(
-    tmp_path: Path,
-) -> None:
-    """A present-but-malformed legacy entry does not win: DD-15 requires it to
-    be well-formed, not merely present, before it beats the env baseline."""
-
-    _write_legacy_json(tmp_path, {"voice_brain_dump": {"mode": "not-a-real-mode"}})
-
-    repo = _sqlite_repo(
-        tmp_path,
-        legacy_states={"voice_brain_dump": FeatureFlagState.ON},
-    )
-
-    assert repo.read().flags["voice_brain_dump"].mode is FlagMode.ON
 
 
 # ---------------------------------------------------------------------------
@@ -850,7 +912,6 @@ def test_010_DD_15_migration_seeds_exactly_the_managed_flags_plus_a_ledger_row(
 
     assert set(MANAGED_FLAGS) == {
         "voice_brain_dump",
-        "mobile_task_classification",
         "external_agent_relay",
         "task_title_autocomplete",
         "crt_canvas",
@@ -872,12 +933,12 @@ def test_010_DD_15_migration_seeds_exactly_the_managed_flags_plus_a_ledger_row(
         assert ledger_count == 1
 
 
-def test_010_FR_004_a_second_construction_is_a_no_op_even_when_legacy_inputs_change(
+def test_010_FR_004_a_second_construction_is_a_no_op_even_when_the_environment_changes(
     tmp_path: Path,
 ) -> None:
     """Migration is restart-idempotent: a second construction over an
-    already-migrated data directory does not re-run, even when the legacy
-    JSON/environment inputs are edited afterward (DD-15)."""
+    already-migrated data directory does not re-run, even when the
+    environment input is edited afterward (DD-15)."""
 
     _sqlite_repo(tmp_path, legacy_states={"voice_brain_dump": FeatureFlagState.OFF})
     assert (
@@ -888,9 +949,6 @@ def test_010_FR_004_a_second_construction_is_a_no_op_even_when_legacy_inputs_cha
         is FlagMode.OFF
     )
 
-    _write_legacy_json(
-        tmp_path, {"voice_brain_dump": {"mode": "on", "selected_users": []}}
-    )
     repo_after_edit = _sqlite_repo(
         tmp_path, legacy_states={"voice_brain_dump": FeatureFlagState.ON}
     )
@@ -900,17 +958,12 @@ def test_010_FR_004_a_second_construction_is_a_no_op_even_when_legacy_inputs_cha
         assert conn.execute("SELECT COUNT(*) FROM migration_ledger").fetchone()[0] == 1
 
 
-def test_010_FR_001_a_pre_commit_migration_failure_leaves_no_rows_no_marker_and_json_intact(
+def test_010_FR_001_a_pre_commit_migration_failure_leaves_no_rows_and_no_marker(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A failure before the migration transaction commits leaves neither a
-    ledger row nor partial flag rows, and never mutates the legacy JSON file;
-    a retried construction then migrates cleanly exactly once (DD-15, SC-003)."""
-
-    legacy_path = _write_legacy_json(
-        tmp_path, {"voice_brain_dump": {"mode": "on", "selected_users": []}}
-    )
-    before = legacy_path.read_bytes()
+    ledger row nor partial flag rows; a retried construction then migrates
+    cleanly exactly once (DD-15, SC-003)."""
 
     class _ExplodingCommitConnection:
         """Wraps a real connection; every `commit()` fails, everything else
@@ -934,13 +987,12 @@ def test_010_FR_001_a_pre_commit_migration_failure_leaves_no_rows_no_marker_and_
         # (010-FR-004) — but the transaction is still all-or-nothing, which is
         # what this test exists to prove.
         degraded = _sqlite_repo(
-            tmp_path, legacy_states={"voice_brain_dump": FeatureFlagState.OFF}
+            tmp_path, legacy_states={"voice_brain_dump": FeatureFlagState.ON}
         )
         assert degraded.read().degraded is True
     finally:
         monkeypatch.undo()
 
-    assert legacy_path.read_bytes() == before
     assert not (tmp_path / "data" / Path(*MIGRATION_COMPLETE_MARKER_PARTS)).exists()
     db_path = _sqlite_db_path(tmp_path)
     if db_path.exists():
@@ -963,7 +1015,7 @@ def test_010_FR_001_a_pre_commit_migration_failure_leaves_no_rows_no_marker_and_
                 )
 
     retried = _sqlite_repo(
-        tmp_path, legacy_states={"voice_brain_dump": FeatureFlagState.OFF}
+        tmp_path, legacy_states={"voice_brain_dump": FeatureFlagState.ON}
     )
     assert retried.read().flags["voice_brain_dump"].mode is FlagMode.ON
     with sqlite3.connect(db_path) as conn:
@@ -973,7 +1025,7 @@ def test_010_FR_001_a_pre_commit_migration_failure_leaves_no_rows_no_marker_and_
 def test_010_DD_15_concurrent_first_start_construction_does_not_duplicate_the_ledger(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Two constructors racing over one empty DB / one legacy JSON seed — each
+    """Two constructors racing over one empty DB / one environment seed — each
     modeling a separate process with its own `_process_lock` rather than the
     in-process `ClassVar` all instances would otherwise share — must both
     succeed, leave exactly one migration-ledger marker, and migrate the three
@@ -989,10 +1041,6 @@ def test_010_DD_15_concurrent_first_start_construction_does_not_duplicate_the_le
     finish it, without depending on where inside `_migrate_once` the ledger
     check itself happens to sit.
     """
-
-    _write_legacy_json(
-        tmp_path, {"voice_brain_dump": {"mode": "on", "selected_users": []}}
-    )
 
     barrier = threading.Barrier(2)
     original_migrate_once = FeatureFlagOverrideRepository._migrate_once
@@ -1015,7 +1063,10 @@ def test_010_DD_15_concurrent_first_start_construction_does_not_duplicate_the_le
         try:
             repo.__init__(
                 tmp_path / "data",
-                legacy_states={"mobile_task_classification": FeatureFlagState.ON},
+                legacy_states={
+                    "voice_brain_dump": FeatureFlagState.ON,
+                    "external_agent_relay": FeatureFlagState.ON,
+                },
             )
         except BaseException as exc:  # noqa: BLE001 - captured for the assertion below
             with results_lock:
@@ -1046,8 +1097,8 @@ def test_010_DD_15_concurrent_first_start_construction_does_not_duplicate_the_le
     overlay = next(iter(results.values())).read()
     assert overlay.degraded is False
     assert overlay.flags["voice_brain_dump"].mode is FlagMode.ON
-    assert overlay.flags["mobile_task_classification"].mode is FlagMode.ON
-    assert overlay.flags["external_agent_relay"].mode is FlagMode.OFF
+    assert overlay.flags["external_agent_relay"].mode is FlagMode.ON
+    assert overlay.flags["crt_canvas"].mode is FlagMode.OFF
 
 
 # ---------------------------------------------------------------------------
@@ -1057,20 +1108,17 @@ def test_010_DD_15_concurrent_first_start_construction_does_not_duplicate_the_le
 # ---------------------------------------------------------------------------
 
 
-def test_010_FR_003_after_migration_changed_env_and_json_have_no_further_effect(
+def test_010_FR_003_after_migration_a_changed_env_has_no_further_effect(
     tmp_path: Path,
 ) -> None:
-    """After the one-time migration, normal reads never consult the legacy
-    JSON or the environment again — only the SQLite row (DD-15)."""
+    """After the one-time migration, normal reads never consult the
+    environment again — only the SQLite row (DD-15)."""
 
     repo = _sqlite_repo(
         tmp_path, legacy_states={"voice_brain_dump": FeatureFlagState.OFF}
     )
     _set_mode(repo, "voice_brain_dump", FlagMode.ON)
 
-    _write_legacy_json(
-        tmp_path, {"voice_brain_dump": {"mode": "off", "selected_users": []}}
-    )
     reopened = _sqlite_repo(
         tmp_path, legacy_states={"voice_brain_dump": FeatureFlagState.OFF}
     )
@@ -1092,7 +1140,7 @@ def test_010_FR_004_a_missing_managed_flag_row_reads_degraded_not_healthy_absenc
     overlay = repo.read()
     assert overlay.degraded is True
     with pytest.raises(DegradedRuntimeFlagsError):
-        _set_mode(repo, "mobile_task_classification", FlagMode.ON)
+        _set_mode(repo, "external_agent_relay", FlagMode.ON)
 
 
 def test_010_FR_004_an_out_of_vocabulary_stored_mode_reads_degraded(
@@ -1136,67 +1184,9 @@ def test_010_FR_004_an_unreadable_database_reads_degraded_and_refuses_mutation(
 
 
 # ---------------------------------------------------------------------------
-# A7 — data-review blockers: legacy-email privacy leak (010-SC-007) and the
+# A7 — data-review blockers: account-ID privacy (010-SC-007) and the
 # degraded-transition double-warning race (010-FR-004)
 # ---------------------------------------------------------------------------
-
-
-def test_010_SC_007_legacy_entry_with_an_email_member_falls_back_to_env_baseline(
-    tmp_path: Path,
-) -> None:
-    """A legacy `selected_users` member that doesn't match the exact account-ID
-    grammar `[A-Za-z0-9_-]{1,128}` (an email, here) invalidates the *whole*
-    legacy entry — migration must not persist any value from it, not merely
-    drop the bad member — falling back to the already-defined environment
-    baseline for that flag. No email sentinel reaches the database bytes."""
-
-    _write_legacy_json(
-        tmp_path,
-        {
-            "voice_brain_dump": {
-                "mode": "selected_users",
-                "selected_users": ["private@example.com"],
-            }
-        },
-    )
-
-    repo = _sqlite_repo(
-        tmp_path, legacy_states={"voice_brain_dump": FeatureFlagState.OFF}
-    )
-
-    overlay = repo.read()
-    assert overlay.flags["voice_brain_dump"].mode is FlagMode.OFF
-    assert overlay.flags["voice_brain_dump"].selected_users == ()
-
-    with sqlite3.connect(_sqlite_db_path(tmp_path)) as conn:
-        raw = "".join(str(row) for row in conn.execute("SELECT * FROM feature_flags"))
-    assert "private@example.com" not in raw
-    assert "@" not in raw
-
-
-def test_010_SC_007_legacy_valid_duplicates_canonicalize_to_sorted_unique(
-    tmp_path: Path,
-) -> None:
-    """Valid duplicate account IDs in a legacy cohort canonicalize to one
-    entry per ID, in deterministic sorted order — a SQLite row like
-    `["user_a", "user_a"]` must never be what migration produces."""
-
-    _write_legacy_json(
-        tmp_path,
-        {
-            "voice_brain_dump": {
-                "mode": "selected_users",
-                "selected_users": ["user_b", "user_a", "user_a"],
-            }
-        },
-    )
-
-    repo = _sqlite_repo(tmp_path)
-
-    assert repo.read().flags["voice_brain_dump"].selected_users == (
-        "user_a",
-        "user_b",
-    )
 
 
 def test_010_SC_007_a_stored_row_with_an_invalid_id_reads_degraded(
@@ -1329,10 +1319,9 @@ def test_010_FR_004_two_concurrent_degraded_reads_log_exactly_one_warning(
 #
 # The migration ledger lives *inside* `feature_flags.sqlite3`, so deleting or
 # recreating that file used to look exactly like a first start: migration
-# re-ran, and the legacy JSON overlay re-seeded cohorts that GDPR erasure had
-# already scrubbed. A non-PII marker beside the legacy document records that
-# the one-time migration happened, durably and independently of the database
-# file (010-FR-001, 010-FR-007, DD-9, DD-15).
+# re-ran, and re-seeded cohorts that GDPR erasure had already scrubbed. A
+# non-PII marker records that the one-time migration happened, durably and
+# independently of the database file (010-FR-001, 010-FR-007, DD-9, DD-15).
 # ---------------------------------------------------------------------------
 
 PURGED_ACCOUNT_ID = "user_purged"
@@ -1360,7 +1349,7 @@ def _exploding_seed_loader() -> ManagedFlagMigrationSeed:
 def test_010_FR_001_a_successful_migration_writes_the_durable_marker(
     tmp_path: Path,
 ) -> None:
-    """A ledgered migration leaves a marker beside the legacy document."""
+    """A ledgered migration leaves a marker beside the database."""
 
     _sqlite_repo(tmp_path)
 
@@ -1390,91 +1379,30 @@ def test_010_SC_007_the_migration_marker_carries_no_account_ids_or_emails(
     """The marker records *that* migration happened, never *what* it moved:
     no account ID, no email, no environment value (010-SC-007)."""
 
-    _write_legacy_json(
-        tmp_path,
-        {
-            "voice_brain_dump": {
-                "mode": "selected_users",
-                "selected_users": ["user_cohort_member"],
-            }
-        },
-    )
-
     _sqlite_repo(
         tmp_path,
-        legacy_states={"mobile_task_classification": FeatureFlagState.INTERNAL},
+        legacy_states={"external_agent_relay": FeatureFlagState.INTERNAL},
         legacy_internal_users=frozenset({EMAIL_SENTINEL}),
         resolve_account_id=lambda email: "acct_internal",
     )
 
     text = _marker_path(tmp_path).read_text(encoding="utf-8")
-    assert "user_cohort_member" not in text
     assert "acct_internal" not in text
     assert EMAIL_SENTINEL not in text
     assert "@" not in text
     assert "internal" not in text
 
 
-def test_010_FR_007_scrub_removes_the_id_from_sqlite_and_the_retained_legacy_json(
-    tmp_path: Path,
-) -> None:
-    """Erasure reaches the retained legacy artifact too: after `scrub_user`,
-    the purged account ID is gone from the SQLite cohort *and* from the
-    rollback-compatibility JSON document (DD-9, DD-13)."""
-
-    legacy_path = _write_legacy_json(
-        tmp_path,
-        {
-            "voice_brain_dump": {
-                "mode": "selected_users",
-                "selected_users": [PURGED_ACCOUNT_ID, "user_kept"],
-            }
-        },
-    )
-
-    repo = _sqlite_repo(tmp_path)
-    assert repo.read().flags["voice_brain_dump"].selected_users == (
-        "user_kept",
-        PURGED_ACCOUNT_ID,
-    )
-
-    repo.scrub_user(PURGED_ACCOUNT_ID)
-
-    assert repo.read().flags["voice_brain_dump"].selected_users == ("user_kept",)
-    assert PURGED_ACCOUNT_ID not in legacy_path.read_text(encoding="utf-8")
-    assert "user_kept" in legacy_path.read_text(encoding="utf-8")
-
-
 def test_010_FR_007_a_recreated_database_after_the_marker_never_resurrects_a_purged_id(
     tmp_path: Path,
 ) -> None:
     """Deleting the database after migration is not a first start: the marker
-    means the legacy document and the deploy-staged environment are never read
-    again, and the missing rows initialize fail-closed OFF (DD-9, DD-15)."""
+    means the deploy-staged environment is never read again, and the missing
+    rows initialize fail-closed OFF (DD-9, DD-15)."""
 
-    _write_legacy_json(
-        tmp_path,
-        {
-            "voice_brain_dump": {
-                "mode": "selected_users",
-                "selected_users": [PURGED_ACCOUNT_ID],
-            }
-        },
-    )
     repo = _sqlite_repo(tmp_path)
+    _add_user(repo, "voice_brain_dump", PURGED_ACCOUNT_ID)
     repo.scrub_user(PURGED_ACCOUNT_ID)
-
-    # An operator-restored older copy of the artifact re-plants the ID; the
-    # marker, not the artifact's contents, is what keeps it out.
-    _write_legacy_json(
-        tmp_path,
-        {
-            "voice_brain_dump": {
-                "mode": "selected_users",
-                "selected_users": [PURGED_ACCOUNT_ID],
-            }
-        },
-    )
     _sqlite_db_path(tmp_path).unlink()
 
     reopened = FeatureFlagOverrideRepository(
@@ -1493,49 +1421,35 @@ def test_010_FR_007_a_recreated_database_after_the_marker_never_resurrects_a_pur
     assert PURGED_ACCOUNT_ID not in raw
 
 
-def test_010_FR_007_a_malformed_legacy_artifact_still_holding_the_id_is_removed(
+def test_010_FR_007_a_leftover_runtime_json_is_ignored_and_deleted_at_startup(
     tmp_path: Path,
 ) -> None:
-    """A degraded legacy artifact must not become a privacy leak: if it cannot
-    be parsed and rewritten but still names the purged account, erasure
-    removes the artifact outright rather than leaving the ID on the volume
-    (DD-9). It is no longer a migration or runtime source by then."""
+    """The pre-ADR-0019 `runtime.json` is neither a seed nor a runtime source,
+    and a copy left on an old volume is deleted rather than kept with account
+    IDs a purge can no longer scrub (DD-9, DD-15)."""
 
     legacy_path = _legacy_path(tmp_path)
     legacy_path.parent.mkdir(parents=True, exist_ok=True)
-    _sqlite_repo(tmp_path)
     legacy_path.write_text(
-        '{"voice_brain_dump": {"selected_users": ["user_purged"',
+        json.dumps(
+            {
+                "voice_brain_dump": {
+                    "mode": "selected_users",
+                    "selected_users": [PURGED_ACCOUNT_ID],
+                }
+            }
+        ),
         encoding="utf-8",
     )
 
-    repo = FeatureFlagOverrideRepository(tmp_path / "data")
-    repo.scrub_user(PURGED_ACCOUNT_ID)
+    repo = _sqlite_repo(
+        tmp_path, legacy_states={"voice_brain_dump": FeatureFlagState.OFF}
+    )
 
     assert not legacy_path.exists()
-
-
-def test_010_FR_007_scrub_leaves_an_unrelated_legacy_artifact_untouched(
-    tmp_path: Path,
-) -> None:
-    """Erasure is surgical: an artifact that never named the purged account is
-    preserved verbatim for rollback."""
-
-    legacy_path = _write_legacy_json(
-        tmp_path,
-        {
-            "voice_brain_dump": {
-                "mode": "selected_users",
-                "selected_users": ["user_kept"],
-            }
-        },
-    )
-    before = legacy_path.read_bytes()
-
-    repo = _sqlite_repo(tmp_path)
-    repo.scrub_user(PURGED_ACCOUNT_ID)
-
-    assert legacy_path.read_bytes() == before
+    entry = repo.read().flags["voice_brain_dump"]
+    assert entry.mode is FlagMode.OFF
+    assert entry.selected_users == ()
 
 
 # ---------------------------------------------------------------------------

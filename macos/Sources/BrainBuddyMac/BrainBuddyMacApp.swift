@@ -5,9 +5,8 @@ import SwiftUI
 
 /// The launch order of contracts/mac-app-host.md §1 (T110, T129):
 /// 1. `SingleInstanceGuard`, here, before any file is read;
-/// 2. – 5. `LegacyStoreImporter` (with its X-05 notices), `LegacyCookieCleanup`,
-///    `WorkspaceHost`, `workspace.load()` (X-09 on `loadError`), run by `MacLaunch` from the
-///    window's first task while static placeholders show;
+/// 2. – 5. the Rust runtime's selection, `WorkspaceHost`, `workspace.load()` (X-09 on
+///    `loadError`), run by `MacLaunch` from the window's first task while static placeholders show;
 /// 6. `SyncTriggerSource.start()` (`MacSyncRuntime`), once the workspace is loaded and readable.
 /// The menus are X-06's `ProjectMenuCommands` and X-07's `SyncMenuCommands`; quitting waits for the
 /// workspace's last write.

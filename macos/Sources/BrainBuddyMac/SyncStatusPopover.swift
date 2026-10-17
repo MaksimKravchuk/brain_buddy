@@ -8,7 +8,7 @@ import SwiftUI
 /// `SyncPopoverContent`: last sync, what waits (or the first-upload line), the notices, the issues
 /// with Copy and Dismiss (a kept outcome in full with "Copy outcome" and "Discard outcome", then
 /// "Outcome discarded · Undo" for 5 s), "Sync now" (disabled, never hidden, where no sync can run),
-/// the email and "Sign out…", and the quiet upgrade lines with "Show in Finder". Non-modal, at most
+/// the email and "Sign out…". Non-modal, at most
 /// 480 pt tall with its own scroll; Esc or a click outside closes it. Focus on open and after Dismiss
 /// follow the content's rules, through the router.
 struct SyncStatusPopover: View {
@@ -172,10 +172,8 @@ struct SyncStatusPopover: View {
             Task { rebuildNotice = await controller.rebuildSyncedCopy() }
         case .updateApp:
             rebuildNotice = RuntimeRecoveryCard.updateHelp  // no store page of its own to open
-        case .openImportReport:
-            if let file = controller.host.importer.upgradeFiles().report { NSWorkspace.shared.activateFileViewerSelecting([file]) }
-        case .exportSavedData, .copyReference:
-            break  // Export has no entry point yet; the reference Copy is its own button.
+        case .exportSavedData, .copyReference, .openImportReport:
+            break  // Export and the import report have no entry point; the reference Copy is its own button.
         }
     }
 
@@ -224,7 +222,6 @@ struct SyncStatusPopover: View {
                         .focused($focus, equals: .signOut)
                 }
             }
-            upgradeLines(content)
         }
         .padding(16)
         .fixedSize(horizontal: false, vertical: true)
@@ -344,34 +341,6 @@ struct SyncStatusPopover: View {
         NSPasteboard.general.setString(text, forType: .string)
         copied = control
         AccessibilityNotification.Announcement("Copied").post()
-    }
-
-    @ViewBuilder
-    private func upgradeLines(_ content: SyncPopoverContent) -> some View {
-        let files = controller.host.importer.upgradeFiles()
-        if let line = content.backupLine, let file = files.backup {
-            finderLine(line, file: file, control: .backupShowInFinder)
-        }
-        if let line = content.reportLine, let file = files.report {
-            finderLine(line, file: file, control: .reportShowInFinder)
-        }
-        if let line = content.laterFileLine, let file = files.laterFile {
-            finderLine(line, file: file, control: .laterFileShowInFinder)
-        }
-    }
-
-    /// A quiet line with "Show in Finder": Finder comes forward, and the popover closes as a
-    /// transient popover does when the app loses focus.
-    private func finderLine(_ line: String, file: URL, control: SyncPopoverControl) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(line)
-                .font(MacSheetFont.meta)
-                .foregroundStyle(CarryOnColorStyle.coTextSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-            Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([file]) }
-                .buttonStyle(.macText)
-                .focused($focus, equals: control)
-        }
     }
 }
 
