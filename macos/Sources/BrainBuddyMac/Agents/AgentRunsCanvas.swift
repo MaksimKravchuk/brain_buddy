@@ -60,6 +60,7 @@ struct AgentRunsCanvas: View {
                         .frame(maxWidth: .infinity, alignment: .topLeading)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
                 .padding(.horizontal, 28).padding(.bottom, 28)
             }
             .overlay { placeholder(isEmpty: shown.isEmpty) }
