@@ -28,6 +28,9 @@ private struct AgentsAccountSectionContent: View {
     let agents: AgentsSession
     let account: LinkedAccount?
     @State private var model: AgentSettingsModel
+    /// The account last loaded. `.task` runs again whenever the section reappears (popping back from
+    /// details), and a reload then would discard a Test again still in flight and leave it "Testing…".
+    @State private var loadedAccountID: String?
 
     init(agents: AgentsSession, account: LinkedAccount?) {
         self.agents = agents
@@ -45,6 +48,8 @@ private struct AgentsAccountSectionContent: View {
         }
         .listRowBackground(Rectangle().fill(.coSurfaceCard))
         .task(id: account?.id) {
+            guard loadedAccountID != account?.id else { return }
+            loadedAccountID = account?.id
             model.update(account: account)
             await model.reload()
         }
