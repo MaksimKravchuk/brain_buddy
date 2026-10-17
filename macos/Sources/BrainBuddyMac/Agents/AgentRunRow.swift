@@ -36,7 +36,8 @@ struct AgentRunRow: View {
                     .font(needsYou ? MacRowFont.titleStrong : MacRowFont.title)
                     .foregroundStyle(CarryOnColorStyle.coTextPrimary)
             }
-            Text(item.subtitle(now: now)).macRowMeta()
+            // The tone is set first: the innermost foregroundStyle wins over macRowMeta's secondary default.
+            Text(item.subtitle(now: now)).foregroundStyle(tone.ink).macRowMeta()
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -71,13 +72,38 @@ struct AgentRunRow: View {
         .contentShape(Rectangle())
     }
 
-    /// "Only your moves get colour": Needs you accent, Lost contact warning, Failed danger, the rest secondary.
-    private var tone: (ink: CarryOnColorStyle, dot: CarryOnColorStyle) {
-        if item.state == .failed { return (.coStatusDanger, .coStatusDanger) }
-        switch item.group {
-        case .needsYou: return (.coTextAccent, .coStepDotCurrent)
-        case .lostContact: return (.coStatusWarning, .coStatusWarning)
-        case .running, .queued, .toReview: return (.coTextSecondary, .coMarkOpen)
+    /// The colour role of a run's state, shared by the canvas card and the waiting row.
+    enum Tone: Equatable {
+        case accent, warning, danger, secondary
+
+        var ink: CarryOnColorStyle {
+            switch self {
+            case .accent: return .coTextAccent
+            case .warning: return .coStatusWarning
+            case .danger: return .coStatusDanger
+            case .secondary: return .coTextSecondary
+            }
+        }
+
+        var dot: CarryOnColorStyle {
+            switch self {
+            case .accent: return .coStepDotCurrent
+            case .warning: return .coStatusWarning
+            case .danger: return .coStatusDanger
+            case .secondary: return .coMarkOpen
+            }
         }
     }
+
+    /// "Only your moves get colour": Needs you accent, Lost contact warning, Failed danger, the rest secondary.
+    static func tone(for item: AgentRunItem) -> Tone {
+        if item.state == .failed { return .danger }
+        switch item.group {
+        case .needsYou: return .accent
+        case .lostContact: return .warning
+        case .running, .queued, .toReview: return .secondary
+        }
+    }
+
+    private var tone: Tone { Self.tone(for: item) }
 }

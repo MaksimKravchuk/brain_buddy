@@ -189,6 +189,7 @@ struct AgentsManagerView: View {
                     onReplace: { controller.open(.replaceCredential(target)) }, onEdit: { controller.open(.edit(target)) })
                 if let notice = model.notice { noticeLines(notice) }
             }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         } else {
             VStack(spacing: 10) {
                 Text(AgentsCopy.noAgents).font(MacSheetFont.body).foregroundStyle(CarryOnColorStyle.coTextSecondary)
