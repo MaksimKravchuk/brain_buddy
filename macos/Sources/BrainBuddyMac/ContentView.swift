@@ -270,6 +270,7 @@ struct WorkspaceView: View {
     var body: some View {
         reviewSheets(collectionSheets(taskSheets(window)))
             .focusedSceneValue(\.closeTaskDetails, closeTaskDetailsAction)
+            .focusedSceneValue(\.handOffSelectedStep, handOffMenuAction)
     }
 
     private var sheetIsBusy: Bool { model.isSaving || isSubmittingSheet }
@@ -1359,6 +1360,14 @@ struct WorkspaceView: View {
 
     private func handOffControl(for task: TaskRecord) -> HandOffControl {
         HandOffControl(relayEnabled: model.agentAvailability.relayEnabled && model.workspace.account != nil, serverID: task.serverID)
+    }
+
+    /// Step › Hand off… for the selected step, enabled when the inspector's button is (030-FR-040).
+    private var handOffMenuAction: HandOffSelectedStepAction? {
+        guard handingOff == nil, let id = selectedTaskID, let task = model.task(id),
+            HandOffControl.menuEnabled(control: handOffControl(for: task), variant: TaskInspectorVariant(state: task.state))
+        else { return nil }
+        return HandOffSelectedStepAction(open: { handingOff = task })
     }
 
     /// G-04, attached beside the other task sheets (030-FR-013).

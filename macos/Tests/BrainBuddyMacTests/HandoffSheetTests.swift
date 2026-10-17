@@ -66,6 +66,25 @@
             #expect(!text.contains("log("))
         }
 
+        @Test("030_FR_040 030_SC_008 the Hand off… menu command is enabled only where the inspector button is")
+        func menuCommandEnabledState() {
+            let enabled = HandOffControl.enabled
+            #expect(HandOffControl.menuEnabled(control: enabled, variant: .next))
+            #expect(HandOffControl.menuEnabled(control: enabled, variant: .waiting))
+            #expect(!HandOffControl.menuEnabled(control: enabled, variant: .inbox))
+            #expect(!HandOffControl.menuEnabled(control: enabled, variant: .someday))
+            #expect(!HandOffControl.menuEnabled(control: enabled, variant: .finished(cancelled: false)))
+            #expect(!HandOffControl.menuEnabled(control: .hidden, variant: .next))
+            #expect(!HandOffControl.menuEnabled(control: .disabled(reason: "x"), variant: .next))
+        }
+
+        @Test("030_FR_040 the menu item reuses the button's wording and the sheet reads arrow keys")
+        func menuWordingAndArrowKeys() {
+            #expect(AgentsCopy.handOff == "Hand off…")
+            #expect(source().contains(".onMoveCommand"))
+            #expect(source().contains("@FocusState private var agentFocus"))
+        }
+
         @Test("030_FR_013 030_FR_040 the flag turning off closes the sheet")
         func flagOffCloses() {
             #expect(HandOffControl.sheetStaysOpen(relayEnabled: true))

@@ -442,6 +442,32 @@ struct HandoffFlowTests {
         #expect(rig.remote.sends.map(\.token) == ["b"])
     }
 
+    @Test("030_FR_040 030_SC_008 down and up move the selected agent and stop at both ends")
+    func arrowKeysMoveSelectionClamped() async {
+        let rig = make()
+        await rig.flow.start()
+        #expect(rig.flow.selectedID == "conn_a")
+        await rig.flow.moveSelection(by: -1)
+        #expect(rig.flow.selectedID == "conn_a")
+        await rig.flow.moveSelection(by: 1)
+        #expect(rig.flow.selectedID == "conn_b")
+        #expect(rig.flow.phase == .ready)
+        await rig.flow.moveSelection(by: 1)
+        #expect(rig.flow.selectedID == "conn_b")
+        await rig.flow.moveSelection(by: -1)
+        #expect(rig.flow.selectedID == "conn_a")
+        #expect(rig.remote.previews.count == 3)
+    }
+
+    @Test("030_FR_040 no agents means no neighbour to move to")
+    func noAgentsNoMove() async {
+        let rig = make(connections: [HandoffFixture.connection(id: "conn_x", name: "Offline", ready: false)])
+        await rig.flow.start()
+        #expect(rig.flow.agentID(movingBy: 1) == nil)
+        await rig.flow.moveSelection(by: 1)
+        #expect(rig.flow.selectedID == nil)
+    }
+
     @Test("030_FR_014 opening the sheet tests a listed-ready agent again; one that stopped is not offered")
     func stoppedAgentIsNotOffered() async {
         let rig = make(connections: [HandoffFixture.connection(id: "conn_a", name: "Hermes")])
