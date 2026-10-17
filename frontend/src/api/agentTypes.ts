@@ -231,19 +231,6 @@ export interface AgentPushCallback {
   disclosure: string | null;
 }
 
-export interface AgentReportingContract {
-  callback_url: string;
-  connection_id: string;
-  connection_header: "X-BrainBuddy-Connection";
-  timestamp_header: "X-BrainBuddy-Timestamp";
-  signature_header: "X-BrainBuddy-Signature";
-  timestamp_format: "ascii-base-10-unix-seconds-no-sign-space-or-leading-zero";
-  signature_algorithm: "hmac-sha256";
-  signing_bytes: "timestamp_bytes + b'.' + raw_body";
-  signature_format: "v1=<lowercase hex>";
-  body_envelope_version: string;
-}
-
 /** Everything that will leave BrainBuddy, itemised for review before dispatch. */
 export interface AgentManifestResponse {
   token: string;

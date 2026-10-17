@@ -1390,7 +1390,6 @@ def test_020_FR_011_task_reconciliation_never_misreads_a_review_record(
         api.container.task_service._reconcile_idempotent_result(
             owner_id=api.owner_id, key=key
         )
-        api.container.task_service._reconcile_idempotent_results(owner_id=api.owner_id)
 
 
 @pytest.mark.parametrize(

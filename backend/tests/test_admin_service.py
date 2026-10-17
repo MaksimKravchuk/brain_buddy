@@ -391,7 +391,7 @@ def test_009_FR_003_a_traversal_account_id_never_reaches_path_construction(
 ) -> None:
     """The charset guard runs before the repository, not after it.
 
-    `UserRepository._user_path` interpolates the id into a filename, so a
+    The legacy user-file layout interpolated the id into a filename, so a
     rejection that happened only after the fetch would still have built (and
     resolved) an attacker-chosen path.
     """

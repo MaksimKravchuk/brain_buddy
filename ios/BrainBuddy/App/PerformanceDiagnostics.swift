@@ -320,6 +320,8 @@ extension AppRoute {
         case .syncIssues: "sync issues"
         case .review: "review"
         case .performance: "performance"
+        case .account: "account"
+        case .signInMethods: "sign-in methods"
         }
     }
 }

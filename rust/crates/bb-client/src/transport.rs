@@ -575,12 +575,6 @@ impl Syncer {
         self.capabilities_checked = false;
     }
 
-    /// Whether sends are backing off at `now`, and until when.
-    pub fn send_backoff_until(&self) -> Option<Duration> {
-        let now = self.clock.now();
-        (!self.send_backoff.ready(now)).then(|| self.send_backoff.until())
-    }
-
     // ------------------------------------------------------------------- one round
 
     /// Capabilities (once per resume), a pull, registration of a pending epoch,

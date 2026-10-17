@@ -639,10 +639,6 @@ impl<T, const MAX: usize> Limited<T, MAX> {
     pub fn as_slice(&self) -> &[T] {
         &self.0
     }
-
-    pub fn into_vec(self) -> Vec<T> {
-        self.0
-    }
 }
 
 impl<T, const MAX: usize> Default for Limited<T, MAX> {

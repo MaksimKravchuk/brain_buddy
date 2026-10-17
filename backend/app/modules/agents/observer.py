@@ -365,18 +365,6 @@ class AgentObserver:
             return True
         return run.exchange_state != "interrupted"
 
-    def recover_interrupted_exchanges(self) -> int:
-        """Both halves of restart recovery, in one synchronous call.
-
-        Kept for callers that want the whole thing to have happened by the time
-        it returns. Boot is deliberately not one of them (`main.py`).
-        """
-
-        pending = self.mark_interrupted_exchanges()
-        for owner_id, run_id in pending:
-            self.service.resolve_interrupted_exchange(run_id, owner_id=owner_id)
-        return len(pending)
-
     # --- the observation lane -----------------------------------------------
 
     def run_once(self, now: datetime | None = None) -> int:

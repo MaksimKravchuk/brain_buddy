@@ -92,6 +92,10 @@ final class FakeHandoffRemote: HandoffRemote, AgentRunActionsRemote {
         var runCalls: [String] = []
         var runKeys: [UUID] = []
         var previewFailure: APIError?
+        /// Per-agent answers to the test the sheet runs on open; an agent with none answers with its listed row.
+        var testResults: [String: Result<AgentConnectionDTO, APIError>] = [:]
+        var testCalls: [String] = []
+        var testKeys: [UUID] = []
     }
 
     private let state = Mutex(State())
@@ -111,7 +115,24 @@ final class FakeHandoffRemote: HandoffRemote, AgentRunActionsRemote {
     var runCalls: [String] { state.withLock { $0.runCalls } }
     var runKeys: [UUID] { state.withLock { $0.runKeys } }
 
+    func scriptTest(_ id: String, _ result: Result<AgentConnectionDTO, APIError>) { state.withLock { $0.testResults[id] = result } }
+    var testCalls: [String] { state.withLock { $0.testCalls } }
+    var testKeys: [UUID] { state.withLock { $0.testKeys } }
+
     func agentConnections() async throws(APIError) -> [AgentConnectionDTO] { state.withLock { $0.connections } }
+
+    func testAgentConnection(id: String, idempotencyKey: UUID) async throws(APIError) -> AgentConnectionDTO {
+        let result: Result<AgentConnectionDTO, APIError> = state.withLock { state in
+            state.testCalls.append(id)
+            state.testKeys.append(idempotencyKey)
+            if let scripted = state.testResults[id] { return scripted }
+            guard let listed = state.connections.first(where: { $0.id == id }) else {
+                return .failure(HandoffFixture.error(.notFound(resource: nil, id: id), status: 404))
+            }
+            return .success(listed)
+        }
+        return try result.get()
+    }
 
     func previewAgentHandoff(taskID: String, connectionID: String, includeDetails: Bool, supportingItems: [AgentContextItemDTO]) async throws(APIError) -> AgentManifestDTO {
         let result: Result<AgentManifestDTO, APIError> = state.withLock { state in
@@ -419,5 +440,41 @@ struct HandoffFlowTests {
         #expect(!rig.flow.needsPassword)
         await rig.flow.send()
         #expect(rig.remote.sends.map(\.token) == ["b"])
+    }
+
+    @Test("030_FR_014 opening the sheet tests a listed-ready agent again; one that stopped is not offered")
+    func stoppedAgentIsNotOffered() async {
+        let rig = make(connections: [HandoffFixture.connection(id: "conn_a", name: "Hermes")])
+        rig.remote.scriptTest("conn_a", .success(HandoffFixture.connection(id: "conn_a", name: "Hermes", ready: false)))
+        await rig.flow.start()
+        #expect(rig.remote.testCalls == ["conn_a"])
+        #expect(rig.flow.agents.isEmpty)
+        #expect(rig.flow.phase == .noReadyAgent)
+        #expect(rig.remote.previews.isEmpty)
+    }
+
+    @Test("030_FR_014 030_FR_015 an agent still ready on its test is offered and previewed; an unreachable one is dropped")
+    func stillReadyAgentIsOffered() async {
+        let rig = make()
+        rig.remote.scriptTest("conn_a", .failure(HandoffFixture.error(.server, status: 502)))
+        await rig.flow.start()
+        let tested = rig.remote.testCalls.sorted()
+        #expect(tested == ["conn_a", "conn_b"])
+        #expect(Set(rig.remote.testKeys).count == 2, "each test carries its own key")
+        #expect(rig.flow.agents.map(\.name) == ["Claude"])
+        #expect(rig.flow.selectedID == "conn_b")
+        #expect(rig.flow.phase == .ready)
+        #expect(rig.remote.previews.count == 1)
+    }
+
+    @Test("030_FR_018 when every test on open fails for want of a connection, the sheet says offline")
+    func allTestsOfflineSaysOffline() async {
+        let rig = make()
+        rig.remote.scriptTest("conn_a", .failure(HandoffFixture.offline))
+        rig.remote.scriptTest("conn_b", .failure(HandoffFixture.offline))
+        await rig.flow.start()
+        #expect(rig.flow.phase == .failed(.offline))
+        #expect(rig.flow.agents.isEmpty)
+        #expect(rig.remote.previews.isEmpty)
     }
 }
