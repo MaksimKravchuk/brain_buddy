@@ -49,16 +49,24 @@ struct AgentDetailsView: View {
                         .textSelection(.enabled)
                 }
             }
-            HStack(spacing: 8) {
-                Button(isTesting ? AgentsCopy.testing : AgentsCopy.testAgain, action: onTest).disabled(!canTest)
-                if canReplaceCredential {
-                    Button(AgentsCopy.replaceCredentialAction, action: onReplace).disabled(!controlsEnabled)
-                }
-                Button(AgentsCopy.edit, action: onEdit).disabled(!controlsEnabled)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { buttons }
+                VStack(alignment: .leading, spacing: 8) { buttons }
             }
             .buttonStyle(.carryOnSecondary)
             .padding(.top, 10).padding(.leading, 164)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Buttons never break a word: each keeps its natural width and the row drops to a column instead.
+    @ViewBuilder private var buttons: some View {
+        Button(isTesting ? AgentsCopy.testing : AgentsCopy.testAgain, action: onTest)
+            .disabled(!canTest).lineLimit(1).fixedSize()
+        if canReplaceCredential {
+            Button(AgentsCopy.replaceCredentialAction, action: onReplace)
+                .disabled(!controlsEnabled).lineLimit(1).fixedSize()
+        }
+        Button(AgentsCopy.edit, action: onEdit).disabled(!controlsEnabled).lineLimit(1).fixedSize()
     }
 }
