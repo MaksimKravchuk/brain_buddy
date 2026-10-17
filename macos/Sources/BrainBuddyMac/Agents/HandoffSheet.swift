@@ -74,7 +74,10 @@ struct HandoffSheet: View {
             ProgressView().controlSize(.small)
         case .noReadyAgent:
             Text(verbatim: AgentsCopy.noReadyAgent).font(MacRowFont.title).foregroundStyle(CarryOnColorStyle.coTextPrimary)
-            Button(AgentsCopy.openSettings) { openSettings() }.buttonStyle(.carryOnSecondary)
+            Button(AgentsCopy.openSettings) {
+                model.agentAvailability.requestAgentsTab()
+                openSettings()
+            }.buttonStyle(.carryOnSecondary)
         default:
             agentRows
             receipt

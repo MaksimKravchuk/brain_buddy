@@ -231,18 +231,6 @@ class DeviceCommandExecutor(Protocol):
         ...
 
 
-class NoDeviceExecutor:
-    """Executes nothing: every unseen command is UPGRADE_REQUIRED, replay works."""
-
-    def supports(self, command_type: str) -> bool:
-        return False
-
-    def execute(
-        self, command: ReceiptCommand[Connection], envelope: Mapping[str, Any]
-    ) -> dict[str, Any]:
-        raise ProtocolFailure("UPGRADE_REQUIRED")
-
-
 def public_result(value: Any) -> Any:
     """A stored response document without its server-private members."""
     if isinstance(value, list):

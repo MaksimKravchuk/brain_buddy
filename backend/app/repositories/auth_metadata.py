@@ -65,26 +65,6 @@ class AuthMetadataRepository:
     def __init__(self, root: Path, store: AuthStore | None = None) -> None:
         self.store = store if store is not None else AuthStore(root)
 
-    def list_bindings(self, user_id: str) -> list[sqlite3.Row]:
-        with self.store.connection() as connection:
-            return list(
-                connection.execute(
-                    "SELECT * FROM auth_identity_bindings WHERE user_id=? ORDER BY provider,id",
-                    (user_id,),
-                ).fetchall()
-            )
-
-    def delete_for_user(self, user_id: str) -> int:
-        """Remove owned metadata; cascades erase dependent mail and handoff secrets."""
-        removed = 0
-        with self.store.transaction() as connection:
-            for table in _OWNED_TABLES:
-                # Table identifiers come solely from the fixed module allowlist.
-                removed += connection.execute(
-                    f"DELETE FROM {table} WHERE user_id=?", (user_id,)  # noqa: S608
-                ).rowcount
-        return removed
-
     def cleanup_expired(self, *, now: datetime, limit: int = 100) -> int:
         """Bound total direct deletions, erasing expired sealed payloads with rows."""
         if not 1 <= limit <= 1000:

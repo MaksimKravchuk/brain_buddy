@@ -1,0 +1,288 @@
+{
+  "architect_action": "Hold implementation and put this decision packet to the human. These are product decisions; no agent may answer them for them. Every lens that produced evidence ran on one provider, so this panel's agreement is one vendor's opinion counted several times.",
+  "artifacts_changed_since_preflight": false,
+  "artifacts_digest": "3103d4009d8d6f5da0aedc398c49c15e014eaab94ab19fcb449f039012705bfa",
+  "declared_risk": "medium",
+  "degraded_lenses": [],
+  "human_signoff": {
+    "approved_by": "Max (current chat)",
+    "approved_on": "2026-10-17",
+    "artifacts_digest": "3103d4009d8d6f5da0aedc398c49c15e014eaab94ab19fcb449f039012705bfa",
+    "rationale": "The current human request explicitly approves parallel complete backend/mutation and native iOS verification, full CI, ordinary merge queue and timing measurement. This sign-off covers that proposed CI outcome, extra concurrent runners and unchanged product/protections. It does not assert approval of the separately pending bounded delivery exception; that unresolved issue remains explicit in the artifacts.",
+    "run_id": "036-parallel-20261017-r2"
+  },
+  "missing_reviewers": [],
+  "model_unverified_lenses": [],
+  "oracle_unknown_lenses": [],
+  "panel_correlated": true,
+  "panel_oracles": {
+    "codex/gpt-5.6-sol": 6
+  },
+  "panel_providers": {
+    "codex": 6
+  },
+  "product_decisions": [
+    {
+      "affected_acceptance": "spec.md Clarifications and FR-006/SC-003; plan.md Verification and delivery; tasks T001, T002, and T005-T007.",
+      "category": "safety-compliance",
+      "options": [
+        "Approve a Spec 036-only exception with named scope, compensating controls, expiration, and an explicit allowance for the reviewed PR-head SHA to differ from the tested and landed merge-group SHA.",
+        "Do not approve the exception; use ADR-0008's compliant ASK landing procedure or repair and formally amend the governance contract before delivery."
+      ],
+      "question": "For Spec 036 only, do you approve a time-bounded exception that uses independent review of the frozen PR-head SHA before enqueue, unchanged Full CI and Docker Images checks, the existing merge queue, and final tested/landed-SHA verification despite the absent restrict_updates and final-merge-SHA review hold required by ADR-0008?",
+      "reviewer": "requirements-consistency",
+      "why_needed": "Every GitHub workflow change is ASK. The artifacts deliberately block implementation and queue use pending this fresh decision, and the prior Spec 035 exception was explicitly non-reusable."
+    },
+    {
+      "affected_acceptance": "Blocks T001, T002, T005, T006, and T007; determines whether FR-005 and FR-006 and SC-003 can be accepted through the proposed ordinary merge-queue procedure.",
+      "category": "permissions",
+      "options": [
+        "Approve a spec-036-only exception covering both PRs, with independent frozen PR-head review before each queue entry, unchanged Full CI and Docker Images protections, final queue/main SHA verification, recorded provenance, and expiry immediately after both landings.",
+        "Do not approve an exception; use ADR-0008's recorded ASK process with exact-SHA green CI and an audited temporary ruleset intervention for each landing.",
+        "Defer both landings until the canonical restrict_updates, landing identity, and fail-closed review-hold architecture is restored."
+      ],
+      "question": "May spec 036 use a fresh, time-bounded exception to the ADR-0008 ASK landing procedure for both the baseline planning/.github/README PR and the workflow implementation PR?",
+      "reviewer": "architecture-consistency",
+      "why_needed": "Both landings touch the mechanically ASK-class .github/ prefix. The live rules recorded at docs/runbooks/results/manual-mac-028-030-retest-2026-10-16.md:92-100 lack the normative restrict_updates configuration and a mechanical independent-review hold. The proposed ordinary queue procedure therefore substitutes frozen PR-head review and final-SHA read-back for ADR-0008's exact-SHA ASK procedure. Spec 036 explicitly leaves this permission pending at spec.md:28 and plan.md:22-24, and the spec-035 exception at specs/035-shared-rust-bridge-cache/founder-acceptance.json:5-12 was narrowly scoped and cannot be reused."
+    },
+    {
+      "affected_acceptance": "Spec clarification; FR-006; Story 1 scenario 5; tasks T001, T005, and T006; exact reviewed/tested/landed SHA evidence.",
+      "category": "permissions",
+      "options": [
+        "Use the binding ADR-0008 ASK procedure: recorded approval, green required CI on the exact landing SHA, and an audited temporary ruleset intervention.",
+        "Grant a one-time Spec 036 exception: independently review the frozen PR head before queueing, retain unchanged required queue CI and protections, and verify the final tested queue SHA at landing."
+      ],
+      "question": "Which landing permission applies to this ASK-class workflow change?",
+      "reviewer": "testability-evidence",
+      "why_needed": "ADR-0030 keeps GitHub workflow changes ASK and preserves ADR-0008 landing mechanics, while the proposed ordinary merge-queue procedure intentionally omits the normal temporary ruleset intervention and merge-group-SHA review hold. Only the owner can authorize that bounded exception."
+    },
+    {
+      "affected_acceptance": "Spec clarification; FR-005 and FR-006; T001, T002, T005, and T006; exact-SHA and ASK-class Definition of Done requirements.",
+      "category": "safety-compliance",
+      "options": [
+        "Restore the canonical landing controls and deliver both PRs through the ADR-0008 ASK procedure with exact-SHA CI and audited intervention.",
+        "Approve a time-bounded Spec 036 exception covering only the baseline and implementation PRs, with frozen PR-head review, unchanged required checks, final-SHA verification, protection read-backs, expiry, and recorded compensating measures.",
+        "Do not proceed with Spec 036."
+      ],
+      "question": "How should Spec 036\u2019s two ASK-class landings proceed: restore and follow the canonical ADR-0008 controls, approve a one-time ordinary merge-queue exception, or stop the feature?",
+      "reviewer": "adversarial-high-risk",
+      "why_needed": "The current rules cannot enforce independent review of the generated merge-group SHA and lack the normative restrict_updates boundary. Choosing the queue exception therefore accepts a material deviation from the repository\u2019s CI trust and exact-SHA landing controls; an implementing agent cannot authorize that waiver."
+    }
+  ],
+  "reviewers": [
+    {
+      "oracle": {
+        "artifacts_digest": "3103d4009d8d6f5da0aedc398c49c15e014eaab94ab19fcb449f039012705bfa",
+        "degraded": false,
+        "executable": "/Users/max/.local/bin/codex",
+        "integration": "codex",
+        "model": "gpt-5.6-sol"
+      },
+      "role": "requirements-consistency",
+      "summary": "The backend, mutation, coverage, and native-lane requirements are substantially aligned with the plan. Delivery is not ready: the artifacts simultaneously claim ordinary queue authorization and state that a fresh governance exception is pending, while the proposed PR-head review does not satisfy the existing final-SHA review contract without that exception. The baseline queue task is also not explicitly dependent on resolving this decision.",
+      "verdict": "product-decision-required"
+    },
+    {
+      "oracle": {
+        "artifacts_digest": "3103d4009d8d6f5da0aedc398c49c15e014eaab94ab19fcb449f039012705bfa",
+        "degraded": false,
+        "executable": "/Users/max/.local/bin/codex",
+        "integration": "codex",
+        "model": "gpt-5.6-sol"
+      },
+      "role": "architecture-consistency",
+      "summary": "The CI-only boundary, data ownership, rollback, mutation aggregation, and native-lane direction are broadly coherent. Two execution contracts still require correction: backend shards would inherit the existing 95% per-invocation coverage gate, and dependent aggregators lack an explicit always-run failure-evidence path. Separately, ordinary merge-queue delivery of the ASK-class baseline and implementation changes requires a fresh, bounded owner permission.",
+      "verdict": "product-decision-required"
+    },
+    {
+      "oracle": {
+        "artifacts_digest": "3103d4009d8d6f5da0aedc398c49c15e014eaab94ab19fcb449f039012705bfa",
+        "degraded": false,
+        "executable": "/Users/max/.local/bin/codex",
+        "integration": "codex",
+        "model": "gpt-5.6-sol"
+      },
+      "role": "testability-evidence",
+      "summary": "The evidence strategy is broadly proportionate: helper and validator tests cover completeness and fail-closed behavior, while exact-SHA CI, artifacts, protection snapshots, and comparable queue runs cover operational acceptance. Approval is blocked by contradictory landing authorization and by tasks that still combine several independently verifiable outcomes into one non-executable integration lane.",
+      "verdict": "product-decision-required"
+    },
+    {
+      "oracle": {
+        "artifacts_digest": "3103d4009d8d6f5da0aedc398c49c15e014eaab94ab19fcb449f039012705bfa",
+        "degraded": false,
+        "executable": "/Users/max/.local/bin/codex",
+        "integration": "codex",
+        "model": "gpt-5.6-sol"
+      },
+      "role": "privacy-consent-security",
+      "summary": "No privacy, consent, or security planning gaps remain. The feature is CI-only and introduces no user-content processing, product authorization path, account record, consent flow, or destructive product action. CI evidence has explicit 7-day PR and 30-day non-PR retention, is excluded from account export/purge because it contains no account data, and is constrained to synthetic identifiers and source-derived results. Raw JUnit remains runner-local; coverage paths must be repository-relative; workspace, home, temporary, absolute, parent-traversal, and unexpected paths fail closed without being echoed. Existing read-only workflow permissions, secret isolation, required-job propagation, and exact-SHA checks are preserved. Consent gating, per-owner scoping, and 404-versus-403 behavior are therefore not applicable rather than omitted.",
+      "verdict": "pass"
+    },
+    {
+      "oracle": {
+        "artifacts_digest": "3103d4009d8d6f5da0aedc398c49c15e014eaab94ab19fcb449f039012705bfa",
+        "degraded": false,
+        "executable": "/Users/max/.local/bin/codex",
+        "integration": "codex",
+        "model": "gpt-5.6-sol"
+      },
+      "role": "ux-accessibility-mobile",
+      "summary": "This lens does not apply. The feature is limited to CI execution and evidence aggregation; design.md explicitly declares no rendered product UI, copy, navigation, accessibility interaction, or mobile journey changes, while plan.md excludes all product code. Per the rubric\u2019s scope guard, loading, empty, error, partial-failure UI, keyboard/focus, mobile viewport, and interruption/resume requirements are therefore not applicable.",
+      "verdict": "pass"
+    },
+    {
+      "oracle": {
+        "artifacts_digest": "3103d4009d8d6f5da0aedc398c49c15e014eaab94ab19fcb449f039012705bfa",
+        "degraded": false,
+        "executable": "/Users/max/.local/bin/codex",
+        "integration": "codex",
+        "model": "gpt-5.6-sol"
+      },
+      "role": "adversarial-high-risk",
+      "summary": "The sharding design is generally fail-closed and introduces no product-data migration, public API, consent, or irreversible product-state change. Approval is blocked because this ASK-class change proposes an ordinary merge-queue exception to binding landing and exact-SHA controls, and that exception is explicitly still awaiting the owner\u2019s decision. Current high-risk approval evidence must also be rebound to the corrected artifacts before implementation.",
+      "verdict": "product-decision-required"
+    }
+  ],
+  "risk": "high",
+  "risk_escalated_by_classifier": true,
+  "run_id": "036-parallel-20261017-r2",
+  "single_provider_panel": true,
+  "stale_reviews": [],
+  "status": "product-decision-required",
+  "technical_findings": [
+    {
+      "category": "delivery authorization and exact-SHA acceptance",
+      "description": "The acceptance contract has no single authoritative delivery state. The specification and intake say ordinary merge-queue delivery is authorized, but the same clarification and plan say the required fresh exception is pending and implementation or queue entry is blocked. The proposed procedure reviews the frozen PR head, whereas FR-006 and the repository delivery contract otherwise require independent evidence bound to the delivered SHA. This difference is permissible only if the owner knowingly accepts the bounded exception.",
+      "evidence": [
+        "specs/036-parallel-required-ci/spec.md:20 requires independent exact-SHA review and real queue/main evidence.",
+        "specs/036-parallel-required-ci/spec.md:28 both says ordinary queue delivery is authorized and says a fresh explicitly recorded exception is still pending.",
+        "specs/036-parallel-required-ci/intake.md:2-4 describes ordinary protected queue delivery as already approved and part of Done.",
+        "specs/036-parallel-required-ci/plan.md:2 classifies the workflow change as ASK/high; plan.md:22 blocks implementation and queue use until a fresh exception is accepted.",
+        "specs/036-parallel-required-ci/checklists/requirements.md:2 marks the owner outcome accepted despite the unresolved exception.",
+        "docs/decisions/0030-pre-launch-narrow-ask-class.md:37-45 keeps every GitHub workflow and the gate-integrity manifest ASK.",
+        "docs/decisions/0008-verified-trunk-serial-landing.md:64-75 and 284-299 require recorded approval, exact-SHA green CI, and the audited ASK landing procedure.",
+        "specs/035-shared-rust-bridge-cache/founder-acceptance.json:5-12 limits the earlier exception to Spec 035 and therefore cannot authorize Spec 036."
+      ],
+      "recommendation": "Obtain the product decision below, then make spec.md, intake.md, plan.md, the checklist, and tasks.md state one consistent status. If the exception is approved, explicitly state that reviewed PR-head SHA may differ from the tested and landed merge-group SHA, define compensating controls and expiry, and amend FR-006 accordingly. Otherwise use the binding ADR-0008 procedure.",
+      "reviewer": "requirements-consistency",
+      "severity": "blocking"
+    },
+    {
+      "category": "blocked-task ordering",
+      "description": "T002 can be read as executable before T001 because only the helper lane is explicitly marked as depending on T001. T002 itself lands an ASK-path baseline through the queue, directly contradicting plan.md's instruction that no queue operation occur before the pending exception is resolved.",
+      "evidence": [
+        "specs/036-parallel-required-ci/tasks.md:3-5 places T001 and T002 in the same lane but marks only T003 as occurring after T001.",
+        "specs/036-parallel-required-ci/plan.md:22 says implementation and queue entry remain blocked until the owner answers.",
+        "specs/036-parallel-required-ci/plan.md:24 requires the baseline planning and .github/README.md candidate to land through the queue.",
+        "docs/decisions/0030-pre-launch-narrow-ask-class.md:37-45 classifies the .github baseline path and gate-integrity manifest as ASK."
+      ],
+      "recommendation": "Make T002 explicitly depend on successful completion of T001 and the recorded owner decision. Keep every subsequent queue or landing task downstream of that prerequisite.",
+      "reviewer": "requirements-consistency",
+      "severity": "important"
+    },
+    {
+      "category": "unowned documentation scope",
+      "description": "The plan includes ios/README.md in the write scope, but the baseline task says planning plus .github/README.md only and no later task owns the iOS documentation change. The intended baseline candidate therefore has an ambiguous write set.",
+      "evidence": [
+        "specs/036-parallel-required-ci/plan.md:5 includes both ios/README.md and .github/README.md in the planned write scope.",
+        "specs/036-parallel-required-ci/plan.md:24 describes the baseline as the planning package plus a small .github/README.md timing note.",
+        "specs/036-parallel-required-ci/tasks.md:4 describes T002 as planning plus .github/README.md only; tasks.md:6-11 assign later work to helper, workflow, validator, and evidence surfaces without owning ios/README.md."
+      ],
+      "recommendation": "Either define T002 as a documented relocation touching both README files or remove ios/README.md from the write scope. Record the exact baseline paths so its review and path-filter comparison are reproducible.",
+      "reviewer": "requirements-consistency",
+      "severity": "advisory"
+    },
+    {
+      "category": "Coverage aggregation ordering",
+      "description": "The backend-shard execution contract contradicts the repository's current pytest configuration. The plan says each shard runs pytest but does not evaluate the whole-suite floor, while every pytest invocation currently inherits --cov-fail-under=95. Only collection explicitly disables default addopts, and the later statement that existing CLI thresholds remain intact leaves no defined override for partial executions. An implementation following the plan would evaluate each partial shard against the whole-suite threshold before coverage can be combined, violating FR-002's aggregation-before-floor contract.",
+      "evidence": [
+        "specs/036-parallel-required-ci/plan.md:7 disables default coverage addopts only for collect-only, then requires shard pytest execution and states that no shard evaluates the whole-suite floor.",
+        "specs/036-parallel-required-ci/plan.md:9 says existing CLI coverage options and thresholds stay intact while moving the floor to backend-results.",
+        "backend/pyproject.toml:210-212 defines --cov-fail-under=95 in pytest addopts, so it applies to every shard unless explicitly overridden.",
+        "github workflow .github/workflows/ci.yml:606-616 explicitly passes --cov-fail-under=0 for the existing partial selected-test path but not for full-suite execution.",
+        "specs/036-parallel-required-ci/spec.md:16 requires both raw databases to be combined before applying the unchanged full-suite floor."
+      ],
+      "recommendation": "State explicitly that every nonempty shard disables only the per-invocation floor, for example with --cov-fail-under=0 or an equivalent addopts override, while retaining branch/context collection and Allure output. Enforce the unchanged 95% floor only after backend-results combines both databases and produces the canonical XML. Add a workflow-validator assertion that rejects reintroduction of a per-shard floor.",
+      "reviewer": "architecture-consistency",
+      "severity": "blocking"
+    },
+    {
+      "category": "Failure handling and diagnostic ownership",
+      "description": "The plan makes backend-results and the mutation judge depend on matrix jobs but does not specify always-run job semantics when a dependency fails or is cancelled. Under the current graph pattern, such a dependent job is skipped unless explicitly guarded. Moving canonical backend artifacts and the blocking mutation Allure producer into those jobs can therefore remove diagnostic evidence precisely when a shard fails, despite the accepted fail-closed and retained-diagnostics requirements.",
+      "evidence": [
+        "specs/036-parallel-required-ci/spec.md:11 requires Full CI to fail on failed, cancelled, or missing shard/native work while preserving existing diagnostic evidence.",
+        "specs/036-parallel-required-ci/plan.md:9 assigns canonical backend Allure and coverage ownership to backend-results and says diagnostics are copied before failures are checked.",
+        "specs/036-parallel-required-ci/plan.md:13 moves blocking-gate Allure production from the mutation measurement to the judge and promises failure diagnostics are always retained.",
+        "specs/036-parallel-required-ci/tasks.md:8 requires validation of failed, cancelled, and skipped propagation plus retained diagnostics but does not define the job-level execution contract that permits this.",
+        "github workflow .github/workflows/ci.yml:1430-1474 currently creates and uploads mutation diagnostics under if: always() in mutation-head.",
+        "github workflow .github/workflows/ci.yml:1486-1490 shows the current mutation judge depends on both measurements without an always-run job condition, while .github/workflows/ci.yml:1934-1952 demonstrates the repository's explicit if: always() pattern for a failure-reporting dependent job."
+      ],
+      "recommendation": "Define backend-results and the mutation judge as always-running dependent jobs. Their shard upload steps must also run on failure; aggregators should download whatever evidence exists, publish or synthesize diagnostics first, then fail on missing, corrupt, failed, or cancelled inputs. Intentional empty partitions remain acceptable only after their manifests validate. Extend the workflow validator with negative cases that remove the always-run condition or diagnostic upload.",
+      "reviewer": "architecture-consistency",
+      "severity": "important"
+    },
+    {
+      "category": "approval and exact-SHA evidence",
+      "description": "The artifacts simultaneously claim that ordinary merge-queue delivery is authorized and that its required bounded exception remains unanswered. This makes the accepted landing procedure\u2014and therefore the exact-SHA evidence required by FR-006\u2014indeterminate.",
+      "evidence": [
+        "specs/036-parallel-required-ci/spec.md:28 says the owner authorizes ordinary queue delivery, then says a fresh bounded exception is pending and implementation must not begin.",
+        "specs/036-parallel-required-ci/plan.md:2 says the current request authorizes the bounded work and existing queue, while plan.md:22 says implementation is blocked until the owner accepts the exception.",
+        "specs/036-parallel-required-ci/tasks.md:3 makes resolving the exception part of T001, and tasks.md:11 conditions T006 on the owner-approved procedure.",
+        "docs/decisions/0008-verified-trunk-serial-landing.md:64-75 requires recorded approval, exact-SHA green CI, and the ASK landing intervention.",
+        "docs/decisions/0030-pre-launch-narrow-ask-class.md:5-6 and 37-45 keep GitHub workflow changes ASK while preserving ADR-0008 landing mechanics."
+      ],
+      "recommendation": "Until the owner answers, state consistently that ordinary queue landing is not yet authorized. After the decision, record one procedure and its provenance across spec.md, plan.md, tasks.md, and quickstart.md, including which SHA is independently reviewed, which SHA CI tests, how SHA drift invalidates evidence, and how landing equality is verified.",
+      "reviewer": "testability-evidence",
+      "severity": "blocking"
+    },
+    {
+      "category": "task-lane executability",
+      "description": "The revised task list names lanes but still places backend aggregation, both mutation matrices, native splitting, workflow graph enforcement, validators, Makefile integration, and the gate-manifest digest into T004. It lacks exact path-level subtasks, story labels, and lane-specific commands/evidence, so those outcomes cannot be assigned or closed independently without reconstructing the plan. Parallel implementation would also conflict because the integration outcomes share the workflow and validator files.",
+      "evidence": [
+        "specs/036-parallel-required-ci/tasks.md:5-8 gives T003 concrete helper ownership but combines every workflow integration outcome into T004.",
+        "specs/036-parallel-required-ci/tasks.md:9-12 provides final checks but no exact evidence-output paths or per-outcome closure criteria.",
+        "specs/036-parallel-required-ci/plan.md:5 lists the concrete write surfaces that tasks.md does not allocate individually.",
+        "specs/036-parallel-required-ci/plan.md:27 claims separate helper and workflow/validator ownership, but tasks.md does not decompose the latter into independently verifiable work.",
+        "specs/036-parallel-required-ci/spec.md:5-12 defines one user story, yet tasks.md contains no [US1] mappings.",
+        "specs/036-parallel-required-ci/evidence/campaign-1-summary.json:183-194 required separate backend/coverage, mutation, native, verification, and timing lanes; the revised T004 still combines the first three.",
+        "specify task contract .specify/agent-commands/speckit-tasks/SKILL.md:169-200 requires immediately executable tasks, story labels, parallel markers where valid, and exact file paths.",
+        ".specify/memory/constitution.md:84 and 106 require explicit contracts, concrete paths, and dependency-organized portable tasks."
+      ],
+      "recommendation": "Decompose T004 into path-specific backend/coverage, mutation, native, and workflow-contract verification tasks, each mapped to FR/SC/scenarios with its focused command and expected artifact. Because these tasks share .github/workflows/ci.yml and scripts/test_validate_ci_artifacts.py, keep one integration owner or order them serially; do not label them parallel. Mark only genuinely disjoint work\u2014such as baseline evidence and helper implementation after T001\u2014as parallel, and add exact evidence paths for T005-T007.",
+      "reviewer": "testability-evidence",
+      "severity": "blocking"
+    },
+    {
+      "category": "ASK landing authority and exact-SHA trust boundary",
+      "description": "Both the baseline and implementation paths touch ASK-class .github or landing-gate surfaces, but the proposed procedure uses the current ordinary merge queue, reviews only the frozen PR head, and merely verifies the generated final SHA. The active protections have no approval hold or restrict_updates rule, while the workflow being changed is candidate-controlled. Final-SHA read-back cannot substitute for independent review bound to that SHA or for the trusted ASK landing boundary. The artifacts correctly acknowledge that this is an unresolved exception and block implementation, so the plan cannot pass until the owner accepts or rejects it.",
+      "evidence": [
+        "specs/036-parallel-required-ci/spec.md:19-20 requires preserved protections and independent exact-SHA evidence, while spec.md:28 says the live rules lack both the normative update restriction and a mechanical review hold and declares the fresh exception pending.",
+        "specs/036-parallel-required-ci/plan.md:2 classifies the work ASK/high; plan.md:22 proposes frozen PR-head review plus ordinary queue delivery and explicitly blocks implementation until owner acceptance.",
+        "specs/036-parallel-required-ci/plan.md:24 and tasks.md:3-4 require a separate baseline PR containing .github/README.md before the implementation PR, so the exception must cover two ASK-class queue landings rather than one.",
+        "docs/decisions/0030-pre-launch-narrow-ask-class.md:32-48 keeps every .github surface and the gate-integrity manifest ASK and explicitly preserves ADR-0008 landing mechanics.",
+        "docs/decisions/0008-verified-trunk-serial-landing.md:64-75 requires recorded ASK approval, exact-SHA green CI, and an audited temporary intervention; lines 99-105 explain why candidate-controlled CI must not promote main; lines 130-140 require restrict_updates and trusted-main classification.",
+        "github workflow .github/workflows/ci.yml:6-11 states that the workflow definition is candidate-controlled, and lines 28-40 show merge-group execution uses the generated queue SHA.",
+        "docs/runbooks/results/manual-mac-028-030-retest-2026-10-16.md:92-100 records that the active ruleset has no update restriction and does not require an approval.",
+        "specs/035-shared-rust-bridge-cache/founder-acceptance.json:5-12 limits the previous exception to spec 035 and records compensating controls, so it cannot authorize spec 036."
+      ],
+      "recommendation": "Keep T003 and all implementation blocked. After the owner selects a path, record the exact scope, both affected PRs, waived ADR clauses, whether PR-head review may replace merge-group-SHA review, expiry, compensating controls, and before/after protection evidence. Otherwise use the canonical ASK landing path.",
+      "reviewer": "adversarial-high-risk",
+      "severity": "blocking"
+    },
+    {
+      "category": "high-risk approval provenance",
+      "description": "Campaign 1 was recorded as medium risk and its sign-off is bound to an earlier artifact digest. The corrected plan is explicitly ASK/high, but T001 only says to preserve the owner response before unlocking T003. A chat answer or the earlier sign-off cannot serve as current high-risk authorization after the artifacts changed.",
+      "evidence": [
+        "specs/036-parallel-required-ci/evidence/campaign-1-summary.json:4-12 records medium risk and binds the sign-off to digest bc4bde7c1021f8a5a240295359b97aaf0aa6a711e09823840a70d5a70777c241.",
+        "specs/036-parallel-required-ci/evidence/campaign-1-summary.json:34-36 records a changes-required verdict rather than approval.",
+        "specs/036-parallel-required-ci/plan.md:2 now declares ASK/high, and research.md:4-5 says campaign 1 findings were carried forward while the landing exception remains pending.",
+        "specs/036-parallel-required-ci/tasks.md:3-6 allows the helper lane after T001 but does not explicitly require a new high-risk campaign summary and digest-bound sign-off.",
+        "docs/decisions/0012-risk-classes-escalation-and-gate-integrity.md:60-70 requires recorded human sign-off for high risk; lines 166-171 require matching run and artifact digest and invalidate approval after artifact edits.",
+        ".specify/agent-commands/speckit-review/SKILL.md:169-186 caps review at two campaigns and requires any founder acceptance after campaign 2 to include expiry, compensating measures, substantive rationale, and complete campaign history."
+      ],
+      "recommendation": "Amend T001 so implementation unlocks only after the current corrected artifacts have a completed high-risk campaign containing this adversarial lens and a valid run/digest-bound human sign-off. If the remaining exception is closed by founder acceptance after campaign 2, require the full expiring acceptance record rather than only preserving chat text.",
+      "reviewer": "adversarial-high-risk",
+      "severity": "important"
+    }
+  ]
+}

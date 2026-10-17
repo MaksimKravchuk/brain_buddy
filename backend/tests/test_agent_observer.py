@@ -33,7 +33,13 @@ from app.schemas.agents import (
     AgentReplyRequest,
 )
 
-from .a2a_fakes import FakeA2AClient, FakeCardFetcher, card_summary, ready_discovery
+from .a2a_fakes import (
+    FakeA2AClient,
+    FakeCardFetcher,
+    card_summary,
+    ready_discovery,
+    recover_interrupted_exchanges,
+)
 
 OWNER = "user_a"
 OTHER_OWNER = "user_b"
@@ -566,7 +572,7 @@ class TestRestartRecovery:
         connection_id = connect_ready(service)
         run_id = queue_handoff(service, connection_id)
 
-        observer.recover_interrupted_exchanges()
+        recover_interrupted_exchanges(observer)
 
         settled = repo.get_run(run_id, owner_id=OWNER)
         assert settled.dispatch_state == "not_sent"
@@ -610,7 +616,7 @@ class TestRestartRecovery:
             ),
         )
 
-        observer.recover_interrupted_exchanges()
+        recover_interrupted_exchanges(observer)
 
         resolved = repo.get_run(run_id, owner_id=OWNER)
         assert resolved.agent_task_id == "t-adopted"
@@ -642,7 +648,7 @@ class TestRestartRecovery:
         )
         a2a_client.script("ListTasks", A2AResult(ok=True, correlation_id="c"))
 
-        observer.recover_interrupted_exchanges()
+        recover_interrupted_exchanges(observer)
 
         resolved = repo.get_run(run_id, owner_id=OWNER)
         assert resolved.dispatch_state == "delivery_unconfirmed"
@@ -686,7 +692,7 @@ class TestRestartRecovery:
             ),
         )
 
-        observer.recover_interrupted_exchanges()
+        recover_interrupted_exchanges(observer)
 
         resolved = repo.get_run(run_id, owner_id=OWNER)
         assert resolved.agent_task_id is None
@@ -755,7 +761,7 @@ class TestRestartRecoveryOfAReply:
         run_id = self._interrupted_reply(service, repo, clock, a2a_client)
         a2a_client.script("ListTasks", A2AResult(ok=True, correlation_id="c"))
 
-        observer.recover_interrupted_exchanges()
+        recover_interrupted_exchanges(observer)
 
         recovered = repo.get_run(run_id, owner_id=OWNER)
         assert recovered.exchange_state == "interrupted"
@@ -787,7 +793,7 @@ class TestRestartRecoveryOfAReply:
         run_id = self._interrupted_reply(service, repo, clock, a2a_client)
         a2a_client.script("ListTasks", A2AResult(ok=True, correlation_id="c"))
 
-        observer.recover_interrupted_exchanges()
+        recover_interrupted_exchanges(observer)
 
         run = service.get_run(run_id, owner_id=OWNER)
         assert run.reply_pending is True
@@ -834,7 +840,7 @@ class TestRestartRecoveryOfAReply:
             "ListTasks", A2AResult(ok=True, correlation_id="c", tasks=(answered,))
         )
 
-        observer.recover_interrupted_exchanges()
+        recover_interrupted_exchanges(observer)
 
         run = service.get_run(run_id, owner_id=OWNER)
         assert run.reply_pending is False
@@ -1135,7 +1141,7 @@ def test_014_FR_002_a_guaranteed_card_still_recovers_by_lookup(
     )
     a2a_client.script("ListTasks", A2AResult(ok=True, correlation_id="c"))
 
-    observer.recover_interrupted_exchanges()
+    recover_interrupted_exchanges(observer)
 
     assert a2a_client.calls_to("SendMessage") == []
 
@@ -1557,7 +1563,7 @@ class TestObservationSchedule:
         clock.advance(timedelta(seconds=61))
 
         observer.run_once()
-        observer.recover_interrupted_exchanges()
+        recover_interrupted_exchanges(observer)
         observer.drain_queued_exchanges()
         service.run_retention_sweep()
 

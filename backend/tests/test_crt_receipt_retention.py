@@ -756,7 +756,6 @@ def _marked_recovery_fixture(container, *, command: str = "create"):
     )
     tree = tree.model_copy(update={"last_command_id": key_digest})
     service.tree_service.tree_repo.save(tree)
-    service.tree_service._cache.clear()
     receipt = replace(
         _receipt_fixture(
             owner_id=owner_id,
@@ -1333,7 +1332,6 @@ def test_startup_update_marker_match_takes_reconciliation_fast_path(container):
         update=lambda current: current.model_copy(update={"revision": 2}),
         command_id=receipt.key_digest,
     )
-    service.tree_service._cache.clear()
     receipt = replace(
         receipt,
         target_revision=2,

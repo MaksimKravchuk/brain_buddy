@@ -1,0 +1,152 @@
+{
+  "architect_action": "Resolve the technical findings and rerun the review campaign once. The cap is two campaigns. Every lens that produced evidence ran on one provider, so this panel's agreement is one vendor's opinion counted several times.",
+  "artifacts_changed_since_preflight": false,
+  "artifacts_digest": "6bacd6fda899dbd8b60ae72bbb9568ab62ca2427ec3424aeef039be2ea1b455c",
+  "declared_risk": "medium",
+  "degraded_lenses": [],
+  "human_signoff": {
+    "approved_by": "Max (current chat)",
+    "approved_on": "2026-10-16",
+    "artifacts_digest": "6bacd6fda899dbd8b60ae72bbb9568ab62ca2427ec3424aeef039be2ea1b455c",
+    "rationale": "Current owner request explicitly authorizes implementing this bounded shared-cache correction and CI/live verification without reducing checks. Existing cache lifecycle is unchanged. Concrete ASK landing remains separately gated by plan.md before enqueue; no authorization is asserted for protection changes or a governance exception.",
+    "run_id": "035-shared-cache-20261016-r2"
+  },
+  "missing_reviewers": [],
+  "model_unverified_lenses": [],
+  "oracle_unknown_lenses": [],
+  "panel_correlated": true,
+  "panel_oracles": {
+    "codex/gpt-5.6-sol": 5
+  },
+  "panel_providers": {
+    "codex": 5
+  },
+  "product_decisions": [],
+  "reviewers": [
+    {
+      "oracle": {
+        "artifacts_digest": "6bacd6fda899dbd8b60ae72bbb9568ab62ca2427ec3424aeef039be2ea1b455c",
+        "degraded": false,
+        "executable": "/opt/homebrew/bin/codex",
+        "integration": "codex",
+        "model": "gpt-5.6-sol"
+      },
+      "role": "requirements-consistency",
+      "summary": "The cache behavior, variants, fallback, and evidence requirements are otherwise aligned, but the ASK landing sequence still does not make exact-SHA approval and independent review blocking before the merge queue can land the change.",
+      "verdict": "changes-required"
+    },
+    {
+      "oracle": {
+        "artifacts_digest": "6bacd6fda899dbd8b60ae72bbb9568ab62ca2427ec3424aeef039be2ea1b455c",
+        "degraded": false,
+        "executable": "/opt/homebrew/bin/codex",
+        "integration": "codex",
+        "model": "gpt-5.6-sol"
+      },
+      "role": "architecture-consistency",
+      "summary": "The cache ownership, exact-key contract, failure behavior, and rollback story align with the current Apple bridge implementation. Changes are required because the proposed ASK landing preserves a protection state that violates ADR-0008, and the merge-queue sequence does not fail closed while exact-SHA review is pending. These are technical delivery decisions for the implementing architect; no product decision is required.",
+      "verdict": "changes-required"
+    },
+    {
+      "oracle": {
+        "artifacts_digest": "6bacd6fda899dbd8b60ae72bbb9568ab62ca2427ec3424aeef039be2ea1b455c",
+        "degraded": false,
+        "executable": "/opt/homebrew/bin/codex",
+        "integration": "codex",
+        "model": "gpt-5.6-sol"
+      },
+      "role": "testability-evidence",
+      "summary": "Every acceptance outcome has proportionate evidence: a required static workflow-contract test, exact-SHA required CI, cache metadata for both Apple variants, and a real merge-group cache hit that retains the app/widget build and complete package tests while recording timings and test count. The work forms two independently verifiable, serial lanes with disjoint ownership: producer workflow/validator first, then documentation plus live consumer verification after warming. Exact misses, cold fallback, failure visibility, protection read-back, and SHA invalidation are explicit. Current GitHub cache behavior supports the planned trusted-main producer and default-branch restore model ([GitHub dependency caching reference](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching)).",
+      "verdict": "pass"
+    },
+    {
+      "oracle": {
+        "artifacts_digest": "6bacd6fda899dbd8b60ae72bbb9568ab62ca2427ec3424aeef039be2ea1b455c",
+        "degraded": false,
+        "executable": "/opt/homebrew/bin/codex",
+        "integration": "codex",
+        "model": "gpt-5.6-sol"
+      },
+      "role": "privacy-consent-security",
+      "summary": "The feature retains only source-derived compiler artifacts and introduces no user-content processing, application authorization path, credential, or product-data store. Retention, purge survival, export exclusion, cache deletion approval, log redaction, and evidence restrictions are explicit. The stated seven-day inactivity eviction matches [GitHub’s official dependency-caching reference](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#usage-limits-and-eviction-policy). No privacy or permissions product decision remains open.",
+      "verdict": "pass"
+    },
+    {
+      "oracle": {
+        "artifacts_digest": "6bacd6fda899dbd8b60ae72bbb9568ab62ca2427ec3424aeef039be2ea1b455c",
+        "degraded": false,
+        "executable": "/opt/homebrew/bin/codex",
+        "integration": "codex",
+        "model": "gpt-5.6-sol"
+      },
+      "role": "ux-accessibility-mobile",
+      "summary": "This lens does not apply. The feature only changes CI compiler-cache preparation and explicitly declares no user-visible surface, product-data change, mobile-workflow impact, or device journey. Loading, empty, error, partial-failure, keyboard/focus, mobile viewport, interruption/resume, destructive-action, screen-ID, affordance-traceability, and product-copy requirements are therefore N/A. Operational cache misses, warming failures, cancellation, rollback, and corrupt-artifact handling are specified without changing product behavior.",
+      "verdict": "pass"
+    }
+  ],
+  "risk": "medium",
+  "risk_escalated_by_classifier": false,
+  "run_id": "035-shared-cache-20261016-r2",
+  "single_provider_panel": true,
+  "stale_reviews": [],
+  "status": "technical-changes-required",
+  "technical_findings": [
+    {
+      "category": "exact-SHA ASK gate sequencing",
+      "description": "The specification and plan bind owner approval to the pre-enqueue branch candidate, but the SHA that will actually land is generated only after enqueueing. The plan then runs independent review concurrently with merge-group CI and relies on removing the PR after an adverse review; it defines no gate that prevents the queue from merging as soon as its required checks pass. The live rules evidence shows zero required approvals and only Full CI and Docker Images as required checks. Consequently, the workflow change can land before independent review completes and without explicit approval of the exact landing SHA, violating SC-003 and the accepted ASK contract.",
+      "evidence": [
+        "specs/035-shared-rust-bridge-cache/spec.md:29-30 requires required CI and workflow-safety checks to pass on the reviewed SHA.",
+        "specs/035-shared-rust-bridge-cache/spec.md:33 instead places ASK approval before enqueueing against a concrete candidate, before the merge-group SHA exists.",
+        "specs/035-shared-rust-bridge-cache/plan.md:15 requires owner approval before enqueueing, while plan.md:18 obtains review of the generated merge-group SHA only while its CI runs and proposes removal on an adverse review.",
+        "specs/035-shared-rust-bridge-cache/evidence/main-effective-rules-before.json:1 records zero required approving reviews and a merge queue gated by Full CI and Docker Images, with no independent-review or owner-approval check.",
+        "github/workflows/ci.yml:28-33 confirms that the queue creates and tests a merge group on top of current main and preceding entries.",
+        "docs/decisions/0008-verified-trunk-serial-landing.md:64-75 requires explicit recorded approval and green required CI on the exact SHA being landed for ASK changes.",
+        "docs/autonomous-delivery-runbook.md:231-237 requires explicit approval and green CI on the exact SHA as ASK landing prerequisites.",
+        "AGENTS.md:81-86 requires ASK approval, CI, independent review, landing, and deployment evidence to identify the same exact SHA; AGENTS.md:208-214 requires the independent reviewer to review the frozen exact SHA."
+      ],
+      "recommendation": "Amend spec.md, plan.md, and quickstart.md so owner approval, independent review, and green required CI are all completed for the current merge-group SHA before it may land, with a real queue hold or equivalent blocking mechanism. Invalidate all three if the merge-group SHA changes. The implementing agent may choose the compliant mechanism; post-landing review or best-effort queue removal must not count as a gate.",
+      "reviewer": "requirements-consistency",
+      "severity": "blocking"
+    },
+    {
+      "category": "ADR alignment and ASK landing",
+      "description": "The plan knowingly preserves a main-protection state that violates the binding landing architecture, then substitutes owner approval and a manually enqueued merge-queue PR for the required ASK procedure. The observed ruleset has no restrict_updates rule, has broad user and organization-admin bypass actors, and requires zero approving reviews. ADR-0008 requires restrict_updates with the landing deploy key as the sole bypass and requires an ASK landing to have exact-SHA green CI plus an audited temporary intervention, unless a separately accountable reviewed path has been established. Preserving the drift does not satisfy that contract and leaves the new trusted cache-writing workflow exposed to an unauthorized main update path.",
+      "evidence": [
+        "specs/035-shared-rust-bridge-cache/plan.md:11 and 14-18 explicitly reject repairing the missing restriction and propose the existing merge queue as the landing path",
+        "specs/035-shared-rust-bridge-cache/evidence/main-rules-before.json:1 shows no restrict_updates rule, required_approving_review_count 0, and multiple broad bypass actors",
+        "docs/decisions/0008-verified-trunk-serial-landing.md:64-75 and 119-141 define the ASK intervention and sole-deploy-key protection invariants",
+        "docs/autonomous-delivery-runbook.md:207-237 states that these protections are requirements and that ASK landing uses a temporary audited intervention",
+        "AGENTS.md:81-83 and 130-133 require the audited ADR-0008 procedure and prohibit automatic ASK landing"
+      ],
+      "recommendation": "Make a compliant protection state a prerequisite to landing. Restore the accepted ADR-0008 rules and use its bounded audited ASK intervention, or first land an accepted ADR/runbook amendment defining an equivalent fail-closed mechanism. A one-off approval to preserve known drift must not be treated as a substitute for the technical landing contract.",
+      "reviewer": "architecture-consistency",
+      "severity": "blocking"
+    },
+    {
+      "category": "Concurrency and exact-SHA gate ordering",
+      "description": "The proposed merge-queue sequence does not guarantee that independent review of the generated merge-group SHA finishes before GitHub merges it. The plan enqueues first, reviews while required CI runs, and removes the PR only after an adverse verdict. If required checks finish before the review, the queue can merge automatically with review still pending, so the workflow change reaches main without the required exact-SHA independent gate.",
+      "evidence": [
+        "specs/035-shared-rust-bridge-cache/plan.md:18 sequences enqueueing before exact merge-group-SHA review and provides no pending-review hold",
+        "specs/035-shared-rust-bridge-cache/evidence/main-rules-before.json:1 configures an automatic ALLGREEN merge queue with a five-minute minimum wait and no required approval",
+        "AGENTS.md:82-86 requires ASK exact-SHA evidence and requires the deployed SHA to be covered by the independent gate",
+        "AGENTS.md:208-214 requires the independent reviewer to review the frozen exact SHA"
+      ],
+      "recommendation": "Specify a fail-closed landing sequence or gate that prevents main mutation until the independent verdict is recorded for the actual merge-group SHA. Any regenerated SHA must reset that gate. Do not rely on review completing before queue checks.",
+      "reviewer": "architecture-consistency",
+      "severity": "important"
+    },
+    {
+      "category": "Operational documentation consistency",
+      "description": "The planned cache note targets a CI section that currently contradicts ADR-0034 and the workflow behavior on which this feature depends. The README says native lanes always run on main and trunk-candidate pushes, while current CI path-filters candidates and suppresses native lanes on a main SHA already verified by a candidate or merge-group run.",
+      "evidence": [
+        "specs/035-shared-rust-bridge-cache/plan.md:18 assigns an operational cache update to ios/README.md",
+        "ios/README.md:135-139 says main and trunk-candidate pushes always run both iOS lanes",
+        "docs/decisions/0034-native-lanes-off-the-landing-critical-path.md:31-51 defines path-filtered candidate lanes and verified-main suppression",
+        ".github/workflows/ci.yml:309-344 implements candidate filtering and verified-main suppression"
+      ],
+      "recommendation": "Correct the stale native-lane description in the same bounded ios/README.md update so the new cache explanation does not contradict its prerequisite behavior.",
+      "reviewer": "architecture-consistency",
+      "severity": "advisory"
+    }
+  ]
+}
