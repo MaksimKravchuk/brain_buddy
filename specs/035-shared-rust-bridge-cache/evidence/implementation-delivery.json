@@ -1,0 +1,84 @@
+{
+  "implementation_pr": "https://github.com/maxk-lab/brain_buddy/pull/499",
+  "reviewed_pr_head": "0d09cdb4b9824cb957237cf9ea72045e26c54686",
+  "independent_review": {
+    "model": "gpt-6.1-sol",
+    "reasoning": "high",
+    "verdict": "accept",
+    "findings": 0
+  },
+  "pr_ci": {
+    "run_id": 38971570680,
+    "attempt": 2,
+    "conclusion": "success",
+    "retry_disposition": "An unchanged frontend focus assertion failed in attempt 1. One bounded job/dependent rerun passed on the same SHA; the subsequent merge-group frontend passed on attempt 1."
+  },
+  "queue_ci": {
+    "run_id": 38975320867,
+    "attempt": 1,
+    "sha": "eb74d27fd7acb7407719246749ea190594913ece",
+    "conclusion": "success"
+  },
+  "landing": {
+    "head_sha": "0d09cdb4b9824cb957237cf9ea72045e26c54686",
+    "merge_commit_sha": "eb74d27fd7acb7407719246749ea190594913ece",
+    "merged": true,
+    "merged_at": "2026-10-16T22:43:08Z",
+    "number": 499,
+    "state": "closed"
+  },
+  "main_rules_unchanged": true,
+  "cold_merge_group_ios": {
+    "job_id": 117223309482,
+    "duration_seconds": 1153,
+    "cache_key": "rust-bridge-apple-20c6ac803d841aef29e59212a02c6ecd30b7ab00",
+    "cache_hit": false,
+    "bridge_seconds": 592,
+    "app_widgets_seconds": 166,
+    "package_step_seconds": 357,
+    "swift_build_seconds": 105.48,
+    "tests": 1488,
+    "suites": 151,
+    "test_runtime_seconds": 244.615,
+    "test_command": "swift test --parallel",
+    "existing_opt_in_skips": "rehearsal and real-backend cases unchanged"
+  },
+  "producer": {
+    "run_id": 38977403417,
+    "sha": "eb74d27fd7acb7407719246749ea190594913ece",
+    "conclusion": "success",
+    "jobs": [
+      {
+        "id": 117230050688,
+        "name": "Warm Mac only bridge",
+        "conclusion": "success",
+        "started_at": "2026-10-16T22:43:19Z",
+        "completed_at": "2026-10-16T22:51:44Z"
+      },
+      {
+        "id": 117230050868,
+        "name": "Warm Full Apple bridge",
+        "conclusion": "success",
+        "started_at": "2026-10-16T22:43:17Z",
+        "completed_at": "2026-10-16T22:51:20Z"
+      }
+    ]
+  },
+  "acceptance": "pending actual warm merge-group evidence from the serial documentation PR",
+  "main_caches": [
+    {
+      "id": 9073137528,
+      "key": "rust-bridge-apple-d0c7ec3274eb57cec701edc212276bf9f7d7d64f",
+      "ref": "refs/heads/main",
+      "created_at": "2026-10-16T22:51:36.419344Z",
+      "size_in_bytes": 24707643
+    },
+    {
+      "id": 9073127937,
+      "key": "rust-bridge-apple-20c6ac803d841aef29e59212a02c6ecd30b7ab00",
+      "ref": "refs/heads/main",
+      "created_at": "2026-10-16T22:51:15.990348Z",
+      "size_in_bytes": 61260172
+    }
+  ]
+}
