@@ -2,8 +2,8 @@ import BrainBuddyMacCore
 import Combine
 import Foundation
 // `@preconcurrency` for the same reason as in VoiceCapture.swift: WhisperKit 0.18.0's API has no
-// `Sendable` annotations. Only static functions are called here, from the main actor, with values
-// (URLs, the progress fraction) that are copied out before they cross.
+// `Sendable` annotations. Only its static functions are called here, from `fetch`, off the main
+// actor; only a URL and the progress fraction come back.
 @preconcurrency import WhisperKit
 
 /// The optional Whisper download (037-FR-006, -007, -008, -009). This is the only file that asks
@@ -41,14 +41,9 @@ final class WhisperDownload: ObservableObject {
             let outcome: State
             do {
                 try files.prepareStaging()
-                let model = try await WhisperKit.download(
-                    variant: WhisperModelFiles.variant, downloadBase: files.staging
-                ) { progress in
-                    let fraction = progress.fractionCompleted
+                let model = try await Self.fetch(into: files) { [weak self] fraction in
                     Task { @MainActor [weak self] in self?.progressed(fraction) }
                 }
-                try Task.checkCancellation()
-                _ = try await ModelUtilities.loadTokenizer(for: .base, tokenizerFolder: files.staging)
                 try Task.checkCancellation()
                 try files.install(modelFolder: model)
                 outcome = .downloaded
@@ -58,6 +53,20 @@ final class WhisperDownload: ObservableObject {
             }
             self?.finished(outcome)
         }
+    }
+
+    /// Fetches the model, then the tokenizer, into `files.staging` and returns the model folder.
+    /// Off the main actor, so WhisperKit's non-`Sendable` callback and tokenizer never cross into it;
+    /// only the progress fraction (a `Double`) does.
+    nonisolated private static func fetch(
+        into files: WhisperModelFiles, progress: @escaping @Sendable (Double) -> Void
+    ) async throws -> URL {
+        let model = try await WhisperKit.download(variant: WhisperModelFiles.variant, downloadBase: files.staging) {
+            progress($0.fractionCompleted)
+        }
+        try Task.checkCancellation()
+        _ = try await ModelUtilities.loadTokenizer(for: .base, tokenizerFolder: files.staging)
+        return model
     }
 
     func cancel() {
