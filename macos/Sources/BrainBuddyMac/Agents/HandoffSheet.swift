@@ -24,6 +24,12 @@ enum HandOffControl: Equatable {
 
     /// The sheet stays open only while the relay is on (G-04.10).
     static func sheetStaysOpen(relayEnabled: Bool) -> Bool { relayEnabled }
+
+    /// The Hand off… menu command is enabled exactly when the inspector's button is: an open step (Next or
+    /// Waiting, where the button is drawn) with the control enabled (030-FR-040).
+    static func menuEnabled(control: HandOffControl, variant: TaskInspectorVariant) -> Bool {
+        control == .enabled && (variant == .next || variant == .waiting)
+    }
 }
 
 /// G-04: "Hand to an agent" (030-FR-013 – 030-FR-018). The flow owns every rule; this draws its phase.
@@ -34,6 +40,7 @@ struct HandoffSheet: View {
     @State private var flow: HandoffFlow
     @Environment(\.openSettings) private var openSettings
     @FocusState private var passwordFocused: Bool
+    @FocusState private var agentFocus: String?
 
     init?(model: BrainBuddyModel, task: TaskRecord, onClose: @escaping () -> Void) {
         guard let server = task.serverID, let account = model.workspace.account else { return nil }
@@ -63,7 +70,9 @@ struct HandoffSheet: View {
         .onChange(of: flow.phase) { _, phase in
             if case .sent = phase { onClose() }
             if phase == .failed(.wrongPassword) { passwordFocused = true }
+            if phase == .previewing || phase == .ready, agentFocus == nil, !passwordFocused { focusSelectedAgent() }
         }
+        .onChange(of: flow.selectedID) { _, _ in focusSelectedAgent() }
     }
 
     @ViewBuilder
@@ -98,9 +107,22 @@ struct HandoffSheet: View {
                     .background(selected ? CarryOnColorStyle.coSurfaceSelected : .coSurfaceCard, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 }
                 .buttonStyle(.plain).disabled(busy)
+                .focusable().focused($agentFocus, equals: agent.id)
                 .accessibilityAddTraits(selected ? .isSelected : [])
             }
         }
+        .onMoveCommand { direction in
+            switch direction {
+            case .up: Task { await flow.moveSelection(by: -1) }
+            case .down: Task { await flow.moveSelection(by: 1) }
+            default: break
+            }
+        }
+    }
+
+    /// Focus starts on, and follows, the selected agent row (030-FR-040).
+    private func focusSelectedAgent() {
+        if let id = flow.selectedID { agentFocus = id }
     }
 
     /// "What it will get": exactly what the server's preview says it will send, then its disclosures.
