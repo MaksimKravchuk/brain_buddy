@@ -37,7 +37,13 @@ than reproducing its contents in a fixture view. The strict snapshot replay and
 existing Agents scene, run-store and grouping checks pass 32 tests in four suites.
 The final full Mac suite passes 458 tests in 48 suites after 57.822 seconds.
 
-Native1x references must come from actual CI record/review/replay; their profile
-fails closed until those two images are approved. No simulated raster, tolerance
-change, shared kit change, authentication/backend change or new feature is included.
-Exact-SHA independent QA, CI and delivery remain separate parent-owned gates.
+The light/dark native1x references were captured by actual CI run
+[39030087778](https://github.com/maxk-lab/brain_buddy/actions/runs/39030087778) at
+source `c8e70048a00943049414ce21c62d6fa40d51fad1`, artifact `macos-app-logs-1`
+(ID `12099744312`). Its full Mac log ran 458 tests in 48 suites and reported exactly
+two issues: these missing references. Both CI images were visually reviewed as
+unblank, with the correct header, zero count and readable centered message, then
+imported byte-exact. The updated candidate still needs native1x CI replay.
+No simulated raster, tolerance change, shared kit change, authentication/backend
+change or new feature is included. Exact-SHA independent QA, CI and delivery remain
+separate parent-owned gates.
