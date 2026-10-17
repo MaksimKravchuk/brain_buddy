@@ -19,11 +19,28 @@ struct SyncStatusLine: View {
         let line = controller.line
         let description = line.description
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            SyncStatusGlyph(glyph: description.glyph)
+            if description.glyph == .none {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(MacSheetFont.meta)
+                    .foregroundStyle(.coTextSecondary)
+                    .accessibilityHidden(true)
+            } else {
+                SyncStatusGlyph(glyph: description.glyph)
+            }
             wordsButton(description)
             if let action = description.trailingActionTitle {
-                Button(action) {
+                if description.action == .signIn {
+                    Text("·").font(MacSheetFont.meta).foregroundStyle(.coTextSecondary)
+                        .accessibilityHidden(true)
+                }
+                Button {
                     Task { await controller.performTrailingAction() }
+                } label: {
+                    if description.action == .signIn {
+                        Text(action).font(MacSheetFont.meta).foregroundStyle(.coTextSecondary)
+                    } else {
+                        Text(action)
+                    }
                 }
                 .buttonStyle(.macText)
                 .accessibilityLabel(description.action == .retry ? "Retry sync" : action)

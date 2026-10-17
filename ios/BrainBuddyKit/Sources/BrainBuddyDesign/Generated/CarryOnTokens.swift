@@ -252,6 +252,10 @@ public enum CarryOnLayout {
     public enum MacSidebarRow {
         public static let height: Double = 34
     }
+    public enum MacWindow {
+        public static let sidebarColumnWidth: Double = 240
+        public static let sidebarRowHeight: Double = 29
+    }
 }
 
 /// Every token by its JSON path, for the test that keeps this file in step with the JSON.
@@ -509,6 +513,8 @@ public enum CarryOnTokenTable {
         "layout.code-box.gap": CarryOnLayout.CodeBox.gap,
         "layout.code-box.radius": CarryOnLayout.CodeBox.radius,
         "layout.mac-sidebar-row.height": CarryOnLayout.MacSidebarRow.height,
+        "layout.mac-window.sidebar-column-width": CarryOnLayout.MacWindow.sidebarColumnWidth,
+        "layout.mac-window.sidebar-row-height": CarryOnLayout.MacWindow.sidebarRowHeight,
     ]
     public static let strings: [String: String] = [
         "font.voice.family": CarryOnFontFace.voice.family,

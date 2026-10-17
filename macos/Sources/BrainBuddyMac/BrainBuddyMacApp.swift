@@ -50,11 +50,16 @@ struct BrainBuddyMacApp: App {
                 .environment(\.carryOnPlatform, .mac)
                 .frame(minWidth: 720, minHeight: 480)
         }
+        .windowStyle(.hiddenTitleBar)
+        .windowToolbarStyle(.unified(showsTitle: false))
         .defaultSize(width: 960, height: 640)
+        .windowResizability(.contentMinSize)
         .commands {
             SyncMenuCommands(launch: launch)
             ProjectMenuCommands()
             TaskDetailsCommands()
+            WorkspaceMenuCommands()
+            SidebarCommands()
         }
         Settings {
             MacSettingsView(launch: launch, selection: $settingsTab)

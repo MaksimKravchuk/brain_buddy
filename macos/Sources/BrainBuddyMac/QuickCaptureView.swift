@@ -58,7 +58,7 @@ final class QuickCaptureController: ObservableObject {
             Unmanaged.passUnretained(self).toOpaque(), &eventHandler
         )
         guard handlerResult == noErr else {
-            registrationError = "Global Quick Capture shortcut could not be enabled. Use the toolbar button."
+            registrationError = "Global Quick Capture shortcut could not be enabled. Use File › Quick Capture."
             return
         }
         let key = EventHotKeyID(signature: quickCaptureSignature, id: quickCaptureHotKeyID)
@@ -69,7 +69,7 @@ final class QuickCaptureController: ObservableObject {
         guard keyResult == noErr else {
             if let eventHandler { RemoveEventHandler(eventHandler) }
             eventHandler = nil
-            registrationError = "⌃⌥⇧B is unavailable. Use Quick Capture in the toolbar."
+            registrationError = "⌃⌥⇧B is unavailable. Use File › Quick Capture."
             return
         }
         registrationError = nil
