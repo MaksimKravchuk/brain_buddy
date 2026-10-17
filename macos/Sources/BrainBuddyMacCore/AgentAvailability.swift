@@ -142,7 +142,8 @@ package final class AgentAvailability {
 }
 
 extension APIError {
-    fileprivate var isNetwork: Bool {
+    /// The request never got an answer: no connection (also read by the hand-off sheet's agent tests).
+    var isNetwork: Bool {
         if case .network = kind { return true }
         return false
     }
