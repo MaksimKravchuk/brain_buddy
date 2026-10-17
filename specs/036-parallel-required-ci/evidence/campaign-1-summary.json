@@ -1,0 +1,253 @@
+{
+  "architect_action": "Resolve the technical findings and rerun the review campaign once. The cap is two campaigns. Every lens that produced evidence ran on one provider, so this panel's agreement is one vendor's opinion counted several times.",
+  "artifacts_changed_since_preflight": false,
+  "artifacts_digest": "bc4bde7c1021f8a5a240295359b97aaf0aa6a711e09823840a70d5a70777c241",
+  "declared_risk": "medium",
+  "degraded_lenses": [],
+  "human_signoff": {
+    "approved_by": "Max (current chat)",
+    "approved_on": "2026-10-17",
+    "artifacts_digest": "bc4bde7c1021f8a5a240295359b97aaf0aa6a711e09823840a70d5a70777c241",
+    "rationale": "The owner explicitly requested implementation of the previously presented two-part backend/mutation and parallel iOS proposal, preserving all checks, then CI and merge-queue delivery with total-time measurement. Current request authorizes this bounded CI change and the extra concurrent runners; no protection edits, new skips, production/auth changes or weaker gates are authorized. Human request: Давай распараллелим backend/mutation и iOS без сокращения проверок. Проведи через CI и merge queue и замерь, насколько сократилось общее время.",
+    "run_id": "036-parallel-20261017"
+  },
+  "missing_reviewers": [],
+  "model_unverified_lenses": [],
+  "oracle_unknown_lenses": [],
+  "panel_correlated": true,
+  "panel_oracles": {
+    "codex/gpt-5.6-sol": 5
+  },
+  "panel_providers": {
+    "codex": 5
+  },
+  "product_decisions": [],
+  "reviewers": [
+    {
+      "oracle": {
+        "artifacts_digest": "bc4bde7c1021f8a5a240295359b97aaf0aa6a711e09823840a70d5a70777c241",
+        "degraded": false,
+        "executable": "/Users/max/.local/bin/codex",
+        "integration": "codex",
+        "model": "gpt-5.6-sol"
+      },
+      "role": "requirements-consistency",
+      "summary": "Backend, mutation, coverage, native-lane, and timing requirements are substantially aligned across the artifacts. Two corrections are required: the merge queue does not fail closed while exact-SHA review is pending, and the plan unnecessarily mandates a specific agent runtime despite portable tasks.",
+      "verdict": "changes-required"
+    },
+    {
+      "oracle": {
+        "artifacts_digest": "bc4bde7c1021f8a5a240295359b97aaf0aa6a711e09823840a70d5a70777c241",
+        "degraded": false,
+        "executable": "/Users/max/.local/bin/codex",
+        "integration": "codex",
+        "model": "gpt-5.6-sol"
+      },
+      "role": "architecture-consistency",
+      "summary": "The sharding and aggregation boundaries are otherwise coherent, but the plan cannot proceed as written: its ASK landing path contradicts binding delivery architecture, exact merge-group review is not fail-closed, and the declared Makefile edit omits the mandatory gate-integrity manifest update.",
+      "verdict": "changes-required"
+    },
+    {
+      "oracle": {
+        "artifacts_digest": "bc4bde7c1021f8a5a240295359b97aaf0aa6a711e09823840a70d5a70777c241",
+        "degraded": false,
+        "executable": "/Users/max/.local/bin/codex",
+        "integration": "codex",
+        "model": "gpt-5.6-sol"
+      },
+      "role": "testability-evidence",
+      "summary": "The positive-path evidence is generally proportionate, but the package does not yet guarantee exact-SHA review before landing, cover several accepted fail-closed cases, or provide executable lane-oriented tasks. Preservation of the test-impact map and repository protections also lacks explicit evidence. These are implementation-planning corrections; no product decision is required.",
+      "verdict": "changes-required"
+    },
+    {
+      "oracle": {
+        "artifacts_digest": "bc4bde7c1021f8a5a240295359b97aaf0aa6a711e09823840a70d5a70777c241",
+        "degraded": false,
+        "executable": "/Users/max/.local/bin/codex",
+        "integration": "codex",
+        "model": "gpt-5.6-sol"
+      },
+      "role": "privacy-consent-security",
+      "summary": "The CI-only scope adequately makes product consent, per-owner authorization, 404-vs-403 behavior, and account export/purge inapplicable. It preserves read-only workflow permissions, introduces no credentials, and specifies 7-day PR and 30-day non-PR artifact retention. One blocking gap remains: the proposed raw shard evidence is not constrained against leaking local runner paths into retained CI/PR evidence.",
+      "verdict": "changes-required"
+    },
+    {
+      "oracle": {
+        "artifacts_digest": "bc4bde7c1021f8a5a240295359b97aaf0aa6a711e09823840a70d5a70777c241",
+        "degraded": false,
+        "executable": "/Users/max/.local/bin/codex",
+        "integration": "codex",
+        "model": "gpt-5.6-sol"
+      },
+      "role": "ux-accessibility-mobile",
+      "summary": "Scope guard applies: this is CI-only execution and evidence aggregation with no BrainBuddy product surface. design.md explicitly excludes rendered UI, copy, navigation, accessibility interactions, and mobile journey changes; intake.md declares the primary capture/workspace loop unchanged; plan.md confines implementation to CI workflows, helpers, validators, tests, and documentation. Loading, empty, error, partial-failure UI, keyboard/focus, mobile viewport, and interruption/resume requirements are therefore not applicable.",
+      "verdict": "pass"
+    }
+  ],
+  "risk": "medium",
+  "risk_escalated_by_classifier": false,
+  "run_id": "036-parallel-20261017",
+  "single_provider_panel": true,
+  "stale_reviews": [],
+  "status": "technical-changes-required",
+  "technical_findings": [
+    {
+      "category": "exact-SHA acceptance sequencing",
+      "description": "The artifacts require independent review of the actual merge-group SHA but do not prevent that SHA from merging while review is still pending. They only prescribe removal after an adverse verdict or SHA regeneration. The recorded rules require no approval and automatically merge after Full CI and Docker Images pass, so the workflow change can land before its independent exact-SHA verdict exists. That breaks the requirement to report one reviewed, tested, and landed SHA.",
+      "evidence": [
+        "specs/036-parallel-required-ci/spec.md:12 and FR-006 at line 20 require successful delivery evidence to identify the exact reviewed, tested, and landed SHAs.",
+        "specs/036-parallel-required-ci/spec.md:28 schedules merge-group review while CI runs and requires removal only after an adverse verdict or regeneration; it does not define pending or missing review as a dequeue condition.",
+        "specs/036-parallel-required-ci/plan.md:22 repeats the concurrent review sequence and likewise lacks a fail-closed pending-review condition.",
+        "specs/036-parallel-required-ci/tasks.md:T006 at lines 7 requires review of the actual queue SHA but does not make that verdict a prerequisite to landing.",
+        "docs/runbooks/results/manual-mac-028-030-retest-2026-10-16.md:92-100 records that the active ruleset requires Full CI, Docker Images, PR, and merge queue, but has no required approval or update restriction.",
+        "docs/decisions/0008-verified-trunk-serial-landing.md:64-75 requires ASK approval and green required CI for the exact SHA being landed.",
+        "AGENTS.md:208-214 requires an independent reviewer distinct from the writer to review the frozen exact SHA."
+      ],
+      "recommendation": "Amend spec.md, plan.md, tasks.md, and quickstart.md so a pending or missing independent verdict for the current merge-group SHA fails closed before landing, just like an adverse verdict. Any regenerated SHA must invalidate the verdict. Leave the mechanism to the implementing agent, but do not count best-effort review completion or post-landing review as satisfying FR-006.",
+      "reviewer": "requirements-consistency",
+      "severity": "blocking"
+    },
+    {
+      "category": "unsupported execution-runtime constraint",
+      "description": "The plan mandates a conductor, Luna implementation worker, and Sol reviewer even though neither the specification nor tasks require that runtime. This makes otherwise portable planning artifacts depend on one execution environment and conflicts with the repository rule that standalone agents or developers may implement directly from validated artifacts.",
+      "evidence": [
+        "specs/036-parallel-required-ci/plan.md:27 assigns mandatory ownership to a conductor, Luna worker, and Sol reviewer.",
+        "specs/036-parallel-required-ci/tasks.md:2-8 defines portable implementation and verification tasks without any runtime dependency.",
+        "AGENTS.md:122-123 states that tasks are planning input, execution tooling is selected by work context, and standalone agents may implement from validated artifacts.",
+        "AGENTS.md:156-162 requires selecting only model IDs exposed by the active runtime rather than assuming availability.",
+        ".specify/memory/constitution.md:105-107 states that generated tasks are portable planning input, Spec Kit is not an execution orchestrator, and implementation may be performed by a developer or standalone agent."
+      ],
+      "recommendation": "Make the ownership paragraph runtime-neutral: require an isolated writer and a distinct independent reviewer, while treating conductor/Luna/Sol routing as an optional execution choice when that runtime is available.",
+      "reviewer": "requirements-consistency",
+      "severity": "important"
+    },
+    {
+      "category": "ADR alignment and landing authority",
+      "description": "The plan classifies the workflow change as ASK and says ADR-0008 remains binding, but explicitly routes it through the ordinary merge queue while preserving a ruleset without restrict_updates and disallowing the intervention required by that ADR. ADR-0030 narrows which paths are ASK but expressly preserves ADR-0008 landing mechanics; every .github workflow remains ASK. A bounded authorization can be recorded as an exception, but the current artifacts simultaneously claim the binding architecture is preserved and prescribe a contradictory landing path.",
+      "evidence": [
+        "specs/036-parallel-required-ci/spec.md:28 requires ordinary merge-queue delivery, preservation of the current no-restrict_updates rules, and no protection intervention.",
+        "specs/036-parallel-required-ci/plan.md:2 classifies the change as ASK/high and declares ADR-0008 and ADR-0030 binding.",
+        "specs/036-parallel-required-ci/plan.md:22 and plan.md:27 prescribe queue landing and state that no protection edit is required.",
+        "docs/decisions/0030-pre-launch-narrow-ask-class.md:32-45 keeps every .github workflow ASK, while lines 5-6 expressly preserve ADR-0008 landing mechanics.",
+        "docs/decisions/0008-verified-trunk-serial-landing.md:64-75 requires recorded approval, exact-SHA green CI, and an audited temporary intervention for ASK landing under the documented ruleset architecture.",
+        "docs/decisions/0008-verified-trunk-serial-landing.md:130-140 and 284-299 require restrict_updates with the landing deploy key as sole bypass and reiterate the ASK procedure.",
+        "specs/035-shared-rust-bridge-cache/founder-acceptance.json:5-12 shows the earlier queue exception was explicitly bounded to spec 035 and did not amend repository-wide landing policy."
+      ],
+      "recommendation": "Reconcile the artifacts before implementation: either use ADR-0008's recorded ASK landing and restoration procedure, or record the fresh, narrowly scoped governance exception with its provenance, waived ADR clauses, compensating controls, and expiry. Do not continue to state that ADR-0008 remains binding without documenting the exception to its landing mechanics.",
+      "reviewer": "architecture-consistency",
+      "severity": "blocking"
+    },
+    {
+      "category": "Failure handling and exact-SHA concurrency",
+      "description": "The required review of the generated merge-group SHA is not a fail-closed gate. The plan reviews that SHA concurrently with required CI and relies on removing the queue entry after an adverse verdict or regeneration. The recorded effective rules require zero approving reviews and only Full CI plus Docker Images, so the queue can merge as soon as those checks pass, before the independent verdict is recorded. This can land a different, unreviewed SHA despite FR-006 and the repository's exact-SHA review contract.",
+      "evidence": [
+        "specs/036-parallel-required-ci/spec.md:20 requires independent exact-SHA review; spec.md:28 sequences merge-group review while CI runs and uses queue removal as recovery.",
+        "specs/036-parallel-required-ci/plan.md:22 repeats concurrent merge-group review and adverse queue removal without defining a blocking hold or required review status.",
+        "specs/035-shared-rust-bridge-cache/evidence/main-effective-rules-before.json:1 records required_approving_review_count 0 and only Full CI and Docker Images as required checks for the automatic merge queue.",
+        ".github/workflows/ci.yml:28-33 confirms merge_group checks_requested runs are the queue's required-check execution.",
+        "docs/decisions/0023-proportionate-fast-lane-for-test-stage-ship-show.md:69-81 requires the independent verdict to bind the frozen exact SHA and invalidates it on SHA drift."
+      ],
+      "recommendation": "Define a fail-closed mechanism that prevents the queue from mutating main until independent review passes for the current merge-group SHA. Any regenerated SHA must reset that gate. Best-effort removal after an adverse verdict is recovery, not a pre-landing gate.",
+      "reviewer": "architecture-consistency",
+      "severity": "important"
+    },
+    {
+      "category": "Repository feasibility and gate integrity",
+      "description": "The declared write scope changes the guarded Makefile but omits the mandatory .specify/gate-integrity.json digest update and simultaneously says no gate-integrity change will occur. The repository's Spec Kit gate will therefore reject the candidate even if the workflow and helper implementation are otherwise correct.",
+      "evidence": [
+        "specs/036-parallel-required-ci/plan.md:5 includes Makefile in the write scope, omits .specify/gate-integrity.json, and excludes gate-integrity changes.",
+        "CLAUDE.md:28-32 states that every Makefile edit must re-record the gate hash in the same commit with scripts/check_gate_integrity.py --update.",
+        "scripts/check_gate_integrity.py:41-60 lists Makefile in GUARDED_FILES.",
+        "scripts/check_gate_integrity.py:566-574 rejects a changed guarded file whose recorded digest no longer matches.",
+        ".specify/gate-integrity.json:10 contains the currently recorded Makefile digest.",
+        "Makefile:160-173 runs scripts/check_gate_integrity.py through make check-specs, so this failure is part of required CI."
+      ],
+      "recommendation": "Either remove the Makefile edit or add .specify/gate-integrity.json to the explicit write scope and re-record the digest in the same candidate after the intended Makefile change. Clarify that this updates the reviewed manifest only and does not weaken gate invariants.",
+      "reviewer": "architecture-consistency",
+      "severity": "blocking"
+    },
+    {
+      "category": "exact-SHA operational evidence",
+      "description": "Independent review of the merge-group SHA is concurrent with required CI but is not a prerequisite of the queue merge. If required checks finish first, the SHA can land before the review verdict, making the promised reviewed/tested/landed-SHA equality unprovable and making adverse dequeue too late.",
+      "evidence": [
+        "specs/036-parallel-required-ci/spec.md:12 and :20 require exact reviewed, tested, and landed SHA evidence.",
+        "specs/036-parallel-required-ci/spec.md:28 and plan.md:22 schedule merge-group review while Full CI runs and rely on removing the entry after an adverse verdict.",
+        "specs/036-parallel-required-ci/tasks.md:7 combines queue-SHA review and landing verification without a blocking ordering contract.",
+        "github workflow `.github/workflows/ci.yml` job `full-ci` at lines 2137-2171 depends only on workflow jobs and contains no queue-SHA review receipt or status."
+      ],
+      "recommendation": "Make review completion a fail-closed prerequisite for landing: bind the independent verdict to the exact merge-group SHA, require that receipt/status before the queue may merge, and order T006 as capture SHA → complete review → confirm required CI → verify landing. Any regenerated SHA must invalidate both review and CI evidence.",
+      "reviewer": "testability-evidence",
+      "severity": "blocking"
+    },
+    {
+      "category": "task lanes and executability",
+      "description": "tasks.md is not grouped into independently verifiable lanes. T004 combines backend sharding, coverage aggregation, two mutation matrices, native jobs, validators, and Makefile integration, while no task identifies concrete paths, FR/SC ownership, dependencies, or lane-specific checks. A direct implementing agent cannot determine safe ownership or independently close each acceptance outcome.",
+      "evidence": [
+        "specs/036-parallel-required-ci/tasks.md:2-8 contains seven coarse tasks with no concrete file paths, story labels, dependencies, parallel markers, or per-task evidence.",
+        "specs/036-parallel-required-ci/tasks.md:5 places all implementation surfaces into one task despite distinct backend, mutation, native, and validator outcomes.",
+        "specs/036-parallel-required-ci/plan.md:5 names eight write surfaces, while plan.md:27 gives only the helper files explicit worker ownership.",
+        "specify constitution `.specify/memory/constitution.md:106` and `:128` requires tasks organized by dependency, independently shippable story, and concrete file path.",
+        "speckit task contract `.specify/agent-commands/speckit-tasks/SKILL.md:169-200` requires immediately executable tasks, story grouping, parallel markers where valid, and exact paths."
+      ],
+      "recommendation": "Rewrite tasks.md into explicit logical lanes: baseline evidence; helper contract and focused tests; backend/coverage integration plus validator tests; mutation integration plus validator tests; native split plus graph tests; exact-head verification; and queue/timing acceptance. Give each task paths, FR/SC mappings, dependencies, commands, and acceptance evidence. Mark lanes parallel only when their write paths are disjoint; this remains portable planning input and does not require any particular agent runtime or multiple PRs.",
+      "reviewer": "testability-evidence",
+      "severity": "blocking"
+    },
+    {
+      "category": "fail-closed test coverage",
+      "description": "The planned automated tests cover only a subset of the accepted failure contract. A green live run proves success paths but cannot prove rejection of corrupt or interrupted evidence, identity/counter disagreement, JUnit failures/errors, or failed/cancelled/skipped job propagation with retained diagnostics. The artifacts also do not explicitly bind the new helper tests into a required exact-SHA CI job.",
+      "evidence": [
+        "specs/036-parallel-required-ci/spec.md:9 and :11 require corrupt, overlapping, interrupted, failed, cancelled, and missing evidence to fail closed while diagnostics remain available.",
+        "specs/036-parallel-required-ci/plan.md:18 promises rejection of malformed evidence, XML failures/errors, overlapping mutant identities, invalid totals, and interruption.",
+        "specs/036-parallel-required-ci/plan.md:21 lists tests only for union, xdist groups, missing/duplicate/wrong-SHA evidence, JUnit counts, empty parts, weighted stats, an unrequired job, and removed aggregate gates.",
+        "specs/036-parallel-required-ci/quickstart.md:2 names `test_ci_shards.py` as a local command, but current required workflow job `.github/workflows/ci.yml:69-77` invokes only `test_validate_ci_artifacts.py` and the workflow validator rather than `make validate-ci` or `test_ci_shards.py`.",
+        "Makefile:133-158 shows the current mirrored validation entry point; the plan does not explicitly require a workflow-contract assertion that the new helper suite remains in required CI."
+      ],
+      "recommendation": "Add focused synthetic negative cases for corrupt manifests, overlapping assignments and mutant identities, interrupted campaigns, counter/identity disagreement, JUnit failure/error counts, nonempty scopes missing metadata, and every new required job removed or made skippable. Assert diagnostic uploads retain `always()` behavior. Invoke `test_ci_shards.py` directly from a required workflow job as well as Makefile, and add a validator mutation proving that removing the invocation or dependency makes validation fail.",
+      "reviewer": "testability-evidence",
+      "severity": "blocking"
+    },
+    {
+      "category": "test-impact map preservation",
+      "description": "FR-002 moves test-impact map generation onto combined coverage data, but no planned assertion proves that contexts from both shards survive combination and produce the union of test ownership. Coverage-floor success alone can remain green with an incomplete context map, which can under-select tests on later pull requests.",
+      "evidence": [
+        "specs/036-parallel-required-ci/spec.md:16 requires preservation of main test-impact map generation.",
+        "specs/036-parallel-required-ci/plan.md:9 moves map generation after coverage combination, but plan.md:21 does not name a combined-context/map assertion.",
+        "specs/036-parallel-required-ci/plan.md:24 records collection, JUnit, Allure, coverage, and mutant counts but no generated map read-back.",
+        "scripts/select_backend_tests.py:70-120 builds the map from per-test coverage contexts.",
+        "github workflow `.github/workflows/ci.yml:619-632` caches that map for subsequent pull-request selection."
+      ],
+      "recommendation": "Add a focused test that combines two coverage databases containing disjoint test contexts, runs `build_map`, and asserts both shards' files/tests and the candidate SHA appear. Record the generated main map's source SHA and bounded file/test counts in operational evidence so the baseline and optimized runs can be compared.",
+      "reviewer": "testability-evidence",
+      "severity": "important"
+    },
+    {
+      "category": "protection preservation evidence",
+      "description": "FR-005 and the clarification require current merge protections to be preserved and re-read, but the delivery tasks record only landing and release disposition. No before/after protection read-back is an explicit acceptance artifact.",
+      "evidence": [
+        "specs/036-parallel-required-ci/spec.md:19 requires preservation of protections and release authority.",
+        "specs/036-parallel-required-ci/spec.md:28 explicitly says to re-read current protections and preserve Full CI, Docker Images, and merge queue.",
+        "specs/036-parallel-required-ci/tasks.md:7 only says to verify landing and observe main/release outcome.",
+        "specs/036-parallel-required-ci/plan.md:24 defines timing and completeness evidence but omits protection-state read-back."
+      ],
+      "recommendation": "Add a read-only pre-enqueue and post-landing protection read-back to the operational lane, recording that Full CI, Docker Images, merge queue, permissions, and release authority are unchanged. This is evidence collection only and does not authorize any protection mutation.",
+      "reviewer": "testability-evidence",
+      "severity": "important"
+    },
+    {
+      "category": "data-in-transit-and-at-rest",
+      "description": "The proposed shard transport uploads raw coverage databases and JUnit XML as retained GitHub artifacts without requiring path normalization or validating that the files exclude absolute runner, workspace, home, or temporary paths. The current coverage configuration does not establish relative-path storage. This leaves the new evidence format permitted to place local paths in CI and PR evidence, violating Constitution Principle I.",
+      "evidence": [
+        ".specify/memory/constitution.md:63-68 prohibits local file paths in logs, metrics, committed fixtures, or PR evidence.",
+        "specs/036-parallel-required-ci/plan.md:7 requires every backend shard artifact to contain its raw .coverage database and JUnit XML.",
+        "specs/036-parallel-required-ci/plan.md:18 asserts that artifacts are safe and retained for 7 or 30 days but does not address local-path removal or validation.",
+        "specs/036-parallel-required-ci/data-model.md:2 includes raw coverage/context databases and JUnit cases without a path-safety invariant.",
+        "backend/pyproject.toml:210-212 configures pytest coverage but defines no relative-files constraint.",
+        ".github/workflows/ci.yml:673-680 shows that the current canonical backend coverage upload is coverage.xml; uploading raw coverage databases is a new evidence type introduced by this plan."
+      ],
+      "recommendation": "Amend the plan, data model, and tasks to require path-safe shard evidence before upload. Coverage evidence transferred between jobs must contain only repository-relative paths or an equivalently sanitized representation. JUnit must either remain runner-local with a validated count/result manifest uploaded, or be sanitized before upload. Make the helper or workflow validator fail closed when newly uploaded shard evidence contains absolute workspace, home, or temporary paths, while preserving the stated diagnostics and 7/30-day retention.",
+      "reviewer": "privacy-consent-security",
+      "severity": "blocking"
+    }
+  ]
+}

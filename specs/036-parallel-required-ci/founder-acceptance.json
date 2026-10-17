@@ -1,0 +1,25 @@
+{
+  "status": "founder-accepted",
+  "accepted_by": "Max (current chat)",
+  "accepted_on": "2026-10-17",
+  "expires_on": "2026-10-19",
+  "scope": "Spec 036 baseline PR #509 and its one workflow implementation PR only; no protection edits or test reduction.",
+  "rationale": "Max explicitly accepted the fresh one-task ordinary merge-queue exception after disclosure that the live queue lacks a final-merge-SHA independent-review hold and normative restrict_updates. Frozen PR-head independent review may precede full required queue CI and final tested/landed SHA verification. This waives only the bounded ADR-0008 ASK intervention and final-SHA review mechanics; all technical findings are corrected, full checks and protections remain unchanged, and global governance is not amended.",
+  "compensating_measures": [
+    "Independent frozen PR-head review before each enqueue; any head change invalidates that review.",
+    "Unchanged required Full CI and Docker Images test the generated merge-group SHA; verify main equals it at landing.",
+    "Record reviewed/tested/landed SHAs, before/after protection snapshots, complete tests, coverage, mutation identities and actual timings.",
+    "No secret/environment changes, protection weakening, product edits or test reduction; exception expires after the two landings or 2026-10-19."
+  ],
+  "campaign_history": [
+    {
+      "run_id": "036-parallel-20261017",
+      "status": "technical-changes-required"
+    },
+    {
+      "run_id": "036-parallel-20261017-r2",
+      "status": "product-decision-required"
+    }
+  ],
+  "human_reply": "Разрешить исключение для этой задачи"
+}
