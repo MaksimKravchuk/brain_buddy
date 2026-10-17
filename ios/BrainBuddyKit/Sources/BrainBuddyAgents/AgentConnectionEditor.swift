@@ -3,14 +3,14 @@ import BrainBuddyCore
 import Foundation
 import Observation
 
-package enum AgentEditorMode: Equatable, Sendable {
+public enum AgentEditorMode: Equatable, Sendable {
     case add
     case replaceCredential(AgentConnectionDTO)
     case edit(AgentConnectionDTO)
     case delete(AgentConnectionDTO)
 }
 
-package enum AgentEditorPhase: Equatable, Sendable {
+public enum AgentEditorPhase: Equatable, Sendable {
     case idle, adding, testing, working, done
     case failed(AgentNotice)
 }
@@ -21,23 +21,23 @@ package enum AgentEditorPhase: Equatable, Sendable {
 /// and on `dismiss()`, and never printed or logged.
 @MainActor
 @Observable
-package final class AgentConnectionEditor: CustomStringConvertible {
-    package let mode: AgentEditorMode
-    package var name: String
-    package var address: String
-    package var scheme: AgentAuthScheme
-    package var secret = ""
-    package var password = ""
-    package private(set) var phase = AgentEditorPhase.idle
+public final class AgentConnectionEditor: CustomStringConvertible {
+    public let mode: AgentEditorMode
+    public var name: String
+    public var address: String
+    public var scheme: AgentAuthScheme
+    public var secret = ""
+    public var password = ""
+    public private(set) var phase = AgentEditorPhase.idle
     /// The last-read copy whose `revision` is sent; replaced when a stale revision is re-read.
-    package private(set) var current: AgentConnectionDTO?
+    public private(set) var current: AgentConnectionDTO?
     @ObservationIgnored private var key: UUID?
     @ObservationIgnored private let model: AgentSettingsModel
-    @ObservationIgnored private let log: any MacLogSink
+    @ObservationIgnored private let log: any AgentLogSink
 
-    package nonisolated var description: String { "AgentConnectionEditor (redacted)" }
+    public nonisolated var description: String { "AgentConnectionEditor (redacted)" }
 
-    package init(mode: AgentEditorMode, model: AgentSettingsModel, log: any MacLogSink = SystemMacLog()) {
+    public init(mode: AgentEditorMode, model: AgentSettingsModel, log: any AgentLogSink = SystemAgentLog()) {
         self.mode = mode
         self.model = model
         self.log = log
@@ -54,7 +54,7 @@ package final class AgentConnectionEditor: CustomStringConvertible {
 
     // MARK: derived state
 
-    package var isBusy: Bool {
+    public var isBusy: Bool {
         switch phase {
         case .adding, .testing, .working: true
         default: false
@@ -68,17 +68,17 @@ package final class AgentConnectionEditor: CustomStringConvertible {
     private var schemeChanged: Bool { scheme != current?.authScheme }
 
     /// Edit shows Current password only when the address or type differs from the saved one (030-FR-032).
-    package var destinationChanged: Bool {
+    public var destinationChanged: Bool {
         if case .edit = mode { return addressChanged || schemeChanged }
         return false
     }
 
-    package var needsPassword: Bool {
+    public var needsPassword: Bool {
         if case .edit = mode { return destinationChanged }
         return true
     }
 
-    package var canSubmit: Bool {
+    public var canSubmit: Bool {
         guard !isBusy, model.controlsEnabled, current != nil || mode == .add else { return false }
         if needsPassword && password.isEmpty { return false }
         // 030-FR-036: without a password on the account only a name-only Edit is possible.
@@ -93,7 +93,7 @@ package final class AgentConnectionEditor: CustomStringConvertible {
 
     // MARK: actions
 
-    package func submit() async {
+    public func submit() async {
         guard canSubmit, let remote = model.remote(), let owner = model.account?.id else { return }
         let actionKey = key ?? UUID(), started = ContinuousClock.now
         key = actionKey
@@ -154,7 +154,7 @@ package final class AgentConnectionEditor: CustomStringConvertible {
     }
 
     /// Closing the sheet: nothing typed survives, and the next action gets its own key.
-    package func dismiss() {
+    public func dismiss() {
         clearSecrets()
         key = nil
         phase = .idle
@@ -205,6 +205,6 @@ package final class AgentConnectionEditor: CustomStringConvertible {
     private func record(_ stage: String, _ outcome: String, _ started: ContinuousClock.Instant, reference: String? = nil) {
         let parts = started.duration(to: .now).components
         let millis = parts.seconds * 1000 + parts.attoseconds / 1_000_000_000_000_000
-        log.log(.sync, "agent-editor stage=\(stage) outcome=\(outcome) ms=\(millis)" + (reference.map { " ref=\($0)" } ?? ""))
+        log.log("agent-editor stage=\(stage) outcome=\(outcome) ms=\(millis)" + (reference.map { " ref=\($0)" } ?? ""))
     }
 }

@@ -1,3 +1,4 @@
+import BrainBuddyAgents
 import BrainBuddyCore
 import BrainBuddyDesign
 import BrainBuddyWorkspace
@@ -141,6 +142,7 @@ private struct TaskDetailForm: View {
 
     @Environment(Workspace.self) private var workspace
     @Environment(ToastCenter.self) private var toasts
+    @Environment(AgentsSession.self) private var agents: AgentsSession?
     @Environment(\.scenePhase) private var scenePhase
     @State private var title: String
     @State private var notes: String
@@ -165,6 +167,8 @@ private struct TaskDetailForm: View {
     /// Board 15, "Not now", and what it chose; acted on once it has closed.
     @State private var isChoosingNotNow = false
     @State private var notNowChoice: NotNowChoice?
+    /// M21, hand the step to an agent (034-FR-009).
+    @State private var isHandingOff = false
     @FocusState private var focus: DetailField?
 
     init(task: TaskRecord, isExpanded: Bool) {
@@ -205,6 +209,12 @@ private struct TaskDetailForm: View {
             .sheet(isPresented: $isChoosingNotNow, onDismiss: runNotNowChoice) {
                 NotNowSheet(taskTitle: task.title) { choice in
                     notNowChoice = choice
+                }
+            }
+            .sheet(isPresented: $isHandingOff) {
+                if let serverID = task.serverID {
+                    HandoffSheet(
+                        taskServerID: serverID, projectName: task.projectID.flatMap { projectRecord($0) }?.name)
                 }
             }
     }
@@ -900,6 +910,13 @@ private struct TaskDetailForm: View {
                 moveMenuItems(from: list)
             } label: {
                 Label("Move to…", systemImage: "arrow.right.circle")
+            }
+            if agents?.canHandOff == true, task.serverID != nil {
+                Button {
+                    isHandingOff = true
+                } label: {
+                    Label(AgentsCopy.handOff, systemImage: "paperplane")
+                }
             }
             Button(action: cancel) {
                 Label("Cancel task", systemImage: "xmark.circle")

@@ -3,7 +3,7 @@ import Foundation
 import Observation
 
 /// The run calls the inspector makes (030-FR-020, 030-FR-023). `BrainBuddyAPIClient` is the production remote.
-package protocol AgentRunActionsRemote: Sendable {
+public protocol AgentRunActionsRemote: Sendable {
     func replyToAgentRun(id: String, message: String, expectedRevision: Int, idempotencyKey: UUID) async throws(APIError) -> AgentRunDTO
     func checkAgentRunDelivery(id: String, currentPassword: String?, expectedRevision: Int, idempotencyKey: UUID) async throws(APIError) -> AgentRunDTO
     func cancelAgentRun(id: String, idempotencyKey: UUID) async throws(APIError) -> AgentRunDTO
@@ -14,18 +14,18 @@ extension BrainBuddyAPIClient: AgentRunActionsRemote {}
 /// The only two step commands the agent feature may call (030-FR-012), over the workspace's existing
 /// complete and create commands. Nothing but `AgentRunActions.markStepDone` holds one.
 @MainActor
-package protocol StepCommands {
+public protocol StepCommands {
     func completeStep(serverID: String) async throws
     /// Creates a step in Next actions, in the project when one is given.
     func createNextAction(title: String, projectID: String?) async throws
 }
 
 /// How a hand-off or run action failed, in the words of 030-FR-018. Nothing is retried automatically.
-package enum AgentActionFailure: Equatable, Sendable {
+public enum AgentActionFailure: Equatable, Sendable {
     case wrongPassword, rateLimited, offline, unavailable, staleRevision, controlWithdrawn, tooLong
     case other(reference: String?)
 
-    package init(_ error: APIError) {
+    public init(_ error: APIError) {
         switch error.agentFailure {
         case .relayUnavailable: self = .unavailable
         case .wrongPassword: self = .wrongPassword
@@ -36,7 +36,7 @@ package enum AgentActionFailure: Equatable, Sendable {
         }
     }
 
-    package func text(offline: String = AgentsCopy.needsConnection) -> String {
+    public func text(offline: String = AgentsCopy.needsConnection) -> String {
         switch self {
         case .wrongPassword: AgentsCopy.wrongPassword
         case .rateLimited: AgentsCopy.rateLimited
@@ -48,25 +48,25 @@ package enum AgentActionFailure: Equatable, Sendable {
         }
     }
 
-    package var reference: String? {
+    public var reference: String? {
         if case .other(let id) = self, let id { return AgentsCopy.reference(id) }
         return nil
     }
 }
 
-package enum AgentActionPhase: Equatable, Sendable { case idle, working, done, failed(AgentActionFailure) }
+public enum AgentActionPhase: Equatable, Sendable { case idle, working, done, failed(AgentActionFailure) }
 
 /// Reply, Stop run, Check again, Mark step done and Make the next step (030-FR-020 – 030-FR-023). Offline
 /// each refuses and nothing is queued (030-FR-025). One Idempotency-Key per attempt, reused only when the
 /// same attempt is retried after an uncertain outcome. The password is never held here.
 @MainActor
 @Observable
-package final class AgentRunActions {
-    package nonisolated static let replyLimit = 4_000
+public final class AgentRunActions {
+    public nonisolated static let replyLimit = 4_000
 
-    package private(set) var phase = AgentActionPhase.idle
+    public private(set) var phase = AgentActionPhase.idle
     /// The run the server returned for the last action, e.g. with `replyPending` set.
-    package private(set) var updated: AgentRunDTO?
+    public private(set) var updated: AgentRunDTO?
     @ObservationIgnored private let remote: any AgentRunActionsRemote
     @ObservationIgnored private let availability: AgentAvailability
     @ObservationIgnored private let steps: any StepCommands
@@ -74,14 +74,14 @@ package final class AgentRunActions {
     @ObservationIgnored private var pending: (payload: String, key: UUID)?
 
     /// `refresh` re-reads the runs right after a reply, stop or check (030-FR-024).
-    package init(
+    public init(
         remote: any AgentRunActionsRemote, availability: AgentAvailability, steps: any StepCommands,
         refresh: @escaping @MainActor () async -> Void = {}
     ) {
         (self.remote, self.availability, self.steps, self.refresh) = (remote, availability, steps, refresh)
     }
 
-    package func reply(to run: AgentRunDTO, message: String) async {
+    public func reply(to run: AgentRunDTO, message: String) async {
         let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         guard run.controls.reply else { return phase = .failed(.controlWithdrawn) }
@@ -92,7 +92,7 @@ package final class AgentRunActions {
         }
     }
 
-    package func stop(_ run: AgentRunDTO) async {
+    public func stop(_ run: AgentRunDTO) async {
         guard run.controls.cancel else { return phase = .failed(.controlWithdrawn) }
         let remote = remote
         await perform("stop|\(run.id)") { (key) async throws(APIError) -> AgentRunDTO in
@@ -101,7 +101,7 @@ package final class AgentRunActions {
     }
 
     /// The password goes only when the person typed one, which the field allows only when the server needs it.
-    package func checkAgain(_ run: AgentRunDTO, password: String = "") async {
+    public func checkAgain(_ run: AgentRunDTO, password: String = "") async {
         let secret = password.isEmpty ? nil : password
         let remote = remote
         await perform("check|\(run.id)|\(run.revision)|\(secret != nil)") { (key) async throws(APIError) -> AgentRunDTO in
@@ -112,7 +112,7 @@ package final class AgentRunActions {
 
     /// Completes the step and, when "Make the next step" has text, creates it in the same project in Next actions
     /// (030-FR-022). The agent never reaches this; only the person's explicit action does (030-FR-012).
-    package func markStepDone(taskServerID: String, projectID: String?, nextStep: String) async {
+    public func markStepDone(taskServerID: String, projectID: String?, nextStep: String) async {
         guard phase != .working else { return }
         phase = .working
         let title = nextStep.trimmingCharacters(in: .whitespacesAndNewlines)

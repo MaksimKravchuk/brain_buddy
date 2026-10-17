@@ -5,7 +5,7 @@ import Observation
 
 /// The seven connection calls Settings › Agents makes (030-FR-029 – 030-FR-034).
 /// `BrainBuddyAPIClient` is the production remote; tests supply a fake.
-package protocol AgentSettingsRemote: Sendable {
+public protocol AgentSettingsRemote: Sendable {
     func agentConnections() async throws(APIError) -> [AgentConnectionDTO]
     func agentConnection(id: String) async throws(APIError) -> AgentConnectionDTO
     func createAgentConnection(
@@ -29,13 +29,13 @@ extension BrainBuddyAPIClient: AgentSettingsRemote {}
 
 /// A failure in words (030-FR-034, 030-FR-038): a short message, whether Try again can help, and the
 /// server's reference. Never carries a secret.
-package struct AgentNotice: Equatable, Sendable {
-    package var message: String
-    package var reference: String?
-    package var failure: AgentFailure
-    package var canRetry: Bool
+public struct AgentNotice: Equatable, Sendable {
+    public var message: String
+    public var reference: String?
+    public var failure: AgentFailure
+    public var canRetry: Bool
 
-    package init(message: String, reference: String? = nil, failure: AgentFailure = .other, canRetry: Bool = false) {
+    public init(message: String, reference: String? = nil, failure: AgentFailure = .other, canRetry: Bool = false) {
         self.message = message
         self.reference = reference
         self.failure = failure
@@ -43,26 +43,36 @@ package struct AgentNotice: Equatable, Sendable {
     }
 }
 
-package struct AgentListRow: Equatable, Identifiable, Sendable {
-    package var id: String
-    package var name: String
+public struct AgentListRow: Equatable, Identifiable, Sendable {
+    public var id: String
+    public var name: String
     /// The web's status word.
-    package var status: String
+    public var status: String
+
+    public init(id: String, name: String, status: String) { (self.id, self.name, self.status) = (id, name, status) }
 }
 
 /// G-06.01. Nil rows are not shown. Every string is untrusted agent text except the copy.
-package struct AgentDetailRows: Equatable, Sendable {
-    package var statusLine: String
-    package var address: String
-    package var credential: String
-    package var lastContact: Date?
-    package var card: String?
-    package var skills: String?
-    package var updates: String
-    package var guarantee: String?
+public struct AgentDetailRows: Equatable, Sendable {
+    public var statusLine: String
+    public var address: String
+    public var credential: String
+    public var lastContact: Date?
+    public var card: String?
+    public var skills: String?
+    public var updates: String
+    public var guarantee: String?
+
+    public init(
+        statusLine: String, address: String, credential: String, lastContact: Date?, card: String?, skills: String?,
+        updates: String, guarantee: String?
+    ) {
+        (self.statusLine, self.address, self.credential, self.lastContact) = (statusLine, address, credential, lastContact)
+        (self.card, self.skills, self.updates, self.guarantee) = (card, skills, updates, guarantee)
+    }
 }
 
-package enum AgentSettingsPhase: Equatable, Sendable {
+public enum AgentSettingsPhase: Equatable, Sendable {
     case notSignedIn, loading, loaded, offline, sessionEnded
     case failed(AgentNotice)
 }
@@ -71,22 +81,22 @@ package enum AgentSettingsPhase: Equatable, Sendable {
 /// is applied only while it still belongs to the account and the request that started it.
 @MainActor
 @Observable
-package final class AgentSettingsModel {
-    package private(set) var phase: AgentSettingsPhase
-    package private(set) var account: LinkedAccount?
-    package private(set) var connections: [AgentConnectionDTO] = []
-    package private(set) var selectedID: String?
-    package private(set) var isTesting = false
-    package private(set) var notice: AgentNotice?
+public final class AgentSettingsModel {
+    public private(set) var phase: AgentSettingsPhase
+    public private(set) var account: LinkedAccount?
+    public private(set) var connections: [AgentConnectionDTO] = []
+    public private(set) var selectedID: String?
+    public private(set) var isTesting = false
+    public private(set) var notice: AgentNotice?
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private let availability: AgentAvailability
     @ObservationIgnored private let makeRemote: @MainActor (LinkedAccount) -> any AgentSettingsRemote
-    @ObservationIgnored private let log: any MacLogSink
+    @ObservationIgnored private let log: any AgentLogSink
 
-    package init(
+    public init(
         account: LinkedAccount?, availability: AgentAvailability,
-        remote: @escaping @MainActor (LinkedAccount) -> any AgentSettingsRemote = AgentSettingsModel.liveRemote,
-        log: any MacLogSink = SystemMacLog()
+        remote: @escaping @MainActor (LinkedAccount) -> any AgentSettingsRemote,
+        log: any AgentLogSink = SystemAgentLog()
     ) {
         self.account = account
         self.availability = availability
@@ -95,13 +105,8 @@ package final class AgentSettingsModel {
         phase = account == nil ? .notSignedIn : .loading
     }
 
-    package static func liveRemote(for account: LinkedAccount) -> any AgentSettingsRemote {
-        BrainBuddyAPIClient(
-            baseURL: account.serverURL, tokenStore: WorkspaceHost.systemTokenStore(), identity: WorkspaceHost.clientIdentity)
-    }
-
     /// A different account drops everything and ignores any request still in flight.
-    package func update(account new: LinkedAccount?) {
+    public func update(account new: LinkedAccount?) {
         guard new?.id != account?.id else { return account = new }
         account = new
         generation += 1
@@ -114,26 +119,26 @@ package final class AgentSettingsModel {
 
     // MARK: derived state
 
-    package var rows: [AgentListRow] {
+    public var rows: [AgentListRow] {
         connections.map { AgentListRow(id: $0.id, name: $0.name, status: Self.status(of: $0)) }
     }
 
-    package var selected: AgentConnectionDTO? { connections.first { $0.id == selectedID } }
-    package var details: AgentDetailRows? { selected.map(Self.details) }
+    public var selected: AgentConnectionDTO? { connections.first { $0.id == selectedID } }
+    public var details: AgentDetailRows? { selected.map(Self.details) }
     /// 030-FR-036: no password on the account. An unreadable state keeps the controls; the server decides.
-    package var isPasswordless: Bool { availability.passwordState == .none }
-    package var controlsEnabled: Bool { phase == .loaded }
-    package var canAdd: Bool { controlsEnabled && !isPasswordless }
-    package var canTest: Bool { controlsEnabled && selected != nil && !isTesting }
+    public var isPasswordless: Bool { availability.passwordState == .none }
+    public var controlsEnabled: Bool { phase == .loaded }
+    public var canAdd: Bool { controlsEnabled && !isPasswordless }
+    public var canTest: Bool { controlsEnabled && selected != nil && !isTesting }
 
-    package func select(_ id: String?) {
+    public func select(_ id: String?) {
         selectedID = connections.contains { $0.id == id } ? id : nil
     }
 
     // MARK: reads
 
     /// The latest call wins; a late answer is dropped.
-    package func reload() async {
+    public func reload() async {
         guard let account else { return }
         generation += 1
         let ticket = generation
@@ -159,7 +164,7 @@ package final class AgentSettingsModel {
     }
 
     /// Test again (030-FR-030): the server test with no password, then the new status.
-    package func testAgain() async {
+    public func testAgain() async {
         guard canTest, let account, let target = selected else { return }
         let key = UUID(), started = ContinuousClock.now, ticket = generation
         isTesting = true
@@ -181,9 +186,9 @@ package final class AgentSettingsModel {
 
     // MARK: used by the editor
 
-    package func remote() -> (any AgentSettingsRemote)? { account.map(makeRemote) }
+    public func remote() -> (any AgentSettingsRemote)? { account.map(makeRemote) }
 
-    package func apply(_ connection: AgentConnectionDTO, select makeSelected: Bool = true) {
+    public func apply(_ connection: AgentConnectionDTO, select makeSelected: Bool = true) {
         if connection.status == .disconnected { return remove(connection.id) }
         if let index = connections.firstIndex(where: { $0.id == connection.id }) {
             connections[index] = connection
@@ -193,21 +198,21 @@ package final class AgentSettingsModel {
         if makeSelected { selectedID = connection.id }
     }
 
-    package func remove(_ id: String) {
+    public func remove(_ id: String) {
         connections.removeAll { $0.id == id }
         if selectedID == id { selectedID = connections.first?.id }
     }
 
     /// The words for a failed call, plus its consequences: a 401 ends the session, and the relay's
     /// flag-off 404 hides the surface and refreshes availability.
-    package func report(_ error: APIError, passwordBearing: Bool) async -> AgentNotice {
+    public func report(_ error: APIError, passwordBearing: Bool) async -> AgentNotice {
         if error.kind == .unauthorized { phase = .sessionEnded }
         let failure = error.agentFailure
         if failure == .relayUnavailable { await availability.relayUnavailable() }
         return Self.notice(error, passwordBearing: passwordBearing)
     }
 
-    package nonisolated static func notice(_ error: APIError, passwordBearing: Bool) -> AgentNotice {
+    public nonisolated static func notice(_ error: APIError, passwordBearing: Bool) -> AgentNotice {
         let failure = error.agentFailure
         let reference = error.referenceID
         switch failure {
@@ -233,18 +238,18 @@ package final class AgentSettingsModel {
 
     // MARK: rows
 
-    package nonisolated static func connection(_ dto: AgentConnectionDTO) -> AgentsCopy.Connection {
+    public nonisolated static func connection(_ dto: AgentConnectionDTO) -> AgentsCopy.Connection {
         AgentsCopy.Connection(
             status: Self.wire(dto.status), stale: dto.stale, agentChanged: dto.agentChanged,
             errorCode: dto.lastTestErrorCode, foundVersion: dto.card?.protocolVersion,
             scheme: nil, staleAfterSeconds: dto.staleAfterSeconds)
     }
 
-    package nonisolated static func status(of dto: AgentConnectionDTO) -> String {
+    public nonisolated static func status(of dto: AgentConnectionDTO) -> String {
         AgentsCopy.statusLabel(connection(dto))
     }
 
-    package nonisolated static func details(_ dto: AgentConnectionDTO) -> AgentDetailRows {
+    public nonisolated static func details(_ dto: AgentConnectionDTO) -> AgentDetailRows {
         let model = connection(dto)
         let sentence = dto.readyForHandoff && dto.status == .ready && !dto.stale && !dto.agentChanged
             ? AgentsCopy.readyForHandoff : AgentsCopy.statusDetail(model)
@@ -278,7 +283,7 @@ package final class AgentSettingsModel {
         }
     }
 
-    package func call<T: Sendable>(_ op: () async throws(APIError) -> T) async -> Result<T, APIError> {
+    public func call<T: Sendable>(_ op: () async throws(APIError) -> T) async -> Result<T, APIError> {
         do throws(APIError) { return .success(try await op()) } catch { return .failure(error) }
     }
 
@@ -286,6 +291,6 @@ package final class AgentSettingsModel {
     private func record(_ stage: String, _ outcome: String, _ started: ContinuousClock.Instant, reference: String? = nil) {
         let parts = started.duration(to: .now).components
         let millis = parts.seconds * 1000 + parts.attoseconds / 1_000_000_000_000_000
-        log.log(.sync, "agent-settings stage=\(stage) outcome=\(outcome) ms=\(millis)" + (reference.map { " ref=\($0)" } ?? ""))
+        log.log("agent-settings stage=\(stage) outcome=\(outcome) ms=\(millis)" + (reference.map { " ref=\($0)" } ?? ""))
     }
 }

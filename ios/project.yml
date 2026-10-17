@@ -72,6 +72,7 @@ targets:
           - BrainBuddyCore
           - BrainBuddyDesign
           - BrainBuddyDiagnostics
+          - BrainBuddyAgents
       - target: BrainBuddyWidgets
         embed: true
     settings:
@@ -240,6 +241,7 @@ schemes:
         - package: BrainBuddyKit/BrainBuddySyncTests
         - package: BrainBuddyKit/BrainBuddyWorkspaceTests
         - package: BrainBuddyKit/BrainBuddyDiagnosticsTests
+        - package: BrainBuddyKit/BrainBuddyAgentsTests
     profile:
       config: Release
     analyze:

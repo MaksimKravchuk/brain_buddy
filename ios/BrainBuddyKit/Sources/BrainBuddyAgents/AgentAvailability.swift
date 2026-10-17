@@ -4,41 +4,41 @@ import Foundation
 import Observation
 
 /// The two reads availability makes (030-FR-002). `BrainBuddyAPIClient` is the production remote.
-package protocol AgentAvailabilityRemote: Sendable {
+public protocol AgentAvailabilityRemote: Sendable {
     func me() async throws(APIError) -> MeDTO
     func accountAuthMethods() async throws(APIError) -> AccountAuthMethodsDTO
 }
 
 extension BrainBuddyAPIClient: AgentAvailabilityRemote {}
 
-package enum AgentPasswordState: Equatable, Sendable { case has, none, unknown }
+public enum AgentPasswordState: Equatable, Sendable { case has, none, unknown }
 
 /// Whether the agent surfaces show, and which controls (030-FR-001, 030-FR-002, 030-FR-036). Memory
 /// only. A read applies only while it still belongs to the account that started it.
 @MainActor
 @Observable
-package final class AgentAvailability {
-    package static let activationThrottle: TimeInterval = 300
-    package static let relayFlag = "external_agent_relay"
+public final class AgentAvailability {
+    public static let activationThrottle: TimeInterval = 300
+    public static let relayFlag = "external_agent_relay"
 
-    package private(set) var ownerID: String?
-    package private(set) var relayEnabled = false
-    package private(set) var passwordState = AgentPasswordState.unknown
-    package private(set) var isOnline = true
+    public private(set) var ownerID: String?
+    public private(set) var relayEnabled = false
+    public private(set) var passwordState = AgentPasswordState.unknown
+    public private(set) var isOnline = true
     /// The one-shot "show Add new agent" request: set by the sidebar, consumed by the Settings tab.
-    package private(set) var addAgentRequested = false
+    public private(set) var addAgentRequested = false
     /// The one-shot "show the Agents tab" request (no Add sheet): set by the hand-off sheet.
-    package private(set) var agentsTabRequested = false
+    public private(set) var agentsTabRequested = false
     @ObservationIgnored private var account: LinkedAccount?
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var lastRefresh: Date?
     @ObservationIgnored private let makeRemote: @MainActor (LinkedAccount) -> any AgentAvailabilityRemote
     @ObservationIgnored private let now: @MainActor () -> Date
-    @ObservationIgnored private let log: any MacLogSink
+    @ObservationIgnored private let log: any AgentLogSink
 
-    package init(
+    public init(
         account: LinkedAccount?, remote: @escaping @MainActor (LinkedAccount) -> any AgentAvailabilityRemote,
-        now: @escaping @MainActor () -> Date = { Date() }, log: any MacLogSink = SystemMacLog()
+        now: @escaping @MainActor () -> Date = { Date() }, log: any AgentLogSink = SystemAgentLog()
     ) {
         self.account = account
         ownerID = account?.id
@@ -48,7 +48,7 @@ package final class AgentAvailability {
     }
 
     /// The workspace's account changed (sign-in, sign-out, another account): everything is dropped.
-    package func update(account new: LinkedAccount?) {
+    public func update(account new: LinkedAccount?) {
         let changed = new?.id != account?.id
         account = new
         guard changed else { return }
@@ -62,7 +62,7 @@ package final class AgentAvailability {
     }
 
     /// At sign-in, and whenever a caller needs the answer now.
-    package func refresh() async {
+    public func refresh() async {
         guard let account else { return }
         generation += 1
         let ticket = generation
@@ -92,37 +92,37 @@ package final class AgentAvailability {
     }
 
     /// The main window became active: at most one read every five minutes (030-FR-002).
-    package func activate() async {
+    public func activate() async {
         if let lastRefresh, now().timeIntervalSince(lastRefresh) < Self.activationThrottle { return }
         await refresh()
     }
 
     /// A person's action (Try again, Retry, opening the hand-off sheet) needs the answer now: a cached offline
     /// state never blocks it. Online callers pay nothing; offline ones bypass the throttle and read again.
-    package func confirmOnline() async -> Bool {
+    public func confirmOnline() async -> Bool {
         if !isOnline { await refresh() }
         return isOnline
     }
 
     /// A flagged route answered "External agent relay is not available.": hide, then read again.
-    package func relayUnavailable() async {
+    public func relayUnavailable() async {
         relayEnabled = false
         await refresh()
     }
 
-    package func requestAddAgent() { addAgentRequested = true }
+    public func requestAddAgent() { addAgentRequested = true }
 
     /// "Open Settings" on the hand-off sheet: bring Settings › Agents forward, without opening Add.
-    package func requestAgentsTab() { agentsTabRequested = true }
+    public func requestAgentsTab() { agentsTabRequested = true }
 
     /// True once per request.
-    package func consumeAgentsTabRequest() -> Bool {
+    public func consumeAgentsTabRequest() -> Bool {
         defer { agentsTabRequested = false }
         return agentsTabRequested
     }
 
     /// True once per request.
-    package func consumeAddAgentRequest() -> Bool {
+    public func consumeAddAgentRequest() -> Bool {
         defer { addAgentRequested = false }
         return addAgentRequested
     }
@@ -138,7 +138,7 @@ package final class AgentAvailability {
     }
 
     /// Stage and outcome only (030-FR-039): never an account, name or flag value.
-    private func record(_ outcome: String) { log.log(.sync, "agent-availability stage=refresh outcome=\(outcome)") }
+    private func record(_ outcome: String) { log.log("agent-availability stage=refresh outcome=\(outcome)") }
 }
 
 extension APIError {

@@ -1,3 +1,4 @@
+import BrainBuddyAgents
 import Testing
 
 @testable import BrainBuddyMacCore

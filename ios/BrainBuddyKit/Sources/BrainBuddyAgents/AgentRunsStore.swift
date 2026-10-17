@@ -5,7 +5,7 @@ import Foundation
 import Observation
 
 /// The two reads All runs makes (030-FR-005). `BrainBuddyAPIClient` is the production remote.
-package protocol AgentRunsRemote: Sendable {
+public protocol AgentRunsRemote: Sendable {
     func agentRunSummaries(taskIDs: [String]) async throws(APIError) -> [String: AgentRunSummaryDTO]
     func agentRun(id: String) async throws(APIError) -> AgentRunDTO
 }
@@ -13,28 +13,30 @@ package protocol AgentRunsRemote: Sendable {
 extension BrainBuddyAPIClient: AgentRunsRemote {}
 
 /// An open step the store lists runs for. Only steps with a server id can have a run (030-FR-013).
-package struct AgentOpenStep: Equatable, Sendable {
-    package var title: String
-    package var serverID: String
+public struct AgentOpenStep: Equatable, Sendable {
+    public var title: String
+    public var serverID: String
 
-    package init(title: String, serverID: String) { (self.title, self.serverID) = (title, serverID) }
+    public init(title: String, serverID: String) { (self.title, self.serverID) = (title, serverID) }
 
     /// The open steps (clarification (c): not completed, not cancelled) the server knows, read-only.
     /// A Rust-selected workspace does not put the server id on its task records, so it lists none
     /// here; see the 030 PR-04 notes for the kit accessor that closes that gap.
     @MainActor
-    package static func open(in workspace: Workspace) -> [AgentOpenStep] {
+    public static func open(in workspace: Workspace) -> [AgentOpenStep] {
         workspace.state.tasks.values.filter(\.isOpen).compactMap { task in
             task.serverID.map { AgentOpenStep(title: task.title, serverID: $0) }
         }
     }
 }
 
-package enum AgentRunsPhase: Equatable, Sendable { case loading, loaded, stale, failed(reference: String?) }
+public enum AgentRunsPhase: Equatable, Sendable { case loading, loaded, stale, failed(reference: String?) }
 
-package struct AgentRunSection: Equatable, Sendable {
-    package var group: AgentRunGroup
-    package var items: [AgentRunItem]
+public struct AgentRunSection: Equatable, Sendable {
+    public var group: AgentRunGroup
+    public var items: [AgentRunItem]
+
+    public init(group: AgentRunGroup, items: [AgentRunItem]) { (self.group, self.items) = (group, items) }
 }
 
 /// A run held in the memory cache; it expires with its content (030-FR-027).
@@ -49,40 +51,40 @@ private struct CachedRun: AgentCacheExpiring {
 /// `pollDue()` once a second, so a test drives it by moving its clock and calling `pollDue()`.
 @MainActor
 @Observable
-package final class AgentRunsStore {
-    package static let summaryInterval: TimeInterval = 60
-    package static let runReadConcurrency = 8
+public final class AgentRunsStore {
+    public static let summaryInterval: TimeInterval = 60
+    public static let runReadConcurrency = 8
 
-    package private(set) var sections: [AgentRunSection] = []
-    package private(set) var items: [AgentRunItem] = []
+    public private(set) var sections: [AgentRunSection] = []
+    public private(set) var items: [AgentRunItem] = []
     /// Listed runs per agent connection id, for the sidebar rows.
-    package private(set) var perAgentCounts: [String: Int] = [:]
-    package private(set) var lastUpdated: Date?
-    package private(set) var phase = AgentRunsPhase.loading
+    public private(set) var perAgentCounts: [String: Int] = [:]
+    public private(set) var lastUpdated: Date?
+    public private(set) var phase = AgentRunsPhase.loading
     /// The main window is visible; polling pauses while it is not.
-    package var isWindowVisible = true
+    public var isWindowVisible = true
     /// The Mac is online; polling pauses while it is not (030-FR-025).
-    package var isOnline = true
+    public var isOnline = true
 
     /// Waiting for's Agents rows: every listed run, in group order.
-    package var waitingForRows: [AgentRunItem] { items }
+    public var waitingForRows: [AgentRunItem] { items }
 
     @ObservationIgnored private let remote: any AgentRunsRemote
     @ObservationIgnored private let steps: @MainActor () -> [AgentOpenStep]
     @ObservationIgnored private let availability: AgentAvailability
     @ObservationIgnored private let cache: AgentMemoryCache
     @ObservationIgnored private let now: @MainActor () -> Date
-    @ObservationIgnored private let log: any MacLogSink
+    @ObservationIgnored private let log: any AgentLogSink
     @ObservationIgnored private var latest: [String: String] = [:]
     @ObservationIgnored private var nextSummaryAt: Date?
     @ObservationIgnored private var nextRunAt: [String: Date] = [:]
     @ObservationIgnored private var loading = false
     @ObservationIgnored private var reloadRequested = false
 
-    package init(
+    public init(
         remote: any AgentRunsRemote, steps: @escaping @MainActor () -> [AgentOpenStep],
         availability: AgentAvailability, cache: AgentMemoryCache, now: @escaping @MainActor () -> Date = { Date() },
-        log: any MacLogSink = SystemMacLog()
+        log: any AgentLogSink = SystemAgentLog()
     ) {
         (self.remote, self.steps, self.availability) = (remote, steps, availability)
         (self.cache, self.now, self.log) = (cache, now, log)
@@ -90,7 +92,7 @@ package final class AgentRunsStore {
 
     /// The last-read run of an open step, for an inspector opened while the run read fails (030-FR-025).
     /// Nil when nothing was read or its content has expired (030-FR-027).
-    package func cachedRun(taskServerID: String) -> AgentRunDTO? {
+    public func cachedRun(taskServerID: String) -> AgentRunDTO? {
         guard let runID = latest[taskServerID],
             case .hit(let cached) = cache.get(CachedRun.self, id: runID, bucket: .run, now: now())
         else { return nil }
@@ -98,20 +100,20 @@ package final class AgentRunsStore {
     }
 
     /// Sign-out, session end or account change: everything listed is dropped.
-    package func reset() {
+    public func reset() {
         (latest, nextRunAt, nextSummaryAt, lastUpdated) = ([:], [:], nil as Date?, nil as Date?)
         (sections, items, perAgentCounts, phase) = ([], [], [:], .loading)
     }
 
     /// First load, Sync now (⌘R) and the refresh after a hand-off, reply or stop: summaries, then every listed run.
-    package func refresh() async { await load(readAllRuns: true) }
+    public func refresh() async { await load(readAllRuns: true) }
 
     /// The open steps changed (a step was marked done or added): list again from what is already read.
-    package func stepsChanged() { rebuild() }
+    public func stepsChanged() { rebuild() }
 
     /// One poll step at the injected clock: summaries every 60 s, each non-ended run at its own interval.
     /// Nothing runs while hidden or offline.
-    package func pollDue() async {
+    public func pollDue() async {
         guard isWindowVisible, isOnline, availability.ownerID != nil else { return }
         guard let nextSummaryAt else { return await refresh() }
         if now() >= nextSummaryAt { await load(readAllRuns: false) }
@@ -122,7 +124,7 @@ package final class AgentRunsStore {
     }
 
     /// The host's polling loop; cancel its task to stop it.
-    package func run(tick: Duration = .seconds(1)) async {
+    public func run(tick: Duration = .seconds(1)) async {
         while !Task.isCancelled {
             await pollDue()
             try? await Task.sleep(for: tick)
@@ -242,7 +244,7 @@ package final class AgentRunsStore {
 
     /// Counts and stage only (030-FR-039): never a title, agent name or run content.
     private func record(_ outcome: String, steps: Int) {
-        log.log(.sync, "agent-runs stage=refresh outcome=\(outcome) steps=\(steps) runs=\(latest.count)")
+        log.log("agent-runs stage=refresh outcome=\(outcome) steps=\(steps) runs=\(latest.count)")
     }
 
     private nonisolated static func readSummaries(

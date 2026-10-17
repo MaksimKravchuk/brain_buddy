@@ -2,14 +2,14 @@ import BrainBuddyAPI
 import Foundation
 
 /// The five groups of All runs, in the order they show (030-FR-006). A pure function of the server's label.
-package enum AgentRunGroup: Int, CaseIterable, Sendable {
+public enum AgentRunGroup: Int, CaseIterable, Sendable {
     case needsYou, running, queued, toReview, lostContact
 
-    package var title: String { AgentsCopy.groups[rawValue] }
+    public var title: String { AgentsCopy.groups[rawValue] }
 
     /// The 030-FR-006 table. A label this build does not know is an ended-looking row that shows verbatim,
     /// so it sits under To review rather than claiming the person's attention.
-    package init(_ state: AgentPrimaryState) {
+    public init(_ state: AgentPrimaryState) {
         switch state {
         case .needsYou, .deliveryUnconfirmed: self = .needsYou
         case .sent, .accepted, .running, .cancellationRequested: self = .running
@@ -24,7 +24,7 @@ package enum AgentRunGroup: Int, CaseIterable, Sendable {
 
 extension AgentPrimaryState {
     /// The server's words for this label, as the run shows them.
-    package var label: String {
+    public var label: String {
         switch self {
         case .notSent: "Not sent"
         case .queued: "Queued"
@@ -46,7 +46,7 @@ extension AgentPrimaryState {
     }
 
     /// An ended run no longer changes, so it is read once and not polled (030-FR-024).
-    package var isEnded: Bool {
+    public var isEnded: Bool {
         switch self {
         case .agentReportedComplete, .failed, .cancelled, .agentNoLongerReportsThisRun,
             .connectionDisconnected, .contentExpired:
@@ -57,19 +57,19 @@ extension AgentPrimaryState {
 }
 
 /// One listed run with its step: what a row of All runs or Waiting for needs (030-FR-007, 030-FR-010).
-package struct AgentRunItem: Equatable, Sendable, Identifiable {
-    package var id: String { runID }
-    package var stepTitle: String
-    package var taskServerID: String
-    package var runID: String
-    package var connectionID: String?
-    package var agentName: String
-    package var state: AgentPrimaryState
-    package var questionText: String?
-    package var sentAt: Date?
-    package var lastContactAt: Date?
+public struct AgentRunItem: Equatable, Sendable, Identifiable {
+    public var id: String { runID }
+    public var stepTitle: String
+    public var taskServerID: String
+    public var runID: String
+    public var connectionID: String?
+    public var agentName: String
+    public var state: AgentPrimaryState
+    public var questionText: String?
+    public var sentAt: Date?
+    public var lastContactAt: Date?
 
-    package init(
+    public init(
         stepTitle: String, taskServerID: String, runID: String, connectionID: String? = nil, agentName: String,
         state: AgentPrimaryState, questionText: String? = nil, sentAt: Date? = nil, lastContactAt: Date? = nil
     ) {
@@ -78,10 +78,10 @@ package struct AgentRunItem: Equatable, Sendable, Identifiable {
         (self.questionText, self.sentAt, self.lastContactAt) = (questionText, sentAt, lastContactAt)
     }
 
-    package var group: AgentRunGroup { AgentRunGroup(state) }
+    public var group: AgentRunGroup { AgentRunGroup(state) }
 
     /// The canvas detail after "<agent> · " (030-FR-007). Any other label shows verbatim.
-    package func detail(now: Date) -> String {
+    public func detail(now: Date) -> String {
         switch state {
         case .needsYou:
             questionText?.split(whereSeparator: \.isNewline).first.map(String.init) ?? state.label
@@ -93,7 +93,7 @@ package struct AgentRunItem: Equatable, Sendable, Identifiable {
     }
 
     /// The compact state of an Agents row in Waiting for (030-FR-010).
-    package func compactState(now: Date, calendar: Calendar = .current) -> String {
+    public func compactState(now: Date, calendar: Calendar = .current) -> String {
         switch state {
         case .running: Self.elapsed(since: sentAt, now: now).map { "\(state.label) · \($0)" } ?? state.label
         case .agentReportedComplete:
@@ -104,7 +104,7 @@ package struct AgentRunItem: Equatable, Sendable, Identifiable {
     }
 
     /// "<agent> · <detail>", the second line of a canvas row.
-    package func subtitle(now: Date) -> String { "\(agentName) · \(detail(now: now))" }
+    public func subtitle(now: Date) -> String { "\(agentName) · \(detail(now: now))" }
 
     /// "<prefix> · <time since last contact>", the prefix alone when the time is unknown.
     private func lost(_ prefix: String, now: Date) -> String {
@@ -112,7 +112,7 @@ package struct AgentRunItem: Equatable, Sendable, Identifiable {
     }
 
     /// "4 min", "3 h", "2 days": whole units, rounded down, never under a minute.
-    package static func elapsed(since start: Date?, now: Date) -> String? {
+    public static func elapsed(since start: Date?, now: Date) -> String? {
         guard let start else { return nil }
         let seconds = max(0, now.timeIntervalSince(start))
         if seconds < 3600 { return "\(max(1, Int(seconds / 60))) min" }

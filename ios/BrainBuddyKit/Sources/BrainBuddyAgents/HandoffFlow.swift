@@ -4,7 +4,7 @@ import Observation
 
 /// The calls a hand-off makes (030-FR-014, 030-FR-015, 030-FR-017). `BrainBuddyAPIClient` is the production
 /// remote. Opening the sheet tests each listed-ready agent again, so a stopped agent is not offered.
-package protocol HandoffRemote: Sendable {
+public protocol HandoffRemote: Sendable {
     func agentConnections() async throws(APIError) -> [AgentConnectionDTO]
     func testAgentConnection(id: String, idempotencyKey: UUID) async throws(APIError) -> AgentConnectionDTO
     func previewAgentHandoff(
@@ -19,12 +19,12 @@ package protocol HandoffRemote: Sendable {
 extension BrainBuddyAPIClient: HandoffRemote {}
 
 /// One ready agent row of the sheet: name, skills joined by ", ", " · ", the start guarantee (030-FR-014).
-package struct HandoffAgent: Equatable, Identifiable, Sendable {
-    package let id: String
-    package let name: String
-    package let detail: String
+public struct HandoffAgent: Equatable, Identifiable, Sendable {
+    public let id: String
+    public let name: String
+    public let detail: String
 
-    package init(_ connection: AgentConnectionDTO) {
+    public init(_ connection: AgentConnectionDTO) {
         id = connection.id
         name = connection.name
         let skills = (connection.card?.skills ?? []).compactMap(\.name).joined(separator: ", ")
@@ -33,7 +33,7 @@ package struct HandoffAgent: Equatable, Identifiable, Sendable {
     }
 }
 
-package enum HandoffPhase: Equatable, Sendable {
+public enum HandoffPhase: Equatable, Sendable {
     case loadingAgents, noReadyAgent, previewing, ready, sending
     case failed(AgentActionFailure)
     case sent(runID: String)
@@ -43,13 +43,13 @@ package enum HandoffPhase: Equatable, Sendable {
 /// command (030-FR-012). The password is cleared after every outcome, so a failed Send needs it typed again.
 @MainActor
 @Observable
-package final class HandoffFlow {
-    package private(set) var phase = HandoffPhase.loadingAgents
-    package private(set) var agents: [HandoffAgent] = []
-    package private(set) var selectedID: String?
-    package private(set) var manifest: AgentManifestDTO?
-    package var password = ""
-    package var acknowledged = false
+public final class HandoffFlow {
+    public private(set) var phase = HandoffPhase.loadingAgents
+    public private(set) var agents: [HandoffAgent] = []
+    public private(set) var selectedID: String?
+    public private(set) var manifest: AgentManifestDTO?
+    public var password = ""
+    public var acknowledged = false
 
     @ObservationIgnored private let taskID: String
     @ObservationIgnored private let items: [AgentContextItemDTO]
@@ -60,7 +60,7 @@ package final class HandoffFlow {
     @ObservationIgnored private var generation = 0
 
     /// `onSent` puts the run into the listed runs at once (030-FR-017); PR-07 wires it to the runs store.
-    package init(
+    public init(
         taskServerID: String, projectName: String?, remote: any HandoffRemote, availability: AgentAvailability,
         onSent: @escaping @MainActor (AgentRunDTO) async -> Void = { _ in }
     ) {
@@ -69,11 +69,11 @@ package final class HandoffFlow {
         (self.remote, self.availability, self.onSent) = (remote, availability, onSent)
     }
 
-    package var needsPassword: Bool { manifest?.reauthenticationRequired == true }
-    package var needsAcknowledgement: Bool { manifest?.acknowledgementRequired == true }
+    public var needsPassword: Bool { manifest?.reauthenticationRequired == true }
+    public var needsAcknowledgement: Bool { manifest?.acknowledgementRequired == true }
 
     /// Send is enabled once each shown field is satisfied (030-FR-016).
-    package var canSend: Bool {
+    public var canSend: Bool {
         guard manifest != nil, phase == .ready || isFailed else { return false }
         return (!needsPassword || !password.isEmpty) && (!needsAcknowledgement || acknowledged)
     }
@@ -85,7 +85,7 @@ package final class HandoffFlow {
 
     /// The sheet opened: agents listed ready are tested again, and only those still ready are offered, the
     /// first selected and previewed. A stored "ready" can outlive the agent's process (manual check A-17).
-    package func start() async {
+    public func start() async {
         phase = .loadingAgents
         guard await availability.confirmOnline() else { return phase = .failed(.offline) }
         let owner = availability.ownerID
@@ -146,18 +146,18 @@ package final class HandoffFlow {
         }
     }
 
-    package func select(_ id: String) async {
+    public func select(_ id: String) async {
         guard agents.contains(where: { $0.id == id }) else { return }
         selectedID = id
         await preview()
     }
 
     /// Try again: sends the same reviewed manifest with the same key, or previews again when there is none.
-    package func tryAgain() async {
+    public func tryAgain() async {
         if manifest != nil { await send() } else if selectedID != nil { await preview() } else { await start() }
     }
 
-    package func send() async {
+    public func send() async {
         guard canSend, let manifest, let agent = selectedID else { return }
         phase = .sending
         guard await availability.confirmOnline() else { return phase = .failed(.offline) }

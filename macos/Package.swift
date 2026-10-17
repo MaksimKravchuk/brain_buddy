@@ -13,6 +13,7 @@ let kit: [Target.Dependency] = [
     .product(name: "BrainBuddyAPI", package: "BrainBuddyKit"),
     .product(name: "BrainBuddySync", package: "BrainBuddyKit"),
     .product(name: "BrainBuddyWorkspace", package: "BrainBuddyKit"),
+    .product(name: "BrainBuddyAgents", package: "BrainBuddyKit"),
 ]
 
 let package = Package(
