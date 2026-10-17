@@ -686,7 +686,7 @@ fn owned_review_activation_cancellation_and_marker_retry_share_commit_guard() {
             busy_timeout_ms: 2_000,
         })
         .unwrap();
-    let capture = workspace.capture_legacy_review().unwrap();
+    let capture = workspace.capture_legacy_review_metadata().unwrap();
     assert!(!capture.already_active);
     let prepare = || BridgeLegacyReviewPrepared {
         token: capture.token.clone(),
@@ -708,7 +708,12 @@ fn owned_review_activation_cancellation_and_marker_retry_share_commit_guard() {
         .0,
         "CANCELLED"
     );
-    assert!(!workspace.capture_legacy_review().unwrap().already_active);
+    assert!(
+        !workspace
+            .capture_legacy_review_metadata()
+            .unwrap()
+            .already_active
+    );
     let operation = Arc::new(BridgeOperation::new());
     let activated = workspace
         .activate_legacy_review(prepare(), context(), operation.clone())
@@ -733,7 +738,7 @@ fn owned_review_activation_cancellation_and_marker_retry_share_commit_guard() {
         "CANCELLED"
     );
     assert_eq!(
-        workspace.capture_legacy_review().unwrap().token,
+        workspace.capture_legacy_review_metadata().unwrap().token,
         capture.token
     );
 }

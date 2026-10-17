@@ -412,5 +412,3 @@ export function CrtStorageUnavailableAlert({ onRetry }: CrtStorageUnavailableAle
     </div>
   );
 }
-
-export const CrtOnlineOnlyWarning = CrtStorageUnavailableAlert;

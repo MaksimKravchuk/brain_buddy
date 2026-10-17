@@ -1051,59 +1051,6 @@ class AgentRepository(BaseRepository):
             ),
         )
 
-    def update_run_if_version(
-        self, run: AgentRunDocument, *, expected_version: int
-    ) -> bool:
-        """Write a run only if nothing moved under the worker that read it.
-
-        Two properties, both of which a plain ``save_run`` would lose.
-
-        **Compare-and-set.** An observer worker reads the run, spends seconds or
-        minutes on a network call, and applies the answer afterwards. Without
-        ``run_version`` in the ``WHERE`` clause a slow observation returning
-        after a fast one would overwrite newer truth with older — the run would
-        appear to move backwards, which reads to the user as the agent having
-        un-completed their work.
-
-        **No resurrection.** This is an ``UPDATE``, never an upsert, so it can
-        only change a row that is still there. A worker that started before an
-        account purge finishes after it and writes nothing, rather than
-        re-creating a row the user asked to be erased (FR-016).
-
-        Returns whether the write applied.
-        """
-
-        with self._connection() as conn, _sqlite_guard("Agent run", run.id):
-            cursor = conn.execute(
-                """
-                UPDATE agent_runs SET
-                    dispatched_at = ?,
-                    manifest_token = ?,
-                    content_expires_at = ?,
-                    content_expired = ?,
-                    agent_task_id = ?,
-                    context_id = ?,
-                    next_observation_at = ?,
-                    exchange_state = ?,
-                    identifiers_expire_at = ?,
-                    payload = ?
-                WHERE owner_id = ? AND id = ?
-                  AND json_extract(payload, '$.run_version') = ?
-                """,
-                (
-                    run.dispatched_at.isoformat() if run.dispatched_at else None,
-                    run.manifest.token if run.manifest else None,
-                    run.content_expires_at.isoformat(),
-                    int(run.content_expired),
-                    *self._a2a_run_columns(run),
-                    self._payload(run),
-                    run.owner_id,
-                    run.id,
-                    expected_version,
-                ),
-            )
-            return cursor.rowcount == 1
-
     def due_observations(
         self, *, now: datetime, limit: int = DUE_OBSERVATION_BATCH
     ) -> list[tuple[str, str]]:
@@ -1340,25 +1287,6 @@ class AgentRepository(BaseRepository):
                 (owner_id, token),
             ).fetchone()
         return None if row is None else self._model(row, AgentRunDocument)
-
-    def find_connection_anywhere(
-        self, connection_id: str
-    ) -> AgentConnectionDocument | None:
-        """Look a connection up without an owner, for inbound event routing.
-
-        Inbound events arrive unauthenticated as a user; the connection is what
-        identifies the owner, and the signature is what proves the caller may
-        act as it. Every downstream read is then re-scoped to that owner.
-        """
-
-        with self._connection() as conn:
-            rows = conn.execute(
-                "SELECT payload FROM agent_connections WHERE id = ? LIMIT 2",
-                (connection_id,),
-            ).fetchall()
-        if len(rows) != 1:
-            return None
-        return self._model(rows[0], AgentConnectionDocument)
 
     def prune_undispatched_runs(self, *, before: datetime) -> int:
         """Drop abandoned review reservations so they cannot accumulate."""
@@ -1903,19 +1831,6 @@ class AgentRepository(BaseRepository):
         """
 
         return self._expire_due_identifiers(now=now)
-
-    def expire_due_identifiers(self, *, now: datetime) -> int:
-        """Null the identifiers an agent could still act on, and drop the events.
-
-        Ninety days from dispatch, and deliberately *not* the run id: the
-        conversation identifier is the run's own id, it is embedded in a
-        callback URL the agent keeps and in a row no sweep deletes, so nulling
-        it here would erase nothing anyone holds while implying it had. The run
-        row and its id stay until the account is purged, and
-        `docs/data-retention.md` says exactly that.
-        """
-
-        return len(self._expire_due_identifiers(now=now))
 
     def _expire_due_identifiers(self, *, now: datetime) -> list[tuple[str, str]]:
         cutoff = (now - IDENTIFIER_RETENTION).isoformat()
