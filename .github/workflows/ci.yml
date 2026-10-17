@@ -103,6 +103,7 @@ jobs:
           python3 -m unittest scripts/test_classify_path_risk.py -v
           python3 -m unittest scripts/test_check_smoke_identity_cohort.py -v
           python3 -m unittest scripts/test_select_backend_tests.py -v
+          python3 -m unittest scripts/test_ci_shards.py -v
           python3 -m unittest scripts/test_release_graph.py -v
           python3 -m unittest scripts/test_classify_changed_scripts.py -v
           python3 scripts/validate_trunk_delivery.py trunk-ci \
@@ -461,7 +462,11 @@ jobs:
           python3 scripts/check_gate_integrity.py
 
   backend:
-    name: Backend
+    name: Backend (${{ matrix.shard }})
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
     runs-on: ubuntu-latest
     needs: changes
     # The job always runs; RUN gates its expensive steps. See the `changes` job
@@ -593,36 +598,114 @@ jobs:
           fi
           echo "selection=${selection}" >> "$GITHUB_OUTPUT"
 
-      - name: Run pytest with coverage and Allure
+      - name: Collect and partition the complete selected-or-full suite
         if: env.RUN == 'true'
         env:
+          PYTHONPATH: ${{ github.workspace }}
+          CI_SHARD_INDEX: ${{ matrix.shard }}
+          CI_SHARD_COUNT: '2'
+          CI_SHARD_SHA: ${{ env.BRAIN_BUDDY_CANDIDATE_SHA }}
+          CI_SHARD_MODE: ${{ steps.select.outputs.mode }}
+          CI_SHARD_DIR: shard-evidence
           MODE: ${{ steps.select.outputs.mode }}
           SELECTION: ${{ steps.select.outputs.selection }}
         run: |
-          # One worker per core. loadgroup spreads tests one at a time except
-          # those sharing an xdist_group (a module bound to a fixed port), and
-          # pytest-cov merges every worker's data, test contexts included.
-          parallel=(-n auto --dist loadgroup)
-          if [ "${MODE}" = "selected" ]; then
-            # A partial run cannot meet the whole-suite 95% bar; the floor is
-            # enforced on the landing path, which always runs everything.
-            mapfile -t tests < "${SELECTION}"
-            pytest "${parallel[@]}" --cov=app --cov-report=term --cov-report=xml --alluredir=allure-results \
-              --cov-fail-under=0 "${tests[@]}"
-          elif [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            pytest "${parallel[@]}" --cov=app --cov-report=term --cov-report=xml --alluredir=allure-results \
-              --cov-context=test
-          else
-            pytest "${parallel[@]}" --cov=app --cov-report=term --cov-report=xml --alluredir=allure-results
+          selected=()
+          if [ "${MODE}" = selected ]; then mapfile -t selected < "${SELECTION}"; fi
+          pytest -p scripts.ci_shards --collect-only -q -o addopts='' "${selected[@]}"
+
+      - name: Run pytest with coverage and Allure
+        id: pytest
+        if: env.RUN == 'true'
+        run: |
+          # An empty @file would run default testpaths: never invoke it.
+          if [ ! -s shard-evidence/pytest-args.txt ]; then
+            echo 'exit-code=0' >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          printf '[run]\nbranch = True\nrelative_files = True\nsource = app\n' > "${RUNNER_TEMP}/coverage.ini"
+          contexts=()
+          if [ "${{ github.event_name }}" = push ] && [ "${{ github.ref }}" = refs/heads/main ]; then
+            contexts=(--cov-context=test)
+          fi
+          set +e
+          pytest -n auto --dist loadgroup --cov=app --cov-report=term --cov-report= \
+            --cov-config="${RUNNER_TEMP}/coverage.ini" --cov-fail-under=0 "${contexts[@]}" \
+            --alluredir=shard-evidence/allure-results --junitxml="${RUNNER_TEMP}/backend-junit.xml" \
+            @shard-evidence/pytest-args.txt
+          pytest_status=$?
+          echo "exit-code=${pytest_status}" >> "$GITHUB_OUTPUT"
+          exit "${pytest_status}"
+
+      - name: Record backend execution and safe coverage evidence
+        if: always() && env.RUN == 'true'
+        run: |
+          python3 ../scripts/ci_shards.py backend-record --assignment shard-evidence/assignment.json \
+            --junit "${RUNNER_TEMP}/backend-junit.xml" --coverage .coverage \
+            --output shard-evidence/manifest.json --sha "${BRAIN_BUDDY_CANDIDATE_SHA}" \
+            --index "${{ matrix.shard }}" --count 2 --mode "${{ steps.select.outputs.mode }}" \
+            --exit-code "${{ steps.pytest.outputs.exit-code }}"
+          if [ -f .coverage ]; then cp .coverage shard-evidence/.coverage; fi
+
+      - name: Upload backend shard evidence
+        if: always() && env.RUN == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-shard-${{ matrix.shard }}
+          path: backend/shard-evidence
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
+
+  backend-results:
+    name: Backend combined results
+    if: always()
+    runs-on: ubuntu-latest
+    needs: [changes, backend]
+    env:
+      RUN: ${{ needs.changes.outputs.backend }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact candidate checkout
+        run: test "$(git rev-parse HEAD)" = "$BRAIN_BUDDY_CANDIDATE_SHA"
+      - name: Set up Python
+        if: env.RUN == 'true'
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - name: Download available backend diagnostics
+        if: always() && env.RUN == 'true'
+        uses: actions/download-artifact@v8.0.2
+        with:
+          pattern: backend-shard-*
+          path: backend-shards
+      - name: Combine complete backend results and coverage
+        id: merge
+        if: always() && env.RUN == 'true'
+        run: |
+          python3 scripts/ci_shards.py backend-version --artifacts backend-shards \
+            --output-dir backend --sha "${BRAIN_BUDDY_CANDIDATE_SHA}"
+          python3 -m pip install "coverage==$(cat backend/coverage-version.txt)"
+          make verify-ci-shard-coverage
+          python3 scripts/ci_shards.py backend-merge --artifacts backend-shards \
+            --output-dir backend --sha "${BRAIN_BUDDY_CANDIDATE_SHA}"
+          echo "mode=$(cat backend/mode.txt)" >> "$GITHUB_OUTPUT"
+          test "${{ needs.backend.result }}" = success
 
       - name: Build the backend test-impact map
         if: env.RUN == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
-        working-directory: .
+        working-directory: backend
         run: |
-          python3 scripts/select_backend_tests.py build-map --coverage backend/.coverage \
-            --backend-root backend --source-sha "${BRAIN_BUDDY_CANDIDATE_SHA}" \
+          python3 ../scripts/select_backend_tests.py build-map --coverage .coverage \
+            --backend-root . --source-sha "${BRAIN_BUDDY_CANDIDATE_SHA}" \
             --output "${RUNNER_TEMP}/backend-test-map.json"
+
+      - name: Verify the combined test-impact map is nonempty
+        if: env.RUN == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: python3 -c 'import json,os; d=json.load(open(os.environ["RUNNER_TEMP"]+"/backend-test-map.json")); assert d["files"], "empty combined test-impact map"'
 
       - name: Save the backend test-impact map
         if: env.RUN == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -632,7 +715,7 @@ jobs:
           key: backend-test-map-${{ github.sha }}
 
       - name: Enforce backend coverage floor
-        if: env.RUN == 'true' && steps.select.outputs.mode == 'full'
+        if: env.RUN == 'true' && steps.merge.outputs.mode == 'full'
         working-directory: .
         run: |
           # The floor may only ratchet upward, so a branch that EDITS the floor
@@ -1057,11 +1140,6 @@ jobs:
             | tee "${RUNNER_TEMP}/xcodebuild.log" \
             | if command -v xcbeautify >/dev/null 2>&1; then xcbeautify --renderer github-actions; else cat; fi
 
-      - name: Test the package on macOS
-        if: env.RUN == 'true'
-        working-directory: ios/BrainBuddyKit
-        run: swift test --parallel
-
       - name: Upload build logs
         if: failure() && env.RUN == 'true'
         uses: actions/upload-artifact@v7
@@ -1072,6 +1150,79 @@ jobs:
             ${{ runner.temp }}/BrainBuddy.xcresult
           if-no-files-found: ignore
           retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
+
+  ios-tests:
+    name: iOS package tests on macOS (Xcode 26)
+    runs-on: ${{ needs.changes.outputs.ios == 'true' && 'macos-26' || 'ubuntu-latest' }}
+    timeout-minutes: 45
+    needs: changes
+    env:
+      RUN: ${{ needs.changes.outputs.ios }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify exact candidate checkout
+        run: test "$(git rev-parse HEAD)" = "$BRAIN_BUDDY_CANDIDATE_SHA"
+
+      - name: Select the newest Xcode 26
+        if: env.RUN == 'true'
+        run: bash ios/scripts/select-xcode.sh
+
+      # Spec 026: the app, the widget extension and the package link the shared Rust
+      # core as a static XCFramework built from rust/bindings/swift (device, simulator
+      # and macOS slices), not committed. Keep the version equal to rust/rust-toolchain.toml.
+      - name: Install pinned Rust
+        if: env.RUN == 'true'
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable action, fixed toolchain
+        with:
+          toolchain: 1.99.0
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios,aarch64-apple-darwin,x86_64-apple-darwin
+
+      # Cached under its inputs exactly as the ios-kit lane caches the Linux
+      # bridge; here the selected Xcode is the toolchain that links it. A cold
+      # build of all five slices is most of this lane's wall clock.
+      - name: Key the Rust bridge on its inputs
+        id: bridge-key
+        if: env.RUN == 'true'
+        run: |
+          inputs="$(git rev-parse HEAD:rust HEAD:ios/scripts/build-rust-bridge.sh)
+          $(xcodebuild -version)
+          $(uname -m)
+          ${BB_APPLE_TARGETS:-all}"
+          echo "key=rust-bridge-apple-$(printf '%s' "${inputs}" | git hash-object --stdin)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the Rust bridge
+        id: bridge-cache
+        if: env.RUN == 'true'
+        uses: actions/cache@v6
+        with:
+          key: ${{ steps.bridge-key.outputs.key }}
+          path: |
+            ios/BrainBuddyKit/Artifacts/BrainBuddyRustFFI.xcframework
+            ios/BrainBuddyKit/Sources/BrainBuddyRustBindings/BrainBuddyRustBindings.swift
+
+      - name: Build the Rust bridge
+        if: env.RUN == 'true'
+        env:
+          CACHE_HIT: ${{ steps.bridge-cache.outputs.cache-hit }}
+        run: |
+          if [ "${CACHE_HIT}" = "true" ]; then
+            echo "Rust bridge restored for these exact inputs; nothing to build"
+            exit 0
+          fi
+          sh ios/scripts/build-rust-bridge.sh apple
+
+      - name: Test the package on macOS
+        if: env.RUN == 'true'
+        working-directory: ios/BrainBuddyKit
+        run: swift test --parallel
+
 
   # The native Mac app (macos/, 021-mac-sync research R3), a service lane of
   # the same kind as ios-app and here for the same reason: a trunk candidate
@@ -1235,7 +1386,11 @@ jobs:
   # fails, so a broken change fails here within minutes too. `changes` carries
   # the enforced-scope decision.
   mutation-base:
-    name: Backend mutation base measurement
+    name: Backend mutation base measurement (${{ matrix.shard }})
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     needs: changes
@@ -1286,66 +1441,73 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e .[dev]
 
-      - name: Measure the enforced scope at the base revision
+      - name: Measure the complete assigned mutation scope
         if: env.RUN == 'true' && github.event_name == 'pull_request'
         env:
           MUTATION_SCOPE: ${{ needs.changes.outputs.mutation_scope }}
         run: |
           mkdir -p base-stats
-
-          # A scoped file the base revision does not contain cannot be measured
-          # there. Recording zero checked mutants tells the gate there was no
-          # comparable base, which it treats as "skip the comparison" rather
-          # than as a base score of 0%.
-          tr ' ' '\n' <<< "${MUTATION_SCOPE}" | sed '/^[[:space:]]*$/d' > /tmp/scope.txt
-          : > /tmp/base-scope.txt
+          tr ' ' '\n' <<< "${MUTATION_SCOPE}" | sed '/^[[:space:]]*$/d' > /tmp/requested-scope.txt
+          : > /tmp/present-scope.txt
           while read -r entry; do
-            if [ -f "base/backend/${entry}" ]; then
-              echo "${entry}" >> /tmp/base-scope.txt
-            else
-              echo "the base revision has no ${entry}; excluded from the comparison"
-            fi
-          done < /tmp/scope.txt
-          if [ ! -s /tmp/base-scope.txt ]; then
-            echo '{"killed": 0, "survived": 0}' > base-stats/base-mutation-stats.json
+            if [ -f "base/backend/${entry}" ]; then echo "${entry}" >> /tmp/present-scope.txt; fi
+          done < /tmp/requested-scope.txt
+          python3 scripts/ci_shards.py mutation-select --scope /tmp/present-scope.txt \
+            --revision "${{ github.event.pull_request.base.sha }}" --index "${{ matrix.shard }}" \
+            --output base-stats/assignment.json
+          python3 -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["assigned"]), end="")' \
+            base-stats/assignment.json > /tmp/assigned-scope.txt
+          if [ ! -s /tmp/assigned-scope.txt ]; then
+            python3 -c 'import json,sys; from scripts.ci_shards import MUTATION_COUNTERS; json.dump(dict.fromkeys(MUTATION_COUNTERS,0),open(sys.argv[1],"w"))' base-stats/mutation-stats.json
             exit 0
           fi
-
           python3 scripts/mutation_gate.py scope \
             --enforced backend/mutation-enforced-scope.txt \
-            --changed /tmp/base-scope.txt \
-            --apply-to base/backend/pyproject.toml
-
+            --changed /tmp/assigned-scope.txt --apply-to base/backend/pyproject.toml
           cd base/backend
           rm -rf mutants
-          # Surviving mutants make mutmut exit non-zero; that is the gate's
-          # verdict to make, not this step's.
           set +e
           mutmut run
-          echo "base mutmut exit status: $?"
+          mutation_status=$?
           set -e
+          echo "mutmut exit status: ${mutation_status}" > "${GITHUB_WORKSPACE}/base-stats/mutation-run-status.txt"
           mutmut export-cicd-stats
-          cp mutants/mutmut-cicd-stats.json \
-            "${GITHUB_WORKSPACE}/base-stats/base-mutation-stats.json"
-          cat "${GITHUB_WORKSPACE}/base-stats/base-mutation-stats.json"
+          cp mutants/mutmut-cicd-stats.json "${GITHUB_WORKSPACE}/base-stats/mutation-stats.json"
+          mutmut results > "${GITHUB_WORKSPACE}/base-stats/mutation-summary.txt" || true
+          mutmut results --all true > "${GITHUB_WORKSPACE}/base-stats/mutation-survivors.txt" || true
 
-      - name: Upload the base measurement
+      - name: Record complete mutation identities and counts
+        if: always() && env.RUN == 'true' && github.event_name == 'pull_request'
+        run: |
+          python3 scripts/ci_shards.py mutation-record --assignment base-stats/assignment.json \
+            --meta base/backend/mutants --stats base-stats/mutation-stats.json \
+            --summary base-stats/mutation-summary.txt --raw-state base/backend/mutants \
+            --output base-stats/manifest.json
+
+      - name: Upload mutation shard evidence
         if: always() && env.RUN == 'true' && github.event_name == 'pull_request'
         uses: actions/upload-artifact@v7
         with:
-          name: mutation-base-stats
+          name: mutation-base-shard-${{ matrix.shard }}
           path: base-stats
           if-no-files-found: error
           retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
 
-  # The head-revision half of the measurement. Independent of mutation-base so
-  # the two campaigns overlap: an earlier shape had the gate both measure and
-  # judge, which forced `needs: mutation-base` and serialised them, doubling a
-  # pull request's wall-clock for no reason. Measuring and judging are split so
-  # only the judging waits. Like mutation-base it starts at once rather than
-  # behind the backend lane; see there for why that costs nothing.
+      - name: Upload raw mutmut state
+        if: always() && env.RUN == 'true' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutation-base-raw-${{ matrix.shard }}
+          path: base/backend/mutants
+          if-no-files-found: warn
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
+
   mutation-head:
-    name: Backend mutation head measurement
+    name: Backend mutation head measurement (${{ matrix.shard }})
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     needs: changes
@@ -1384,49 +1546,121 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e .[dev]
 
-      - name: Measure the enforced scope at this revision
+      - name: Measure the complete assigned mutation scope
         if: env.RUN == 'true'
         env:
           MUTATION_SCOPE: ${{ needs.changes.outputs.mutation_scope }}
         run: |
           mkdir -p backend/mutation-artifacts
-          tr ' ' '\n' <<< "${MUTATION_SCOPE}" | sed '/^[[:space:]]*$/d' > /tmp/head-scope.txt
+          tr ' ' '\n' <<< "${MUTATION_SCOPE}" | sed '/^[[:space:]]*$/d' > /tmp/requested-scope.txt
+          cp /tmp/requested-scope.txt /tmp/present-scope.txt
+          python3 scripts/ci_shards.py mutation-select --scope /tmp/present-scope.txt \
+            --revision "${BRAIN_BUDDY_CANDIDATE_SHA}" --index "${{ matrix.shard }}" \
+            --output backend/mutation-artifacts/assignment.json
+          python3 -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["assigned"]), end="")' \
+            backend/mutation-artifacts/assignment.json > /tmp/assigned-scope.txt
+          if [ ! -s /tmp/assigned-scope.txt ]; then
+            python3 -c 'import json,sys; from scripts.ci_shards import MUTATION_COUNTERS; json.dump(dict.fromkeys(MUTATION_COUNTERS,0),open(sys.argv[1],"w"))' backend/mutation-artifacts/mutation-stats.json
+            exit 0
+          fi
           python3 scripts/mutation_gate.py scope \
             --enforced backend/mutation-enforced-scope.txt \
-            --changed /tmp/head-scope.txt \
-            --apply-to backend/pyproject.toml
-
+            --changed /tmp/assigned-scope.txt --apply-to backend/pyproject.toml
           cd backend
           rm -rf mutants
-          # Surviving mutants make mutmut exit non-zero; that is the gate's
-          # verdict to make, not this step's.
           set +e
           mutmut run
-          echo "mutmut exit status: $?" > mutation-artifacts/mutation-run-status.txt
+          mutation_status=$?
           set -e
-          # export-cicd-stats is NOT tolerated: the verdict is computed from the
-          # file it writes, so a campaign that cannot produce one must fail the
-          # job rather than be waved through. The human-readable summaries are
-          # diagnostics and may fail without invalidating the measurement.
+          echo "mutmut exit status: ${mutation_status}" > "${GITHUB_WORKSPACE}/backend/mutation-artifacts/mutation-run-status.txt"
           mutmut export-cicd-stats
-          cp mutants/mutmut-cicd-stats.json mutation-artifacts/mutation-stats.json
-          mutmut results > mutation-artifacts/mutation-summary.txt || true
-          mutmut results --all true > mutation-artifacts/mutation-survivors.txt || true
-          cat mutation-artifacts/mutation-stats.json
+          cp mutants/mutmut-cicd-stats.json "${GITHUB_WORKSPACE}/backend/mutation-artifacts/mutation-stats.json"
+          mutmut results > "${GITHUB_WORKSPACE}/backend/mutation-artifacts/mutation-summary.txt" || true
+          mutmut results --all true > "${GITHUB_WORKSPACE}/backend/mutation-artifacts/mutation-survivors.txt" || true
 
-      # Written here rather than in the verdict job so a failing gate still
-      # ships its evidence, and tolerant of a campaign that died before writing
-      # any: a run that crashed is exactly when someone needs the artifacts.
-      #
-      # The directory and the artifact are both named `*-allure-results` so the
-      # aggregate below actually discovers them. They were called
-      # `mutation-gate-evidence`, which produced a valid Allure result that no
-      # report ever contained: the aggregate downloads by `*-allure-results`
-      # pattern, and this is the BLOCKING gate — the one result a person most
-      # needs in the report was the one silently missing from it. The two `.txt`
-      # files stay in the same directory because the result declares them as
-      # attachments by bare filename, which Allure resolves relative to the
-      # results directory.
+      - name: Record complete mutation identities and counts
+        if: always() && env.RUN == 'true'
+        run: |
+          python3 scripts/ci_shards.py mutation-record --assignment backend/mutation-artifacts/assignment.json \
+            --meta backend/mutants --stats backend/mutation-artifacts/mutation-stats.json \
+            --summary backend/mutation-artifacts/mutation-summary.txt --raw-state backend/mutants \
+            --output backend/mutation-artifacts/manifest.json
+
+      - name: Upload mutation shard evidence
+        if: always() && env.RUN == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutation-head-shard-${{ matrix.shard }}
+          path: backend/mutation-artifacts
+          if-no-files-found: error
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
+
+      - name: Upload raw mutmut state
+        if: always() && env.RUN == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutation-head-raw-${{ matrix.shard }}
+          path: backend/mutants
+          if-no-files-found: warn
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
+
+  mutation-gate:
+    name: Backend mutation gate
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs:
+      - changes
+      - mutation-base
+      - mutation-head
+    env:
+      RUN: ${{ needs.changes.outputs.mutation }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact candidate checkout
+        run: test "$(git rev-parse HEAD)" = "$BRAIN_BUDDY_CANDIDATE_SHA"
+      - name: Download available head measurements
+        if: always() && env.RUN == 'true'
+        uses: actions/download-artifact@v8.0.2
+        with:
+          pattern: mutation-head-shard-*
+          path: head-shards
+      - name: Download available base measurements
+        if: always() && env.RUN == 'true' && github.event_name == 'pull_request'
+        uses: actions/download-artifact@v8.0.2
+        with:
+          pattern: mutation-base-shard-*
+          path: base-shards
+      - name: Independently read the present base scope
+        if: always() && env.RUN == 'true' && github.event_name == 'pull_request'
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base-source
+      - name: Combine complete mutation measurements
+        if: always() && env.RUN == 'true'
+        env:
+          MUTATION_SCOPE: ${{ needs.changes.outputs.mutation_scope }}
+        run: |
+          tr ' ' '\n' <<< "${MUTATION_SCOPE}" | sed '/^[[:space:]]*$/d' > /tmp/head-scope.txt
+          python3 scripts/ci_shards.py mutation-merge --artifacts head-shards \
+            --expected-scope /tmp/head-scope.txt --sha "${BRAIN_BUDDY_CANDIDATE_SHA}" \
+            --output-dir backend/mutation-artifacts
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            : > /tmp/base-scope.txt
+            while read -r entry; do
+              if [ -f "base-source/backend/${entry}" ]; then echo "${entry}" >> /tmp/base-scope.txt; fi
+            done < /tmp/head-scope.txt
+            python3 scripts/ci_shards.py mutation-merge --artifacts base-shards \
+              --expected-scope /tmp/base-scope.txt --sha "${{ github.event.pull_request.base.sha }}" \
+              --output-dir base-stats
+          fi
+          test "${{ needs.mutation-head.result }}" = success
+          test "${{ needs.mutation-base.result }}" = success
+
       - name: Create blocking-gate Allure evidence
         if: always() && env.RUN == 'true'
         run: |
@@ -1446,24 +1680,6 @@ jobs:
             --survivors backend/mutation-gate-allure-results/mutation-survivors.txt \
             --output backend/mutation-gate-allure-results/mutation-gate-result.json
 
-      - name: Upload raw mutmut state
-        if: always() && env.RUN == 'true'
-        uses: actions/upload-artifact@v7
-        with:
-          name: mutation-gate-raw-results
-          path: backend/mutants
-          if-no-files-found: warn
-          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
-
-      - name: Upload mutation statistics, summary and survivors
-        if: always() && env.RUN == 'true'
-        uses: actions/upload-artifact@v7
-        with:
-          name: mutation-gate-artifacts
-          path: backend/mutation-artifacts
-          if-no-files-found: error
-          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
-
       - name: Upload blocking-gate Allure evidence
         if: always() && env.RUN == 'true'
         uses: actions/upload-artifact@v7
@@ -1473,58 +1689,25 @@ jobs:
           if-no-files-found: error
           retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
 
-  # ADR-0004's blocking verdict over the ADR-0016 enforced tier. It fails below
-  # 95%, fails when the campaign checked no mutants at all, and on a pull
-  # request also fails on any regression against the base revision.
-  #
-  # This job only judges: both measurements arrive as artifacts, so it costs
-  # seconds and the two campaigns that feed it ran concurrently.
-  mutation-gate:
-    name: Backend mutation gate
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    needs:
-      - changes
-      - mutation-base
-      - mutation-head
-    env:
-      RUN: ${{ needs.changes.outputs.mutation }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-
-      - name: Verify exact candidate checkout
-        run: test "$(git rev-parse HEAD)" = "$BRAIN_BUDDY_CANDIDATE_SHA"
-
-      - name: Download the head measurement
-        if: env.RUN == 'true'
-        uses: actions/download-artifact@v8.0.2
+      - name: Upload combined mutation statistics and diagnostics
+        if: always() && env.RUN == 'true'
+        uses: actions/upload-artifact@v7
         with:
           name: mutation-gate-artifacts
-          path: head-stats
-
-      - name: Download the base measurement
-        if: env.RUN == 'true' && github.event_name == 'pull_request'
-        uses: actions/download-artifact@v8.0.2
-        with:
-          name: mutation-base-stats
-          path: base-stats
-
+          path: |
+            backend/mutation-artifacts
+            base-stats
+          if-no-files-found: error
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
       - name: Enforce the mutation gate
         if: env.RUN == 'true'
         run: |
-          # --base-stats is passed on every pull request, and the gate errors on
-          # a path that does not exist. A base measurement that failed to
-          # produce a file therefore fails the gate instead of quietly
-          # downgrading it to a threshold-only check.
           base_args=()
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            base_args=(--base-stats base-stats/base-mutation-stats.json)
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            base_args=(--base-stats base-stats/mutation-stats.json)
           fi
           python3 scripts/mutation_gate.py check \
-            --stats head-stats/mutation-stats.json "${base_args[@]}"
+            --stats backend/mutation-artifacts/mutation-stats.json "${base_args[@]}"
 
   # Proves the production Dockerfiles still build. This is a required status
   # check on main (docs/autonomous-delivery-runbook.md), so the job name is
@@ -1940,9 +2123,11 @@ jobs:
       - changes
       - spec-kit
       - backend
+      - backend-results
       - frontend
       - ios-kit
       - ios-app
+      - ios-tests
       - macos-app
       - mutation-base
       - mutation-head
@@ -2143,9 +2328,11 @@ jobs:
       - changes
       - spec-kit
       - backend
+      - backend-results
       - frontend
       - ios-kit
       - ios-app
+      - ios-tests
       - macos-app
       - mutation-base
       - mutation-head

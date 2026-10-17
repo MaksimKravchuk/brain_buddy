@@ -481,7 +481,7 @@ jobs:
           # rollout the next deploy captures, and it fails closed rather than
           # guessing between them.
           echo "AUTHORIZED_STAGED_FEATURE_FLAGS=delivery_canary=internal" >> "${GITHUB_ENV}"
-          echo "Staged smoke identity and delivery_canary=internal for ${BACKEND_APP} (voice_brain_dump, mobile_task_classification and external_agent_relay are SQLite-managed through the admin portal and stay omitted from this string; admin_portal no longer exists as a flag)."
+          echo "Staged smoke identity and delivery_canary=internal for ${BACKEND_APP} (voice_brain_dump and external_agent_relay are SQLite-managed through the admin portal and stay omitted from this string; admin_portal no longer exists as a flag)."
 
       # Overwrites the delivery-only rollout the step above just staged, so
       # THIS call — not that one — is what the backend below actually boots
@@ -507,7 +507,6 @@ jobs:
           KNOWN = {
               "delivery_canary",
               "voice_brain_dump",
-              "mobile_task_classification",
               "external_agent_relay",
           }
 

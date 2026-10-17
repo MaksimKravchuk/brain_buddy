@@ -175,43 +175,6 @@ struct MacSyncFlowTests {
         #expect(rig.tokens.storedPending.isEmpty && rig.tokens.storedTokens.isEmpty)
     }
 
-    @Test("021-FR-029 021-FR-005 an upgraded account-less Mac with a pre-021 cookie sends one bodiless logout, to that cookie's host only")
-    func upgradedMacSendsOneLogout() async throws {
-        let folder = TemporaryFolder()
-        let server = StubServer()
-        let tokens = SpyTokenStore()
-        let log = CapturingMacLog()
-        let ticks = ManualSyncScheduler()
-        let timers = ManualSyncScheduler()
-        let launch = MacLaunch(
-            environment: MacLaunchEnvironment(
-                configuration: MacHostConfiguration(directory: folder.url, isDryRun: false), tokenStore: tokens, transport: server,
-                cookieJar: FakeCookieJar([FakeCookieJar.session("legacy-session", domain: "api.example.com")]),
-                responseCache: FakeResponseCache(), now: TestClock().provider, makeID: SequentialIDs().provider, log: log,
-                tickScheduler: ticks, syncScheduler: timers
-            )
-        )
-        await launch.run { _ in }
-        let host = try #require(launch.host)
-        let rig = Rig(launched: host, folder: folder, server: server, tokens: tokens, log: log, ticks: ticks, timers: timers)
-        await rig.settle()
-        await rig.triggers.start()
-        await rig.triggers.handle(.didBecomeActive)
-        for _ in 0..<4 { await ticks.runNext() }
-        rig.triggers.pathChanged(satisfied: false)
-        rig.triggers.pathChanged(satisfied: true)
-        await rig.settle()
-
-        let requests = server.requests
-        #expect(requests.count == 1, "\(server.routes)")
-        let logout = try #require(requests.first)
-        #expect(logout.method == .post)
-        #expect(logout.url.absoluteString == "https://api.example.com/auth/logout")
-        #expect(logout.body == nil, "bodiless: no task data")
-        #expect(logout.header("Cookie") == "brainbuddy_session=legacy-session")
-        #expect(tokens.storedPending.isEmpty, "delivered, so no longer pending")
-    }
-
     @Test("021-FR-030 the sync category's log lines hold no title, email or host")
     func syncLogsHoldNoContent() async throws {
         let sentinel = "Sentinel-7f3c title"
@@ -745,7 +708,7 @@ struct MacSyncFlowTests {
         await engine.waitUntilIdle()
         try workspace.capture(CaptureDraft(text: "Kept on failure", list: .inbox))
         await workspace.flush()
-        let flow = SignOutFlow(workspace: workspace, importer: nil, now: clock.provider, log: CapturingMacLog())
+        let flow = SignOutFlow(workspace: workspace, now: clock.provider, log: CapturingMacLog())
         var signedOut = false
         flow.didSignOut = { signedOut = true }
         server.clearLog()
@@ -782,55 +745,16 @@ struct MacSyncFlowTests {
         func storedAccount() async -> LinkedAccount? { await inner.storedAccount() }
     }
 
-    @Test("021-FR-005 021-FR-021 after a sign-out: Inbox, the account-less line, the sign-out recorded and the backup rule applied")
+    @Test("021-FR-005 after a sign-out: Inbox and the account-less line")
     func afterSignOut() async throws {
-        let folder = TemporaryFolder()
-        try Fixture.install("legacy-populated", in: folder)
-        let server = StubServer()
-        let tokens = SpyTokenStore()
-        let clock = TestClock()
-        let ticks = ManualSyncScheduler()
-        let timers = ManualSyncScheduler()
-        let log = CapturingMacLog()
-        let launch = MacLaunch(
-            environment: MacLaunchEnvironment(
-                configuration: MacHostConfiguration(directory: folder.url, isDryRun: false), tokenStore: tokens, transport: server,
-                cookieJar: FakeCookieJar(), responseCache: FakeResponseCache(), now: clock.provider, makeID: SequentialIDs().provider,
-                log: log, tickScheduler: ticks, syncScheduler: timers
-            )
-        )
-        await launch.run { _ in }
-        let rig = Rig(
-            launched: try #require(launch.host), folder: folder, server: server, tokens: tokens, log: log, ticks: ticks, timers: timers,
-            clock: clock
-        )
-        let record = try #require(MacLocalStateStore(directory: folder.url).load()?.legacyImport)
-        let backup = try #require(record.backupFileName)
-
-        // During the first upload (the server refuses the creates here) the backup is kept, dated.
+        let rig = await Rig()
         await rig.signIn()
         rig.model.choose(.list(.next))
         rig.controller.presentSignOut()
-        let prompt = try #require(rig.controller.signOut.prompt)
-        #expect(prompt.unsent > 0)
-        #expect(prompt.backup == .kept(until: clock.now.addingTimeInterval(LegacyImportCoordinator.backupRetention)))
-        #expect(prompt.text.detail?.hasSuffix("A copy of your tasks from before the update stays on this Mac until 5 Nov.") == true)
+        #expect(rig.controller.signOut.prompt != nil)
         #expect(await rig.controller.confirmSignOut() == .signedOut)
         #expect(rig.model.destination == .list(.inbox), "selection resets to Inbox")
         #expect(rig.controller.line.description.text == "On this Mac · Sign in to sync")
-        #expect(MacLocalStateStore(directory: folder.url).load()?.legacyImport?.signedOutSinceImport == true)
-        #expect(MacFiles.exists(folder.file(backup)), "kept: its 30 days have not passed")
-
-        // 31 days later a sign-out with nothing of the first upload left removes it, and says so.
-        clock.advance(31 * TestClock.day)
-        await rig.signIn()
-        rig.controller.presentSignOut()
-        let later = try #require(rig.controller.signOut.prompt)
-        #expect(later.backup == .removed)
-        #expect(later.text.detail?.hasSuffix(SyncCopy.signOutBackupRemoved) == true, "never silent")
-        #expect(await rig.controller.confirmSignOut() == .signedOut)
-        #expect(!MacFiles.exists(folder.file(backup)))
-        #expect(MacLocalStateStore(directory: folder.url).load()?.legacyImport?.backupDeletedAt != nil)
     }
 
     // MARK: The token store and the client
@@ -866,12 +790,11 @@ struct MacSyncFlowTests {
         let launch = MacLaunch(
             environment: MacLaunchEnvironment(
                 configuration: MacHostConfiguration(directory: folder.url, isDryRun: true), tokenStore: tokens, transport: server,
-                cookieJar: FakeCookieJar([FakeCookieJar.session("legacy-session", domain: "api.example.com")]),
-                responseCache: FakeResponseCache(), now: TestClock().provider, makeID: SequentialIDs().provider, log: log,
+                now: TestClock().provider, makeID: SequentialIDs().provider, log: log,
                 tickScheduler: ticks, syncScheduler: timers
             )
         )
-        await launch.run { _ in }
+        await launch.run()
         let rig = Rig(launched: try #require(launch.host), folder: folder, server: server, tokens: tokens, log: log, ticks: ticks, timers: timers)
         await rig.triggers.start()
         await rig.triggers.handle(.didBecomeActive)

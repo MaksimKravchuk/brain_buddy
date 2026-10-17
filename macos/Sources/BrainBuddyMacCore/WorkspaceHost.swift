@@ -16,7 +16,7 @@ package struct MacHostConfiguration: Hashable, Sendable {
     /// The dry-run folder override: an absolute path to an existing folder.
     package static let dataDirectoryVariable = "BRAINBUDDY_MAC_DATA_DIR"
     package static let keychainService = "app.brainbuddy.mac.session"
-    /// The pre-021 app's bundle id, kept so the Keychain and the single-instance lookup are stable.
+    /// The app's bundle id, kept so the Keychain and the single-instance lookup are stable.
     package static let bundleIdentifier = "com.brainbuddy.mac.prototype"
     package static let serverDefaultsKey = "BrainBuddyAPIURL"
 
@@ -31,7 +31,7 @@ package struct MacHostConfiguration: Hashable, Sendable {
     }
 
     package var directory: URL
-    /// True while `BRAINBUDDY_MAC_DATA_DIR` is set: no cookie, cache or Keychain item is touched.
+    /// True while `BRAINBUDDY_MAC_DATA_DIR` is set: no Keychain item is touched.
     package var isDryRun: Bool
 
     package init(directory: URL, isDryRun: Bool) {
@@ -59,15 +59,9 @@ package struct MacHostConfiguration: Hashable, Sendable {
         return MacHostConfiguration(directory: URL(fileURLWithPath: raw, isDirectory: true), isDryRun: true)
     }
 
-    package var storeURL: URL { directory.appendingPathComponent(LegacyFileNames.store) }
+    package var storeURL: URL { directory.appendingPathComponent(MacFileNames.store) }
 
-    /// `~/Library/Caches/<bundle id>`, the pre-021 HTTP cache's folder.
-    package static var legacyCacheDirectory: URL? {
-        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
-            .appendingPathComponent(bundleIdentifier, isDirectory: true)
-    }
-
-    /// The server addresses this Mac knew before 021: the stored one and the default.
+    /// The server addresses this Mac knows: the stored one and the default.
     package static func knownServers(_ defaults: UserDefaults = .standard) -> [URL] {
         let stored = defaults.string(forKey: serverDefaultsKey).flatMap(BrainBuddyAPI.serverURL(from:))
         return [stored, BrainBuddyAPI.defaultServerURL].compactMap { $0 }
@@ -133,7 +127,6 @@ package final class WorkspaceHost {
     /// when the window becomes visible again, contracts/mac-app-host.md §5).
     package let engine: SyncEngine
     package let localState: MacLocalStateStore
-    package let importer: LegacyImportCoordinator
     package let device: DeviceKind = .mac
     private let now: @Sendable () -> Date
     private var firstWriteRecorded = false
@@ -151,7 +144,6 @@ package final class WorkspaceHost {
         self.configuration = configuration
         self.now = now
         localState = MacLocalStateStore(directory: configuration.directory)
-        importer = LegacyImportCoordinator(directory: configuration.directory, localState: localState, now: now, log: log)
         let store = FileDocumentStore(fileURL: configuration.storeURL)
         let base: @Sendable () -> any SessionTokenStore = { tokenStore ?? Self.systemTokenStore() }
         let tokens: any SessionTokenStore = configuration.isDryRun ? DeferredSessionTokenStore(opening: base) : base()
@@ -198,28 +190,21 @@ package final class WorkspaceHost {
     }
 
     /// X-09 "Set aside and start fresh", after the person confirmed: the unreadable `store.json`
-    /// becomes `store.unreadable-<UTC>.json` (kept until sign-out) and an empty workspace opens. The
-    /// set-aside file makes the folder "in use", so no later launch imports into it.
+    /// becomes `store.unreadable-<UTC>.json` (kept until sign-out) and an empty workspace opens.
     package func startFresh() async {
         await workspace.resetUnreadableStore()
     }
 }
 
 /// Everything the launch needs from the outside world, so tests can run it in a temporary folder
-/// with a fake cookie jar, cache, token store and transport.
+/// with a fake token store and transport.
 package struct MacLaunchEnvironment {
     package var configuration: MacHostConfiguration
     package var tokenStore: (any SessionTokenStore)?
     package var transport: (any HTTPTransport)?
-    package var cookieJar: any LegacyCookieJar
-    package var responseCache: any LegacyResponseCache
-    package var cacheDirectory: URL?
-    package var knownServers: [URL]
     package var now: @Sendable () -> Date
     package var makeID: @Sendable () -> UUID
     package var log: any MacLogSink
-    package var legacyLocking: any LegacyStoreLocking
-    package var importHooks: LegacyImportTestHooks
     /// The kit's 15 s ticker and the engine's timers; nil is real time (tests pass manual ones).
     package var tickScheduler: (any SyncScheduler)?
     package var syncScheduler: (any SyncScheduler)?
@@ -231,10 +216,8 @@ package struct MacLaunchEnvironment {
 
     package init(
         configuration: MacHostConfiguration, tokenStore: (any SessionTokenStore)? = nil, transport: (any HTTPTransport)? = nil,
-        cookieJar: any LegacyCookieJar, responseCache: any LegacyResponseCache, cacheDirectory: URL? = nil,
-        knownServers: [URL] = [], now: @escaping @Sendable () -> Date = { Date() },
+        now: @escaping @Sendable () -> Date = { Date() },
         makeID: @escaping @Sendable () -> UUID = { UUID() }, log: any MacLogSink = SystemMacLog(),
-        legacyLocking: any LegacyStoreLocking = LockfLegacyStoreLocking(), importHooks: LegacyImportTestHooks = LegacyImportTestHooks(),
         tickScheduler: (any SyncScheduler)? = nil, syncScheduler: (any SyncScheduler)? = nil,
         rustRuntime: RustRuntimeEnvironment? = nil, rustPilot: RustRuntimePilotSwitch = RustRuntimePilotSwitch()
     ) {
@@ -245,24 +228,14 @@ package struct MacLaunchEnvironment {
         self.configuration = configuration
         self.tokenStore = tokenStore
         self.transport = transport
-        self.cookieJar = cookieJar
-        self.responseCache = responseCache
-        self.cacheDirectory = cacheDirectory
-        self.knownServers = knownServers
         self.now = now
         self.makeID = makeID
         self.log = log
-        self.legacyLocking = legacyLocking
-        self.importHooks = importHooks
     }
 
     /// The app's own environment.
     package static func live(_ configuration: MacHostConfiguration) -> MacLaunchEnvironment {
-        MacLaunchEnvironment(
-            configuration: configuration, cookieJar: HTTPCookieStorage.shared, responseCache: URLCache.shared,
-            cacheDirectory: MacHostConfiguration.legacyCacheDirectory, knownServers: MacHostConfiguration.knownServers(),
-            rustRuntime: try? RustRuntimeEnvironment.mac(configuration)
-        )
+        MacLaunchEnvironment(configuration: configuration, rustRuntime: try? RustRuntimeEnvironment.mac(configuration))
     }
 }
 
@@ -286,24 +259,19 @@ extension RustRuntimeEnvironment {
     }
 }
 
-/// Launch steps 2 – 5 (contracts/mac-app-host.md §1), after `SingleInstanceGuard`: the legacy
-/// import with its X-05 notices, the legacy cookie and cache cleanup, `WorkspaceHost`, and
-/// `workspace.load()`. Step 6, `SyncTriggerSource.start()`, follows in the app once the window has
-/// the workspace (PR-09). While it runs the window shows static
-/// placeholders (X-05 "loading"); an unreadable `store.json` leaves `loadError` set (X-09).
+/// The launch steps of contracts/mac-app-host.md §1 after `SingleInstanceGuard`: the Rust runtime's
+/// selection, `WorkspaceHost`, and `workspace.load()`. Step 6, `SyncTriggerSource.start()`,
+/// follows in the app once the window has the workspace (PR-09). While it runs the window shows
+/// static placeholders (X-05 "loading"); an unreadable `store.json` leaves `loadError` set (X-09).
 ///
-/// The workspace opens only once the import reached a terminal state (data-model E7.1 invariant
-/// 4). When the import step throws (a full disk, a folder that refuses a write), the launch stops
-/// at `.importFailed`: no `WorkspaceHost`, no `store.json`, the previous version's file as it was.
-/// An empty workspace opened here would become "in use" with its first change and turn that file
-/// into a "later file" that is never imported. "Try again" (`retryImport`) runs the import step
-/// again, which resumes its durable state machine from whatever the failed attempt recorded.
+/// When the Rust runtime cannot be opened the launch stops at `.importFailed`: no `WorkspaceHost`
+/// and the retired `store.json` as it was. "Try again" (`retryImport`) runs the launch again.
 @MainActor
 @Observable
 package final class MacLaunch {
     package enum Phase {
         case launching
-        /// The import step failed; nothing opened. `retryImport()` runs it again.
+        /// The runtime could not be opened; nothing opened. `retryImport()` runs the launch again.
         case importFailed
         case ready(WorkspaceHost)
     }
@@ -316,7 +284,6 @@ package final class MacLaunch {
     /// A launch or a retry is running ("Trying again…").
     package private(set) var isRunning = false
     @ObservationIgnored private let environment: MacLaunchEnvironment
-    @ObservationIgnored private var presentNotice: (@MainActor (LegacyImportNotice) async -> Void)?
 
     package init(environment: MacLaunchEnvironment) {
         self.environment = environment
@@ -332,15 +299,13 @@ package final class MacLaunch {
         return false
     }
 
-    /// Runs the steps once. `presentNotice` shows one X-05 alert and returns when the person chose
-    /// "Continue" or "Show in Finder"; the notice is recorded as seen only then.
-    package func run(presentNotice: @escaping @MainActor (LegacyImportNotice) async -> Void) async {
+    /// Runs the steps once.
+    package func run() async {
         guard case .launching = phase, !isRunning else { return }
-        self.presentNotice = presentNotice
         await proceed()
     }
 
-    /// The import-failed state's "Try again": the import step again, then the rest of the launch.
+    /// The import-failed state's "Try again": the launch again.
     package func retryImport() async {
         guard importFailed, !isRunning else { return }
         await proceed()
@@ -351,44 +316,21 @@ package final class MacLaunch {
         defer { isRunning = false }
         let environment = self.environment
         let directory = environment.configuration.directory
-        let importer = LegacyImportCoordinator(
-            directory: directory, now: environment.now, makeID: environment.makeID, log: environment.log,
-            legacyLocking: environment.legacyLocking, hooks: environment.importHooks
-        )
-        // Step 2: off the main actor (a large store takes a moment); nothing is shown meanwhile but
-        // the placeholders.
-        let result = await Task.detached { () -> Result<LegacyImportLaunchResult, any Error> in
-            Result { try importer.run() }
-        }.value
-        switch result {
-        case .success(let launch):
-            for notice in launch.notices {
-                await presentNotice?(notice)
-                try? importer.recordNoticeSeen(notice)
-            }
-        case .failure(let error):
-            // No terminal state was reached: open nothing (E7.1 invariant 4). The previous
-            // version's file is as it was; the next attempt resumes from the record on disk.
-            environment.log.log(.import, "import step failed class=\(String(describing: type(of: error)))")
-            phase = .importFailed
-            return
-        }
 
-        // Step 3: once per Mac, never in a dry run. A failure here leaves the cookies and the
-        // cache for the next launch to remove (`legacyCleanupDoneAt` is recorded only once all
-        // went); it never touches the workspace, so the launch goes on.
-        let cleanup = LegacyCookieCleanup(
-            jar: environment.cookieJar, cache: environment.responseCache, cacheDirectory: environment.cacheDirectory,
-            tokenStore: environment.tokenStore ?? WorkspaceHost.systemTokenStore(),
-            localState: MacLocalStateStore(directory: directory), knownServers: environment.knownServers,
-            now: environment.now, log: environment.log
-        )
-        if !environment.configuration.isDryRun {
-            do {
-                _ = try await cleanup.run(isDryRun: false)
-            } catch {
-                environment.log.log(.sync, "legacy session cleanup failed class=\(String(describing: type(of: error)))")
+        // Housekeeping every launch repeats (data-model E7): the sidecar exists before anything
+        // reads it, review marks older than 30 days go, and a `store.json` that is already there
+        // counts as written. A failure here is logged and never keeps the workspace closed.
+        let launchedAt = environment.now()
+        let storeURL = environment.configuration.storeURL
+        do {
+            try MacLocalStateStore(directory: directory).update { state in
+                state.pruneOldMarks(now: launchedAt)
+                if MacFiles.exists(storeURL), state.workspaceFirstWrittenAt == nil {
+                    state.workspaceFirstWrittenAt = launchedAt
+                }
             }
+        } catch {
+            environment.log.log(.import, "launch housekeeping failed class=\(String(describing: type(of: error)))")
         }
 
         // The runtime (spec 026, T044): the install's persisted selection, the same file the iOS
@@ -445,9 +387,9 @@ package final class MacLaunch {
     }
 }
 
-/// The words of the launch's import-failed state, in the X-09 pattern (one calm panel in place of
-/// the lists, "Try again" the default). Like X-05 "couldn't carry over", it says the previous
-/// version's file is untouched; there is no "Start fresh", which would skip the import.
+/// The words of the launch's stopped state, in the X-09 pattern (one calm panel in place of the
+/// lists, "Try again" the default). It says the previous version's file is untouched; there is no
+/// "Start fresh", which would fork from the retired file.
 package enum LegacyImportFailedCopy {
     package static let title = "Brain Buddy couldn't finish the update"
     package static let message =

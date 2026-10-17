@@ -1,3 +1,4 @@
+import BrainBuddyAgents
 import BrainBuddyDesign
 import BrainBuddyMacCore
 import SwiftUI

@@ -21,7 +21,9 @@ CI cannot run.
    - Never commit screenshots, logs or reports that show real tasks, titles, emails or hosts.
      Results are content-free: pass/fail, counts, SHAs and versions.
 2. **The owner's real Mac data is upgraded only by the owner.**
-   - Feature 021's first launch imports the old `local-gtd.json` and renames it to a backup.
+   - Feature 021's first launch imported the old `local-gtd.json` and renamed it to a backup. That
+     importer has since been retired (ADR-0030 cleanup), so the dry-run steps that exercise the import no
+     longer apply.
    - Run the **dry run on a copy (D1–D8)** first, and stop there for the real folder.
    - Upgrading the owner's real folder (`$REAL` in the upgrade plan) needs the owner's explicit
      go-ahead after D1–D8 pass.

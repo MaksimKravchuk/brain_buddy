@@ -280,7 +280,6 @@ def test_010_SC_003_feature_flags_key_set_is_exactly_known_feature_flags(
     assert expected == {
         "delivery_canary",
         "voice_brain_dump",
-        "mobile_task_classification",
         "external_agent_relay",
         "task_title_autocomplete",
         "crt_canvas",
@@ -327,6 +326,6 @@ def test_010_FR_008_a_runtime_override_reaches_login_and_signup_not_only_me(
         assert payload["voice_brain_dump"] is True
         # Only the overridden flag moves; every other value stays exactly what
         # the environment computed.
-        assert payload["mobile_task_classification"] is False
+        assert payload["task_title_autocomplete"] is False
         assert payload["delivery_canary"] is False
         assert payload["external_agent_relay"] is False

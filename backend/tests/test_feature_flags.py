@@ -14,6 +14,7 @@ from app.core.config import (
     ALL_FEATURE_FLAGS,
     ENVIRONMENT_OWNED_FLAGS,
     KNOWN_FEATURE_FLAGS,
+    RETIRED_FEATURE_FLAGS,
     RUNTIME_MANAGED_FLAGS,
     FeatureFlagSettings,
     FeatureFlagState,
@@ -27,8 +28,8 @@ INTERNAL_EMAIL = "cohort-member@example.com"
 OUTSIDER_EMAIL = "outsider@example.com"
 PASSWORD = "correct-horse-battery-staple"
 
-# Feature 006 (mobile task classification) gates its exposure on this flag.
-MOBILE_CLASSIFICATION_FLAG = "mobile_task_classification"
+# Retired with the Expo client (spec 006, FR-015); only its tolerance is tested.
+RETIRED_FLAG = "mobile_task_classification"
 
 
 @pytest.fixture(autouse=True)
@@ -338,7 +339,7 @@ def test_env_invalid_internal_user_fails_closed(
         "unknown_flag=on",
         "=on",
         "voice_brain_dump=on,voice_brain_dump=off",
-        "mobile_task_classification",
+        "weekly_review",
     ],
 )
 def test_010_FR_003_an_invalid_managed_flag_entry_no_longer_blocks_startup(
@@ -396,15 +397,15 @@ def test_010_DD_15_the_migration_seed_loader_parses_the_managed_entries(
     _configure_env(
         monkeypatch,
         tmp_path,
-        flags="voice_brain_dump=on,mobile_task_classification=internal",
+        flags="voice_brain_dump=on,external_agent_relay=internal",
         internal_users=INTERNAL_EMAIL.upper(),
     )
 
     seed = get_config().feature_flags.load_managed_migration_seed()
 
     assert seed.states["voice_brain_dump"] is FeatureFlagState.ON
-    assert seed.states["mobile_task_classification"] is FeatureFlagState.INTERNAL
-    assert seed.states["external_agent_relay"] is FeatureFlagState.OFF
+    assert seed.states["external_agent_relay"] is FeatureFlagState.INTERNAL
+    assert seed.states["crt_canvas"] is FeatureFlagState.OFF
     assert seed.internal_users == frozenset({INTERNAL_EMAIL})
 
 
@@ -432,7 +433,7 @@ def test_010_DD_15_the_migration_seed_covers_exactly_the_managed_flags(
     assert set(seed.states) == set(RUNTIME_MANAGED_FLAGS)
     assert "delivery_canary" not in seed.states
     assert seed.states["voice_brain_dump"] is FeatureFlagState.INTERNAL
-    assert seed.states["mobile_task_classification"] is FeatureFlagState.OFF
+    assert seed.states["external_agent_relay"] is FeatureFlagState.OFF
 
 
 @pytest.mark.parametrize(
@@ -442,7 +443,7 @@ def test_010_DD_15_the_migration_seed_covers_exactly_the_managed_flags(
         "unknown_flag=on",
         "=on",
         "voice_brain_dump=on,voice_brain_dump=off",
-        "mobile_task_classification",
+        "weekly_review",
     ],
 )
 def test_010_DD_15_the_migration_seed_loader_fails_closed_on_invalid_input(
@@ -590,67 +591,40 @@ def test_unauthenticated_me_stays_401_without_flag_payload(
 
 
 # ---------------------------------------------------------------------------
-# Feature 006 — mobile task classification rollout flag
+# Retired flag: mobile_task_classification (spec 006, FR-015 retired 2026-10-16)
 # ---------------------------------------------------------------------------
 
 
-@allure.story("006-FR-015 mobile task classification rollout flag")
-def test_006_FR_015_mobile_classification_flag_defaults_off_in_me_response(
+@allure.story("retired mobile_task_classification flag")
+def test_retired_mobile_task_classification_flag_is_gone_from_me_response(
     api_client: TestClient,
 ) -> None:
-    """006-FR-015: the mobile classification flag ships OFF and reaches /auth/me.
+    """The Expo client it gated was removed, so the flag no longer exists."""
 
-    Default OFF is what makes the mobile task screen render exactly today's
-    presentation until the flag is deliberately turned on. Asserted at both
-    ends: the typed configuration, and the only channel the mobile client can
-    read the flag through.
+    assert RETIRED_FLAG in RETIRED_FEATURE_FLAGS
+    assert RETIRED_FLAG not in KNOWN_FEATURE_FLAGS
+    assert RETIRED_FLAG not in RUNTIME_MANAGED_FLAGS
 
-    ADR-0019 moved the configuration end from the runtime state map to the
-    migration seed — this flag is SQLite-managed now, so the default it ships
-    with is the row the store is seeded with, not a state this config holds.
-    """
-
-    assert MOBILE_CLASSIFICATION_FLAG in KNOWN_FEATURE_FLAGS
-    assert MOBILE_CLASSIFICATION_FLAG in RUNTIME_MANAGED_FLAGS
-    assert (
-        FeatureFlagSettings()
-        .load_managed_migration_seed()
-        .states[MOBILE_CLASSIFICATION_FLAG]
-        is FeatureFlagState.OFF
-    )
-
-    with allure.step("GET /api/auth/me delivers the flag, resolved off"):
-        body = api_client.get("/api/auth/me").json()
-        flags = body["feature_flags"]
-        # Delivered, not merely absent-and-therefore-falsy on the client: a
-        # missing key and an explicit ``false`` are indistinguishable to a
-        # client that reads ``=== true``, and only one of them proves the
-        # rollout channel works.
+    with allure.step("GET /api/auth/me no longer delivers the retired flag"):
+        flags = api_client.get("/api/auth/me").json()["feature_flags"]
+        assert RETIRED_FLAG not in flags
         assert set(flags) == set(KNOWN_FEATURE_FLAGS)
-        assert flags[MOBILE_CLASSIFICATION_FLAG] is False
 
 
-@allure.story("006-FR-015 mobile task classification rollout flag")
-def test_006_FR_015_mobile_classification_flag_is_exposed_once_rolled_out(
+@allure.story("retired mobile_task_classification flag")
+def test_retired_mobile_task_classification_flag_staged_in_env_is_ignored_by_seed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """006-FR-015: turning the flag on exposes it to the authenticated user.
+    """A leftover staged value must not fail a first start, nor seed a row."""
 
-    Without this the default-off assertion above would also pass for a name
-    that is merely allow-listed and wired to nothing.
-    """
-
-    client = _signed_up_client(
-        tmp_path,
-        monkeypatch,
-        email=OUTSIDER_EMAIL,
-        flags=f"{MOBILE_CLASSIFICATION_FLAG}=on",
+    _configure_env(
+        monkeypatch, tmp_path, flags=f"voice_brain_dump=on,{RETIRED_FLAG}=on"
     )
-    with allure.step("GET /api/auth/me after the flag is rolled out"):
-        flags = client.get("/api/auth/me").json()["feature_flags"]
-        assert flags[MOBILE_CLASSIFICATION_FLAG] is True
-        # Exposure only: other flags are untouched by this one's rollout.
-        assert flags["delivery_canary"] is False
+
+    seed = get_config().feature_flags.load_managed_migration_seed()
+
+    assert seed.states["voice_brain_dump"] is FeatureFlagState.ON
+    assert RETIRED_FLAG not in seed.states
 
 
 # ---------------------------------------------------------------------------

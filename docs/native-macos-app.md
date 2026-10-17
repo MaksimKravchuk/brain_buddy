@@ -12,12 +12,12 @@ above all).
 
 | part | where | what it does |
 |---|---|---|
-| `BrainBuddyMacCore` | `macos/Sources/BrainBuddyMacCore/` | Foundation only, so it builds and tests outside the app: the one-time import of the pre-021 store, `mac-local.json`, the single-instance lock, `WorkspaceHost` and the launch (`MacLaunch`), the window's model, and the sync UI's logic (`SyncStatusLineModel`, `SyncPopoverModel`, `SignInFlow`, `SignOutFlow`, `SyncTriggerSource`, `MacPresentationRouter`, `MacSyncController`) |
+| `BrainBuddyMacCore` | `macos/Sources/BrainBuddyMacCore/` | Foundation only, so it builds and tests outside the app: `mac-local.json`, the single-instance lock, `WorkspaceHost` and the launch (`MacLaunch`), the window's model, and the sync UI's logic (`SyncStatusLineModel`, `SyncPopoverModel`, `SignInFlow`, `SignOutFlow`, `SyncTriggerSource`, `MacPresentationRouter`, `MacSyncController`) |
 | `BrainBuddyMac` | `macos/Sources/BrainBuddyMac/` | the SwiftUI and AppKit views that lay that logic out, the menus, `NWPathMonitor`, the App Nap activity, and WhisperKit inside the `VoiceTranscriber` actor |
 | the kit | `ios/BrainBuddyKit` | `Workspace`, `SyncEngine`, `FileDocumentStore`, `KeychainSessionTokenStore`, the status describer and its copy |
 
-Launch order (contracts/mac-app-host.md §1): the single-instance lock; the legacy import with its
-one-time notices; the pre-021 cookie and cache cleanup; `WorkspaceHost` (the kit `Workspace` over
+Launch order (contracts/mac-app-host.md §1): the single-instance lock; the Rust runtime's
+selection; `WorkspaceHost` (the kit `Workspace` over
 `store.json`, a `SyncEngine` with the Mac's Keychain service, client identity and 30 s pull age);
 `workspace.load()`; then the sync triggers start (`SyncTriggerSource`).
 
@@ -36,9 +36,8 @@ Everything lives in `~/Library/Application Support/BrainBuddyMac/` (0700), or in
 |---|---|
 | `store.json` (+ `.store.json.lock`) | the workspace: until sign-out deletes it; kept through a 401 ("Sign in again to sync"); account-less, until the person removes the folder |
 | `store.unreadable-<UTC>.json` | a workspace file that could not be read, set aside after "Start fresh"; until sign-out |
-| `store.import-<attemptID>.json` | only during the one-time import |
-| `mac-local.json` (+ lock) | review marks, the import record, the sidebar's disclosure; kept across sign-out |
-| `local-gtd.backup-<UTC>.json`, `local-gtd.import-report-<UTC>.txt` | the pre-upgrade store and its report: at least 30 days, and deleted only after a sign-out since the update (data-model E8) |
+| `mac-local.json` (+ lock) | review marks, the sidebar's disclosure, the first run; kept across sign-out |
+| `local-gtd.json`, `local-gtd.backup-<UTC>.json`, `local-gtd.import-report-<UTC>.txt` | left by the retired pre-sync app and its one-time importer. The app no longer reads, creates or deletes them (the importer was removed under ADR-0030, with no real users); remove the folder to delete them |
 | `.instance.lock` | one running copy per folder |
 
 The 021 transport is ephemeral: no cookie jar, no HTTP cache.
@@ -121,8 +120,8 @@ even when the window is covered; it ends at sign-out, and an account-less Mac ho
 is accepted: an idle tick sends nothing, and a full pull runs at most every 30 s.
 
 **Nothing is sent before sign-in.** Account-less, every trigger reaches the engine, which sends
-nothing but a pending logout: one left by a sign-out, or the pre-021 session handed over by the
-cookie cleanup, each to its own host and carrying no task data.
+nothing but a pending logout: one left by a sign-out, to its own host and carrying no task
+data.
 
 ## The first sign-in and its timestamp limit
 
@@ -139,7 +138,7 @@ accept client times, which is out of scope.
 
 "Sign out…" (popover or app menu) first runs the window's discard confirmation when a task edit is
 unsaved or the capture draft is not empty, then the confirmation with the count of changes that
-would be removed, the open sync issues and the pre-upgrade backup. "Sign out and remove" removes
+would be removed and the open sync issues. "Sign out and remove" removes
 only the changes and sync issues the confirmation named (each by id and content). If any other change is
 pending when you confirm, whether one that arrived while it was open, one queued in place of a
 change that was just sent, or an edit folded into a named change, nothing is signed out or removed
@@ -156,7 +155,6 @@ removed from this Mac."); drafts alone change neither its title nor its "Sign ou
 ## The dry run
 
 `BRAINBUDDY_MAC_DATA_DIR=<an existing folder>` runs the app on a copy of a folder (quickstart
-Scenario 6 step 0): every file of the table above lives there, the pre-021 cookies and HTTP cache
-are left alone, and the app makes no Keychain call at all (no read, write or removal) until a
+Scenario 6 step 0): every file of the table above lives there, and the app makes no Keychain call at all (no read, write or removal) until a
 sign-in the person starts in the dry run. Never sign in during a dry run of real data. See
 `macos/README.md` for the commands.

@@ -1,3 +1,4 @@
+import BrainBuddyAgents
 import BrainBuddyAPI
 import BrainBuddyDesign
 import BrainBuddyMacCore

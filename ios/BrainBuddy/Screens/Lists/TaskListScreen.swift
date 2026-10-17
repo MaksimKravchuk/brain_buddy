@@ -1,3 +1,4 @@
+import BrainBuddyAgents
 import BrainBuddyCore
 import BrainBuddyDesign
 import BrainBuddyWorkspace
@@ -27,6 +28,10 @@ struct TaskListScreen: View {
     @AppStorage private var storedOptions: String
     /// The decision card (M-03) a marker chip opened, as a large sheet.
     @State private var decisionCard: DecisionCardTarget?
+    /// Agent runs listed in Waiting for (spec 034); nil until the session exists.
+    @Environment(AgentsSession.self) private var agents: AgentsSession?
+    /// The agent run a row in Waiting for's Agents group opened, as a sheet.
+    @State private var openRun: AgentRunItem?
 
     init(destination: Destination) {
         self.destination = destination
@@ -53,9 +58,12 @@ struct TaskListScreen: View {
             .sheet(item: $decisionCard) { target in
                 DecisionCardSheet(taskID: target.taskID)
             }
+            .sheet(item: $openRun) { item in
+                AgentRunSheet(item: item)
+            }
             .bbScreenTitle(title)
             .modifier(
-                ListSubtitle(summary: result.isEmpty ? nil : caption(for: result, options: options))
+                ListSubtitle(summary: subtitleSummary(for: result, options: options))
             )
             .toolbar { toolbarContent(result) }
             .safeAreaInset(edge: .bottom) {
@@ -64,6 +72,7 @@ struct TaskListScreen: View {
                     next: { await workspace.nextListPage(destination, options: options) })
             }
             .task(id: options) { await prepareQueries(options: options) }
+            .task { await agents?.refreshSteps() }
             .refreshable {
                 await workspace.syncNow()
             }
@@ -133,6 +142,9 @@ struct TaskListScreen: View {
                         .bbBareRow()
                 }
             }
+            if !agentRows.isEmpty {
+                agentsGroup
+            }
             ForEach(result.sections) { section in
                 taskSection(
                     section, options: options, cardTaskID: nextStep?.task.id, currentTaskID: currentID,
@@ -151,7 +163,7 @@ struct TaskListScreen: View {
             value: result.sections.flatMap(\.tasks).map(\.id)
         )
         .overlay {
-            if result.isEmpty {
+            if result.isEmpty && agentRows.isEmpty {
                 if case .list(.next) = destination {
                     // The empty state would cover notes in the list: they
                     // sit above it instead.
@@ -166,6 +178,40 @@ struct TaskListScreen: View {
                 }
             }
         }
+    }
+
+    // MARK: Agents (spec 034)
+
+    /// Waiting for's Agents rows (034-FR-004); none on any other destination.
+    private var agentRows: [AgentRunItem] {
+        guard case .list(.waiting) = destination else { return [] }
+        return agents?.waitingRows ?? []
+    }
+
+    /// The Agents label and its runs, then the label that names the tasks below them as People.
+    @ViewBuilder private var agentsGroup: some View {
+        groupLabel(AgentsCopy.waitingAgents)
+        ForEach(agentRows) { item in
+            AgentRunRow(item: item) { openRun = item }
+                .bbCardRow()
+        }
+        groupLabel(AgentsCopy.waitingPeople)
+    }
+
+    private func groupLabel(_ text: String) -> some View {
+        Text(text)
+            .bbSectionLabel()
+            .accessibilityAddTraits(.isHeader)
+            .listRowInsets(BBCardRow.headerInsets)
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+    }
+
+    /// The line before the sync state: Waiting for's "2 people, 1 agent" while runs are listed
+    /// (the count is the tasks shown), else the list's own summary.
+    private func subtitleSummary(for result: TaskListResult, options: ListOptions) -> String? {
+        if !agentRows.isEmpty, let header = agents?.waitingHeader(people: result.openCount) { return header }
+        return result.isEmpty ? nil : caption(for: result, options: options)
     }
 
     /// Weekly review notes on Next (M-01 threshold changed, M-03 error rows);

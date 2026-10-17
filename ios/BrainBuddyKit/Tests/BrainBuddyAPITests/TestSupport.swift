@@ -118,7 +118,7 @@ enum Fixture {
         #"brainbuddy_session=""; expires=Tue, 29 Sep 2026 10:00:00 GMT; Max-Age=0; Path=/; SameSite=lax"#
 
     static let me =
-        #"{"id":"user_1a2b3c4d5e6f","email":"ada@example.com","display_name":"Ada","deletion_cancelled":false,"feature_flags":{"voice_brain_dump":true,"mobile_task_classification":false}}"#
+        #"{"id":"user_1a2b3c4d5e6f","email":"ada@example.com","display_name":"Ada","deletion_cancelled":false,"feature_flags":{"voice_brain_dump":true}}"#
     static let project =
         ##"{"id":"project_0a1b2c3d4e5f","name":"Home","color":"#0EA5E9","state":"active","revision":2,"open_task_count":3}"##
     static let archivedProject =

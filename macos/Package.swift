@@ -13,6 +13,7 @@ let kit: [Target.Dependency] = [
     .product(name: "BrainBuddyAPI", package: "BrainBuddyKit"),
     .product(name: "BrainBuddySync", package: "BrainBuddyKit"),
     .product(name: "BrainBuddyWorkspace", package: "BrainBuddyKit"),
+    .product(name: "BrainBuddyAgents", package: "BrainBuddyKit"),
 ]
 
 let package = Package(
@@ -25,8 +26,8 @@ let package = Package(
     ],
     targets: [
         // The Foundation-only part of the app (tasks.md "PR-08 task lanes", review c2 G48): the
-        // legacy import, the device state, the single-instance lock, the host and the window's
-        // model. No SwiftUI or AppKit, so it also builds and tests outside the app.
+        // device state, the single-instance lock, the host and the window's model. No SwiftUI or
+        // AppKit, so it also builds and tests outside the app.
         .target(name: "BrainBuddyMacCore", dependencies: kit),
         .executableTarget(
             name: "BrainBuddyMac",
@@ -36,9 +37,9 @@ let package = Package(
                 .product(name: "BrainBuddyDesign", package: "BrainBuddyKit"),
             ] + kit
         ),
-        // `Resources/` holds the synthetic legacy stores the importer is tested on; `.copy` keeps
-        // their bytes as they are. Snapshot tests read `__Snapshots__/*.png` beside their source
-        // file, so it is excluded rather than bundled.
+        // Snapshot tests read `__Snapshots__/*.png` beside their source file, so it is excluded
+        // rather than bundled. `Resources/` holds the synthetic pre-sync store fixtures that the
+        // Rust importer tests (rust/crates/bb-client/tests) read by path; no Swift test uses them.
         .testTarget(
             name: "BrainBuddyMacTests",
             dependencies: [
@@ -46,8 +47,7 @@ let package = Package(
                 .product(name: "BrainBuddyDesign", package: "BrainBuddyKit"),
                 .product(name: "BrainBuddyDesignTestSupport", package: "BrainBuddyKit"),
             ] + kit,
-            exclude: ["__Snapshots__"],
-            resources: [.copy("Resources")]
+            exclude: ["__Snapshots__", "Resources"]
         ),
     ]
 )

@@ -369,7 +369,7 @@ struct EndpointRequestTests {
         #expect(request.header("Idempotency-Key") == nil)
         #expect(me == MeDTO(
             id: "user_1a2b3c4d5e6f", email: "ada@example.com", displayName: "Ada",
-            featureFlags: ["voice_brain_dump": true, "mobile_task_classification": false]
+            featureFlags: ["voice_brain_dump": true]
         ))
     }
 

@@ -36,7 +36,7 @@ struct RustSyncRecoveryTests {
     ) -> SyncPopoverContent {
         SyncPopoverModel.content(
             snapshot: snapshot ?? SyncSnapshot(account: email, lastSyncedAt: now), issues: [], state: .empty,
-            files: .none, runtimeIssues: issues, recovery: recovery, now: now
+            runtimeIssues: issues, recovery: recovery, now: now
         )
     }
 

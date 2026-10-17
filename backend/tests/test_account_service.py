@@ -192,7 +192,7 @@ def test_010_FR_007_purge_scrubs_every_cohort_before_deleting_the_account(
     )
     _seed_cohort(
         container,
-        "mobile_task_classification",
+        "weekly_review",
         FlagMode.SELECTED_USERS,
         ("user_other", "user_purged"),
     )
@@ -217,7 +217,7 @@ def test_010_FR_007_purge_scrubs_every_cohort_before_deleting_the_account(
     overlay = container.feature_flag_repo.read()
     assert overlay.degraded is False
     assert overlay.flags["voice_brain_dump"].selected_users == ("user_kept",)
-    assert overlay.flags["mobile_task_classification"].selected_users == ("user_other",)
+    assert overlay.flags["weekly_review"].selected_users == ("user_other",)
     assert container.user_repo.get_by_id(member.id) is None
 
 

@@ -1,3 +1,4 @@
+import BrainBuddyAgents
 import AppKit
 import BrainBuddyAPI
 import BrainBuddyCore
@@ -97,7 +98,7 @@ final class AgentsTabController {
         case .add: guard model.canAdd else { return }
         default: guard model.controlsEnabled else { return }
         }
-        editor = AgentConnectionEditor(mode: mode, model: model)
+        editor = AgentConnectionEditor(mode: mode, model: model, log: SystemMacLog())
     }
 
     func closeEditor() {

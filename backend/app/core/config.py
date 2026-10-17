@@ -58,13 +58,6 @@ class AppEnvironment(str, Enum):
 # route (which reads the effective flag from ``/api/auth/me``). It ships
 # default OFF and rolls out OFF → INTERNAL → ON like every other flag.
 #
-# ``mobile_task_classification`` (spec 006, FR-015) gates assigning a project
-# and Tags from the mobile task detail screen. It is purely client-side
-# exposure: no route, service or stored shape changes with it, and the mobile
-# client reads the effective value from ``/api/auth/me`` exactly as the
-# frontend reads ``voice_brain_dump``. Default OFF means the task screen keeps
-# today's presentation until the flag is deliberately turned on.
-#
 # ``external_agent_relay`` (ADR-0008) gates the bring-your-own-agent relay:
 # connection management, hand-off, and the owner-facing run projection. Inbound
 # connector events are deliberately *not* flag-gated — a run already dispatched
@@ -85,8 +78,8 @@ class AppEnvironment(str, Enum):
 # control only: session authentication and owner checks stay mandatory.
 #
 # Runtime-manageable subset (spec 010, DD-1, DD-15, DD-16, superseded
-# 2026-08-15): ``voice_brain_dump``, ``mobile_task_classification`` and
-# ``external_agent_relay`` are managed exclusively by the SQLite-backed
+# 2026-08-15): ``voice_brain_dump`` and ``external_agent_relay`` (among
+# others) are managed exclusively by the SQLite-backed
 # ``FeatureFlagOverrideRepository`` once the one-time migration has run
 # (ADR-0019). Their deploy-staged environment text reaches this module only as
 # the raw ``ManagedFlagMigrationInput`` below, parsed solely by the one-time
@@ -102,7 +95,6 @@ class AppEnvironment(str, Enum):
 KNOWN_FEATURE_FLAGS: tuple[str, ...] = (
     "delivery_canary",
     "voice_brain_dump",
-    "mobile_task_classification",
     "external_agent_relay",
     "task_title_autocomplete",
     "crt_canvas",
@@ -110,6 +102,13 @@ KNOWN_FEATURE_FLAGS: tuple[str, ...] = (
     "weekly_review",
     "rust_core_sync",
 )
+
+# Flags that once existed and no longer do. ``mobile_task_classification``
+# gated the Expo client, which was removed in 2026-10 (spec 006, FR-015
+# retired 2026-10-16). Its name is not configurable, but a leftover value
+# staged in ``BRAIN_BUDDY_FEATURE_FLAGS`` or a leftover SQLite row must not
+# stop a first start or degrade the runtime store, so both are ignored.
+RETIRED_FEATURE_FLAGS: frozenset[str] = frozenset({"mobile_task_classification"})
 
 # Every flag name ``BRAIN_BUDDY_FEATURE_FLAGS`` may configure. There is no
 # more private subset (DD-14): ``PRIVATE_FEATURE_FLAGS`` held only
@@ -287,7 +286,7 @@ class FeatureFlagSettings(BaseModel):
         """
 
         states = _parse_feature_flag_states(self.migration_input.raw_states)
-        _reject_unknown_flags(states)
+        _reject_unknown_flags(set(states) - RETIRED_FEATURE_FLAGS)
         return ManagedFlagMigrationSeed(
             states=MappingProxyType(
                 {
@@ -1534,6 +1533,7 @@ __all__ = [
     "CANONICAL_PUBLIC_CALLBACK_HOSTS",
     "ENVIRONMENT_OWNED_FLAGS",
     "KNOWN_FEATURE_FLAGS",
+    "RETIRED_FEATURE_FLAGS",
     "RUNTIME_MANAGED_FLAGS",
     "AdminSettings",
     "AgentRelaySettings",
