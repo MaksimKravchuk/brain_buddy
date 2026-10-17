@@ -49,7 +49,6 @@ struct WelcomeInboxView: View {
         }
         .frame(maxWidth: 560, alignment: .leading)
         .padding(.horizontal, 28)
-        .padding(.top, CarryOnSpace.sm)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background {
             // F-01.07: Esc skips, empty or typed. Invisible, so only its shortcut shows.

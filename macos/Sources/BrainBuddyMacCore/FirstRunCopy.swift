@@ -8,7 +8,7 @@ package enum FirstRunCopy {
     package static let intro = "Write it as it is and press Return. It goes to the Inbox; you sort it in a moment."
     package static let placeholder = "Type, or press the mic to speak"
     package static let hotkeyHint = "Capture from any app, without switching to Carry On."
-    package static let hotkeyUnavailable = "⌃⌥⇧B is unavailable. Use Quick Capture in the toolbar."
+    package static let hotkeyUnavailable = "⌃⌥⇧B is unavailable. Use File › Quick Capture."
     package static let speechHint = "Speech becomes text on this Mac. It asks for the microphone the first time."
     package static let noAccount = "No account needed. Your tasks stay on this Mac until you sign in."
     package static let typingLine = "Goes to Inbox, as you wrote it"
