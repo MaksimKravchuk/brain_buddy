@@ -30,3 +30,11 @@ The existing component-composition M16 fixture already covered the choices and f
 No tracked kit source or generated token changed, so a kit rerun is not required for this correction. Local native backing scale is 2x; the snapshot names retain explicit native profiles. A genuine native1x CI reference, independent exact-SHA native QA, CI, integration and delivery remain parent-owned gates. This receipt does not claim those gates or production acceptance have passed.
 
 Prepared from `bae38ea826ec069778ea0f9558e082e98ec7ff0a` on `codex/mac-inbox-inspector-board`. Builds reused the exclusive leased `mac-board-parity/brain_buddy/macos/.build` cache. Missing ignored Apple bridge artifacts were copied from that worktree's kit artifacts/bindings only; no tracked kit source or existing bridge product was replaced.
+
+## Parent native check
+
+The actual app at product commit `78613411f354478fbf45111e3b4bccda2ea41824` exposes the four choices and footer without Note, generic properties, subtask or comment controls in ordinary Inbox AX. [Native after](../../design/evidence/mac-inbox-inspector/after-native.png).
+
+Parent entered unsaved subtask and comment drafts in A step I can take, pressed Back, confirmed the editors disappeared from AX and the visible title regained selection, then reopened A step I can take. Both exact draft values remained. [Retention check](../../design/evidence/mac-inbox-inspector/drafts-retained-native.png). The drafts were cleared without adding records and the app was quit. This verifies local-state preservation, not a claim about retry IDs from runtime UI.
+
+This independent candidate does not include the separate main-window geometry correction. The parent maximized the window and hid the sidebar to inspect the full content; baseline window/chrome differences remain outside this content verdict.
