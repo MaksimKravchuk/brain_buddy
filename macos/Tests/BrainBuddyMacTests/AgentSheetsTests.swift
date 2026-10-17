@@ -14,12 +14,12 @@
     struct AgentSheetsTests {
         private let hermes = AgentFixtures.connection()
 
-        private func controller(password: Bool = true) async -> AgentsTabController {
+        private func controller(password: Bool = true, remote: FakeAgentRemote? = nil) async -> AgentsTabController {
             let availability = AgentAvailability(
                 account: AccountFixtures.account(),
                 remote: { _ in FakeAvailabilityRemote(password: password) }, now: { Date(timeIntervalSince1970: 1_000_000) })
             await availability.refresh()
-            let remote = FakeAgentRemote(list: .success([AgentFixtures.connection()]))
+            let remote = remote ?? FakeAgentRemote(list: .success([AgentFixtures.connection()]))
             let model = AgentSettingsModel(account: AccountFixtures.account(), availability: availability, remote: { _ in remote })
             await model.reload()
             return AgentsTabController(model: model, availability: availability)
@@ -41,6 +41,74 @@
             #expect(AgentSheetPlan.submitTitle(.add, phase: .idle) == "Add and test")
             #expect(AgentSheetPlan.submitTitle(.add, phase: .adding) == "Adding…")
             #expect(AgentSheetPlan.submitTitle(.add, phase: .testing) == "Testing…")
+        }
+
+        @Test("030_FR_031 M30 opens proof without a request and submits only after password entry")
+        func addConfirmsBeforeSending() async {
+            let remote = FakeAgentRemote()
+            let editor = AgentConnectionEditor(mode: .add, model: await controller(remote: remote).model)
+            editor.name = "Hermes"
+            editor.address = "https://hermes.example.org"
+            editor.secret = "synthetic-credential"
+            #expect(editor.canConfirmAdd && !editor.canSubmit)
+            let flow = AgentEditorSheetFlow()
+            await flow.performPrimary(editor: editor)
+            #expect(flow.confirmingAdd)
+            await flow.performPrimary(editor: editor)
+            #expect(remote.calls.filter { $0.op == "create" }.isEmpty)
+            editor.password = "synthetic-password"
+            remote.queue(.success(hermes))
+            remote.queue(.success(hermes))
+            await flow.performPrimary(editor: editor)
+            #expect(remote.calls.filter { $0.op == "create" }.count == 1)
+            #expect(editor.phase == .done)
+            #expect(editor.secret.isEmpty && editor.password.isEmpty)
+        }
+
+        @Test("030_FR_034 M30 rejection clears proof and returns to the credential form")
+        func addFailureReturnsToForm() async {
+            let remote = FakeAgentRemote()
+            remote.queue(.failure(AgentFixtures.wrongPassword))
+            let editor = AgentConnectionEditor(mode: .add, model: await controller(remote: remote).model)
+            editor.name = "Hermes"
+            editor.address = "https://hermes.example.org"
+            editor.scheme = .apiKey
+            editor.secret = "synthetic-credential"
+            let flow = AgentEditorSheetFlow()
+            await flow.performPrimary(editor: editor)
+            editor.password = "synthetic-password"
+            await flow.performPrimary(editor: editor)
+            #expect(!flow.confirmingAdd)
+            #expect(editor.secret.isEmpty && editor.password.isEmpty)
+            #expect(editor.name == "Hermes" && editor.address == "https://hermes.example.org" && editor.scheme == .apiKey)
+            #expect(!editor.canConfirmAdd && !editor.canSubmit)
+            if case .failed(let notice) = editor.phase { #expect(notice.failure == .wrongPassword) }
+            else { Issue.record("Wrong password must stay a visible failure") }
+            await flow.performPrimary(editor: editor)
+            #expect(!flow.confirmingAdd)
+            #expect(remote.calls.filter { $0.op == "create" }.count == 1)
+            editor.secret = "synthetic-credential"
+            #expect(editor.canConfirmAdd && !editor.canSubmit)
+            await flow.performPrimary(editor: editor)
+            #expect(flow.confirmingAdd && editor.password.isEmpty)
+            await flow.performPrimary(editor: editor)
+            #expect(flow.confirmingAdd, "Return with empty proof must not collapse the retry stage")
+            #expect(remote.calls.filter { $0.op == "create" }.count == 1)
+        }
+
+        @Test("030_FR_025 030_FR_036 M30 cannot request proof while offline or passwordless")
+        func addConfirmationNeedsAvailability() async {
+            for controller in [await controller(password: false), await controller(remote: FakeAgentRemote(list: .failure(AgentFixtures.offline)))] {
+                let editor = AgentConnectionEditor(mode: .add, model: controller.model)
+                editor.name = "Hermes"
+                editor.address = "https://hermes.example.org"
+                editor.secret = "synthetic-credential"
+                editor.password = "synthetic-password"
+                #expect(!editor.canConfirmAdd && !editor.canSubmit)
+                let flow = AgentEditorSheetFlow()
+                await flow.performPrimary(editor: editor)
+                #expect(!flow.confirmingAdd)
+            }
         }
 
         @Test("030_FR_032 Edit shows the password only after the address or type changes")

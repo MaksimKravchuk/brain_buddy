@@ -69,10 +69,16 @@ example `G-05.03`.
   with + and − (`.carryOnQuiet`, glyph buttons) under it; right the details grid in 028's
   row style (150 pt right-aligned `text-secondary` label, value, no trailing control), and
   the button row Test again / Replace credential… / Edit… (`.carryOnSecondary`).
-- **Add new agent** (G-07, M30): a sheet over Settings, 440 pt wide, 028 row grid. The
-  credential type is a two-segment control (Bearer token | API key); the secret a secure
-  field; helpers in 12 pt `text-secondary`. Buttons "Cancel" and "Add and test"
-  (`.carryOnPrimary`).
+- **Add new agent** (G-07, M30): the authoritative PNG shows a 420 pt frosted sheet over
+  Settings, using native regular material over `bg-ground`, with 22 pt padding, white
+  `surface-card` fields and helpers in 12 pt
+  `text-secondary`. The Credential label precedes a full-width stone two-segment control
+  (Bearer token | API key), with a white selected segment; the secure secret field follows
+  directly below it. Buttons are "Cancel" (quiet) and "Add and test" (`.carryOnStrong`,
+  ink). The initial form matches the PNG without a password field. Add and test opens a
+  separate Current password proof stage in the same sheet and makes no request until
+  the required password is entered and confirmed. The server proof, cancellation and
+  secret-wiping contracts remain unchanged; other agent sheets retain their layout.
 - **Colour** (DSAgents "Only your moves get colour"): Needs you uses `text-accent`
   (terracotta); Running and Queued `text-secondary` (dust); Lost contact
   `status-warning` (ochre); Failed `status-danger` (oxblood) with the agent's words.
@@ -173,11 +179,12 @@ Compact states: "Needs you" (accent), "Running · 4 min", "Queued", "Reported ·
 
 | key | state | what shows | FR |
 |---|---|---|---|
-| G-07.01 | Empty (M30) | Name, Address + helper, Credential [Bearer token | API key] + secret + helper, Current password; Cancel, Add and test (disabled until all filled) | 030-FR-031 |
+| G-07.01 | Empty (M30) | Name, Address + helper, Credential [Bearer token | API key] + secret + helper; Cancel, Add and test (disabled until these agent fields are filled; opens G-07.06 without a request) | 030-FR-031 |
 | G-07.02 | Adding / testing | "Adding…", then "Testing…"; fields disabled | 030-FR-031 |
 | G-07.03 | Added, test failed | Sheet closes; the new agent selected with its status sentence (for example "Unreachable") | 030-FR-031 |
-| G-07.04 | Wrong password | "That password isn't right."; password cleared and focused; other fields kept | 030-FR-034 |
-| G-07.05 | Rejected address or name | The server's message under the field | 030-FR-034 |
+| G-07.04 | Wrong password | "That password isn't right."; both secrets cleared; returns to the form with Credential focused; name, address and type kept; re-entry and a fresh proof action are required | 030-FR-034 |
+| G-07.05 | Rejected address or name | The server's message under the field; both secrets cleared and the agent form returns | 030-FR-034 |
+| G-07.06 | Password proof | Same title; Current password secure field; Cancel, Add and test (disabled without password). Confirming uses the existing create-and-test operation and server-required password; Cancel dismisses and wipes both secrets | 030-FR-031, 030-FR-035 |
 
 ### G-08 — Replace credential, Edit, Delete
 

@@ -247,6 +247,13 @@ public enum CarryOnLayout {
     public enum MacSidebarRow {
         public static let height: Double = 34
     }
+    public enum MacAgentAdd {
+        public static let width: Double = 420
+        public static let padding: Double = 22
+        public static let segmentHeight: Double = 30
+        public static let segmentInset: Double = 2
+        public static let fieldPaddingX: Double = 10
+    }
 }
 
 /// Every token by its JSON path, for the test that keeps this file in step with the JSON.
@@ -501,6 +508,11 @@ public enum CarryOnTokenTable {
         "layout.code-box.gap": CarryOnLayout.CodeBox.gap,
         "layout.code-box.radius": CarryOnLayout.CodeBox.radius,
         "layout.mac-sidebar-row.height": CarryOnLayout.MacSidebarRow.height,
+        "layout.mac-agent-add.width": CarryOnLayout.MacAgentAdd.width,
+        "layout.mac-agent-add.padding": CarryOnLayout.MacAgentAdd.padding,
+        "layout.mac-agent-add.segment-height": CarryOnLayout.MacAgentAdd.segmentHeight,
+        "layout.mac-agent-add.segment-inset": CarryOnLayout.MacAgentAdd.segmentInset,
+        "layout.mac-agent-add.field-padding-x": CarryOnLayout.MacAgentAdd.fieldPaddingX,
     ]
     public static let strings: [String: String] = [
         "font.voice.family": CarryOnFontFace.voice.family,
