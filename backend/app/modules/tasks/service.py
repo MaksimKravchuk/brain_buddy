@@ -1867,12 +1867,6 @@ class TaskService:
         if record is not None:
             self._apply_idempotent_record(record, owner_id=owner_id)
 
-    def _reconcile_idempotent_results(self, *, owner_id: str) -> None:
-        """Repair all recorded results for an owner (maintenance path only)."""
-
-        for record in self.task_repo.list_idempotency_for_owner(owner_id=owner_id):
-            self._apply_idempotent_record(record, owner_id=owner_id)
-
     def _apply_idempotent_record(
         self, record: IdempotencyRecord, *, owner_id: str
     ) -> None:

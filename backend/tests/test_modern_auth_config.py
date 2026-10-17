@@ -62,12 +62,19 @@ def configured_values() -> dict[str, Any]:
     }
 
 
+def _available(settings: ModernAuthSettings, name: str) -> bool:
+    """A method counts as available when any of its channels is configured."""
+    if name == "apple_available":
+        return settings.apple_web_available or settings.apple_native_available
+    return bool(getattr(settings, name))
+
+
 def test_023_FR_003_missing_settings_leave_password_configuration_available() -> None:
     """Missing modern setup disables new methods and preserves password startup."""
     settings = get_config().modern_auth
     assert not settings.crypto_ready
     assert not settings.google_available
-    assert not settings.apple_available
+    assert not (settings.apple_web_available or settings.apple_native_available)
     assert not settings.email_available
     assert get_config().password_policy.min_length > 0
     assert AppConfig().modern_auth == ModernAuthSettings()
@@ -86,12 +93,12 @@ def test_023_FR_003_fully_configured_methods_and_distinct_apple_channels() -> No
     assert settings.apple_web_available and settings.apple_native_available
     values["apple_services_id"] = ""
     native_only = ModernAuthSettings(**values)
-    assert native_only.apple_available and native_only.apple_native_available
+    assert native_only.apple_native_available
     assert not native_only.apple_web_available
     values["apple_services_id"] = "com.example.web"
     values["apple_native_app_id"] = ""
     web_only = ModernAuthSettings(**values)
-    assert web_only.apple_available and web_only.apple_web_available
+    assert web_only.apple_web_available
     assert not web_only.apple_native_available
 
 
@@ -129,7 +136,7 @@ def test_023_FR_003_invalid_origins_or_keyring_disable_every_new_method(
     values[field] = value
     settings = ModernAuthSettings(**values)
     assert not settings.google_available
-    assert not settings.apple_available
+    assert not (settings.apple_web_available or settings.apple_native_available)
     assert not settings.email_available
 
 
@@ -153,10 +160,10 @@ def test_023_FR_003_invalid_provider_setup_only_hides_affected_method(
     values = configured_values()
     values[field] = value
     settings = ModernAuthSettings(**values)
-    assert not getattr(settings, unavailable)
+    assert not _available(settings, unavailable)
     assert settings.crypto_ready
     other = {"google_available", "apple_available", "email_available"} - {unavailable}
-    assert all(getattr(settings, name) for name in other)
+    assert all(_available(settings, name) for name in other)
 
 
 def test_023_FR_021_settings_are_frozen_and_secret_free_in_repr_and_dumps() -> None:
@@ -197,7 +204,7 @@ def test_023_FR_023_environment_builder_reads_explicit_modern_auth_names(
     settings = get_config().modern_auth
     assert (
         settings.google_available
-        and settings.apple_available
+        and _available(settings, "apple_available")
         and settings.email_available
     )
     assert settings.current_key_id == "key-2"

@@ -650,17 +650,6 @@ class ReceiptCommand[ConnectionT = Connection]:
         self._activity = self.unit.activity
         return result
 
-    def accept_legacy_projection_repair(self) -> None:
-        """Allow the old child read-repair without reapplying the command effect."""
-        if (
-            self.request.origin != "legacy"
-            or self.replay is None
-            or self.replay["outcome"] != "accepted"
-            or self.unit.activity != self._activity + 1
-        ):
-            raise SyncCommandError("COMMAND_INTEGRITY")
-        self._activity = self.unit.activity
-
     def _complete(self) -> None:
         if self._failed:
             raise SyncCommandError("COMMAND_FINALIZATION_FAILED")

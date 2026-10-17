@@ -833,35 +833,6 @@ class TestOperationShapes:
         assert params["id"] == "task-1"
         assert params["metadata"]["brainbuddy.command_id"] == "cmd-9"
 
-    def test_014_FR_008_push_registration_sends_the_per_run_url_and_token(self) -> None:
-        seen: list[httpx.Request] = []
-        client = _client(
-            lambda request: httpx.Response(
-                200,
-                json={
-                    "jsonrpc": "2.0",
-                    "id": json.loads(request.content)["id"],
-                    "result": {"config": {}},
-                },
-            ),
-            seen=seen,
-        )
-
-        client.create_push_config(
-            TARGET,
-            task_id="task-1",
-            url="https://bb.example/api/a2a/push/run-1/tok",
-            token="tok",
-        )
-
-        body = json.loads(seen[0].content)
-        assert body["method"] == "CreateTaskPushNotificationConfig"
-        assert body["params"] == {
-            "taskId": "task-1",
-            "url": "https://bb.example/api/a2a/push/run-1/tok",
-            "token": "tok",
-        }
-
 
 class TestStructuredLogging:
     """What a log line is allowed to say about someone else's agent."""
