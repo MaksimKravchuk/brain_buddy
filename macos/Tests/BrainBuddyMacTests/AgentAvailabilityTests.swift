@@ -156,4 +156,18 @@ struct AgentAvailabilityTests {
         let second = model.consumeAddAgentRequest()
         #expect(!idle && first && !second)
     }
+
+    @Test("030_FR_036 the hand-off Open Settings request is one-shot and never asks for the Add sheet")
+    func agentsTabRequestIsOneShot() {
+        let model = make(FakeAvailabilityRemote())
+        let idle = model.consumeAgentsTabRequest()
+        model.requestAgentsTab()
+        let addAsked = model.addAgentRequested
+        let first = model.consumeAgentsTabRequest()
+        let second = model.consumeAgentsTabRequest()
+        model.requestAgentsTab()
+        let again = model.consumeAgentsTabRequest()
+        #expect(!idle && first && !second && again, "each request is seen once, a later one again")
+        #expect(!addAsked, "Add new agent is not requested")
+    }
 }

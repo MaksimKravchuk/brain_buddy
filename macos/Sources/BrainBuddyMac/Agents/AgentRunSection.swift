@@ -99,6 +99,8 @@ struct AgentTimelineRow: Equatable {
 final class AgentRunSectionModel {
     private(set) var runs: [AgentRunDTO] = []
     private(set) var asksPassword = false
+    /// The last read of this step's runs failed: what shows is the last known state, read-only (030-FR-025).
+    private(set) var isStale = false
     var selectedRunID: String?
     var answer = ""
     var nextStep = ""
@@ -111,16 +113,19 @@ final class AgentRunSectionModel {
     @ObservationIgnored private let steps: any StepCommands
     @ObservationIgnored private let refreshStore: @MainActor () async -> Void
     @ObservationIgnored let now: @MainActor () -> Date
+    @ObservationIgnored private let cachedRun: @MainActor () -> AgentRunDTO?
     @ObservationIgnored private(set) lazy var actions = AgentRunActions(
         remote: remote, availability: availability, steps: steps, refresh: { [weak self] in await self?.refreshAll() })
 
     init(
         taskServerID: String, projectID: String?, remote: any AgentRunSectionRemote, availability: AgentAvailability,
         steps: any StepCommands, now: @escaping @MainActor () -> Date = { Date() },
-        refreshStore: @escaping @MainActor () async -> Void = {}
+        refreshStore: @escaping @MainActor () async -> Void = {},
+        cachedRun: @escaping @MainActor () -> AgentRunDTO? = { nil }
     ) {
         (self.taskServerID, self.projectID, self.remote) = (taskServerID, projectID, remote)
         (self.availability, self.steps, self.now, self.refreshStore) = (availability, steps, now, refreshStore)
+        self.cachedRun = cachedRun
     }
 
     var shown: AgentRunDTO? { runs.first { $0.id == selectedRunID } ?? runs.first }
@@ -129,7 +134,12 @@ final class AgentRunSectionModel {
     func choose(_ run: AgentRunDTO) { selectedRunID = selectedRunID == run.id ? nil : run.id }
 
     func load() async {
-        guard let all = try? await remote.agentRuns(taskID: taskServerID) else { return }
+        guard let all = try? await remote.agentRuns(taskID: taskServerID) else {
+            isStale = true
+            if runs.isEmpty, let cached = cachedRun() { runs = [cached] }
+            return
+        }
+        isStale = false
         runs = all.sorted { $0.createdAt > $1.createdAt }
         if let selectedRunID, !runs.contains(where: { $0.id == selectedRunID }) { self.selectedRunID = nil }
     }
@@ -140,14 +150,14 @@ final class AgentRunSectionModel {
     }
 
     func sendReply() async {
-        guard let run = shown else { return }
+        guard !isStale, let run = shown else { return }
         await actions.reply(to: run, message: answer)
         if actions.phase == .done { answer = "" }
     }
 
     /// The password field appears only after the server refused a check for want of it, and is cleared after each try.
     func checkAgain() async {
-        guard let run = shown else { return }
+        guard !isStale, let run = shown else { return }
         await actions.checkAgain(run, password: password)
         password = ""
         asksPassword = actions.phase == .failed(.wrongPassword)
@@ -187,10 +197,12 @@ struct AgentRunSectionView: View {
         (self.model, self.task, self.onHandOff) = (model, task, onHandOff)
         _section = State(initialValue: AgentRunSectionModel(
             taskServerID: server, projectID: task.projectID?.rawValue, remote: client, availability: model.agentAvailability,
-            steps: InspectorStepCommands(model: model, taskID: task.id), refreshStore: { await runs.refresh() }))
+            steps: InspectorStepCommands(model: model, taskID: task.id), refreshStore: { await runs.refresh() },
+            cachedRun: { [server] in runs.cachedRun(taskServerID: server) }))
     }
 
-    private var online: Bool { model.agentAvailability.isOnline }
+    /// Actions need a connection and a fresh read of this run; a stale view is read-only.
+    private var online: Bool { model.agentAvailability.isOnline && !section.isStale }
     private var item: AgentRunItem? { model.agentRuns.items.first { $0.taskServerID == task.serverID } }
     private var refreshKey: String {
         "\(item?.state.label ?? "")|\(item?.lastContactAt?.timeIntervalSince1970 ?? 0)|\(model.agentRuns.lastUpdated?.timeIntervalSince1970 ?? 0)"
@@ -227,7 +239,7 @@ struct AgentRunSectionView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
-        if !online || model.agentRuns.phase == .stale, let at = model.agentRuns.lastUpdated {
+        if !online || model.agentRuns.phase == .stale, let at = model.agentRuns.lastUpdated ?? run.lastContactAt {
             MacInspectorMetaText(text: AgentsCopy.lastUpdated(at.formatted(date: .omitted, time: .shortened)))
         }
         stateBlock(run, block)

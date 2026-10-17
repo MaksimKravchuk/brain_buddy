@@ -16,7 +16,8 @@ struct Driver {
     static func launch(pilot: Bool = true, extraArguments: [String] = []) -> Driver {
         let app = XCUIApplication()
         // An explicit NO, because the switch is a persisted default: it must not leak between runs.
-        app.launchArguments += ["-BBRustRuntimePilot", pilot ? "YES" : "NO"] + extraArguments
+        // The first run (boards 01 to 04) would cover a clean install; the rehearsals start past it.
+        app.launchArguments += ["-BBRustRuntimePilot", pilot ? "YES" : "NO", "-BBSkipFirstRun", "YES"] + extraArguments
         app.launch()
         let driver = Driver(app: app)
         driver.dismissExplainer()
