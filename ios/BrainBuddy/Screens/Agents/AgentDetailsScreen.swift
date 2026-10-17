@@ -246,7 +246,7 @@ struct AgentDetailsScreen: View {
                     .textSelection(.enabled)
             }
             .padding(.horizontal, CGFloat(CarryOnLayout.Row.paddingX))
-            .padding(.vertical, CGFloat(CarryOnSpace.sm) - 1)
+            .padding(.vertical, CGFloat(CarryOnSpace.sm))
             .accessibilityElement(children: .combine)
         }
     }

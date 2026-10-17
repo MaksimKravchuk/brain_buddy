@@ -141,7 +141,7 @@ struct AgentFormLabel: View {
             .carryOnFont(CarryOnTypeScale.metaStrong)
             .foregroundStyle(.coTextSecondary)
             .padding(.top, CGFloat(CarryOnSpace.sm))
-            .padding(.bottom, CGFloat(CarryOnSpace.xxs) + 2)
+            .padding(.bottom, CGFloat(CarryOnSpace.xs))
             .accessibilityHidden(true)
     }
 }
@@ -188,7 +188,7 @@ extension View {
         self
             .carryOnFont(CarryOnTypeScale.body)
             .foregroundStyle(.coTextPrimary)
-            .padding(.horizontal, CGFloat(CarryOnSpace.sm) + 2)
+            .padding(.horizontal, CGFloat(CarryOnSpace.sm))
             .frame(minHeight: BBMetrics.hitTarget)
             .background(
                 .coSurfaceCard, in: RoundedRectangle(cornerRadius: CGFloat(CarryOnRadius.md), style: .continuous))
