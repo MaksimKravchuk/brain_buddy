@@ -22,13 +22,20 @@ before. What the job adds is authority and honesty about outcomes:
 - **Uncertainty.** A lookup that leaves the exchange interrupted proves nothing
   about whether the agent received the message, so the job is
   ``reconciliation_required``, never a success and never an endless retry.
+- **Following the user.** The uncertainty is also on the run, and the user
+  settles it there with **Check again** or **Stop run**. Nothing tells the
+  ledger, so a reconcile pass reads the run's local state and closes the parked
+  lookup once the user has decided; it never looks anything up or retries,
+  because a retry would be a background lookup the user's own check already
+  owns (014-FR-010). A run still waiting on the user keeps its job parked.
 """
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from datetime import datetime, timedelta
-from typing import Protocol
+from typing import Literal, Protocol
 
 from app.utils.time import utcnow
 
@@ -41,6 +48,10 @@ OBSERVE_JOB_TYPE = "agent.observe"
 RECOVER_JOB_TYPE = "agent.recover"
 _AUTHORITY_LOST = "authority_lost"
 _DELIVERY_UNPROVEN = "delivery_unproven"
+
+logger = logging.getLogger(__name__)
+
+ReconciliationOutcome = Literal["settled", "abandoned", "uncertain"]
 
 
 class ObservationResult(Protocol):
@@ -77,6 +88,39 @@ class AgentObserverPort(Protocol):
         keep_going: Callable[[], bool] | None = ...,
     ) -> bool: ...
 
+    def reconciliation_outcome(
+        self, owner_id: str, run_id: str
+    ) -> ReconciliationOutcome: ...
+
+
+def reconcile_parked_lookups(observer: AgentObserverPort, ledger: JobRepository) -> int:
+    """Close each parked lookup whose run the user has since settled or stopped.
+
+    ``succeeded`` once the exchange is settled and ``failed`` once the run was
+    abandoned; a run still awaiting the user's decision stays parked, so the
+    uncertainty remains visible (026-SC-007). Returns how many jobs it closed.
+    """
+
+    closed = 0
+    for job in ledger.list_reconciliation_required(RECOVER_JOB_TYPE):
+        if job.payload_ref is None:
+            continue
+        outcome = observer.reconciliation_outcome(job.scope, job.payload_ref)
+        if outcome == "uncertain":
+            continue
+        decision: Literal["succeeded", "failed"] = (
+            "succeeded" if outcome == "settled" else "failed"
+        )
+        if ledger.resolve_reconciliation(job.job_id, decision=decision):
+            closed += 1
+            logger.info(
+                "agent_lookup_reconciled job_id=%s run_id=%s decision=%s",
+                job.job_id,
+                job.payload_ref,
+                decision,
+            )
+    return closed
+
 
 class AgentObservationAdapter:
     """The periodic observation pass as a recurring system job."""
@@ -88,16 +132,19 @@ class AgentObservationAdapter:
         self,
         observer: AgentObserverPort,
         gate: JobExecutionGate,
+        ledger: JobRepository,
         *,
         cadence: timedelta | None = None,
     ) -> None:
         observer.delegate_scheduling()
         self._observer = observer
         self._gate = gate
+        self._ledger = ledger
         self.cadence: timedelta | None = cadence or observer.observation_interval
 
     def run(self, context: JobContext) -> JobOutcome:
         with self._gate.executing(context.lease):
+            reconcile_parked_lookups(self._observer, self._ledger)
             result = self._observer.observe_due(
                 keep_going=lambda: not context.should_abandon()
             )
@@ -196,6 +243,10 @@ class AgentRecoveryAdapter:
         self._boot_swept = True
 
     def _mark_and_record(self) -> None:
+        # First, so a run settled since its lookup was parked and interrupted
+        # again now is not blocked by the old job's dedup key.
+        reconcile_parked_lookups(self._observer, self._ledger)
+
         def record_lookup(owner_id: str, run_id: str) -> None:
             self._ledger.ensure_scheduled(
                 job_type=self.job_type,
@@ -215,4 +266,6 @@ __all__ = [
     "AgentObserverPort",
     "AgentRecoveryAdapter",
     "ObservationResult",
+    "ReconciliationOutcome",
+    "reconcile_parked_lookups",
 ]
