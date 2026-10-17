@@ -60,9 +60,9 @@ alert.
   the action bar: "Make it my next step" (`button-primary-bg` / `-fg`, the accent; the only
   one) and "Not yet" (quiet).
 - **F-03**: toolbar as today ("New step ⌘N", ⌘O). List header "Next actions · 1 step".
-  The next-step card as today with label "Now" (no project). The tip under the card: a
-  `surface-card` box with `control-quiet` border, the tip text (`text-primary`, 14 pt) and
-  a secondary button "Got it" (`button-secondary-bg` / `-fg`).
+  The next-step card as today with label "Now" (no project). The tip under the card is one
+  horizontal stone-quiet row: tip text (`text-primary`, 14 pt) at the leading edge and a plain
+  trailing "Got it" action. It has no separate outlined card or secondary pill button.
 - **F-04**: sidebar brand, then "Lists" (Inbox, Next actions, Waiting for, Someday) and
   "Dates" (Overdue, Today, Upcoming), rows without trailing counts; no Projects, Archived
   projects or Tags sections; footer "On this Mac · Sign in to sync" as today.

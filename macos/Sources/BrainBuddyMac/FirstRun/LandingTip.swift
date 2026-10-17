@@ -20,20 +20,21 @@ struct LandingTip: View {
                 }
                 .buttonStyle(.plain)
             }
-            VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 12) {
                 Text(tip)
                     .carryOnFont(CarryOnTypeScale.body)
                     .foregroundStyle(.coTextPrimary)
                     .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
                 Button(FirstRunCopy.gotIt, action: onDismiss)
-                    .buttonStyle(.carryOnSecondary)
+                    .buttonStyle(.macText)
                     .keyboardShortcut(.defaultAction)
                     .focused($gotItFocused)
             }
-            .padding(16)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(CarryOnColorStyle.coSurfaceCard, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(CarryOnColorStyle.coControlQuiet, lineWidth: 1))
+            .background(CarryOnColorStyle.coControlQuiet, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .task { gotItFocused = true }
         .onAppear { AccessibilityNotification.Announcement(tip).post() }
