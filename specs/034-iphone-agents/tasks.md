@@ -216,7 +216,7 @@ parallel with PR-03 and PR-04.
         "The Agents section, details and Add new agent match M25, M29 and M30 and call the shared editor"
       ],
       "budget": {
-        "product_loc": 830,
+        "product_loc": 840,
         "files": 5
       },
       "oversize_reason": "Four screens (section, details, add, credential sheets) over one shared editor; each is a port of an already-reviewed Mac view and none is usable alone.",
