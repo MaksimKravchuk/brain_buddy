@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import os
+import re
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -229,6 +233,36 @@ class MutationMergeTests(unittest.TestCase):
             with self.subTest(parts=parts), self.assertRaises(ValueError):
                 ci_shards.merge_mutation_manifests(parts, sha="a" * 40)
 
+
+
+class WorkflowEmptyMutationTests(unittest.TestCase):
+    def test_036_FR_003_workflow_empty_assignment_records_complete_zero_evidence(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/ci.yml").read_text()
+        emitters = re.findall(r"python3 -c '([^']+)' \\\n            ([^\n]+/assignment.json) > /tmp/assigned-scope.txt", workflow)
+        zeros = re.findall(r"python3 -c '([^']+)' ([^\n]+/mutation-stats.json)", workflow)
+        self.assertEqual(len(emitters), 2)
+        self.assertEqual(len(zeros), 2)
+        for emitter, zero in zip(emitters, zeros):
+            with self.subTest(), tempfile.TemporaryDirectory() as directory:
+                folder = Path(directory)
+                assignment = folder / "assignment.json"
+                ci_shards._write_json(assignment, {
+                    "sha": "a" * 40, "index": 0, "count": 2,
+                    "requested_scope": ["app/services/version_service.py"], "assigned": [],
+                })
+                emitted = subprocess.check_output([sys.executable, "-c", emitter[0], str(assignment)])
+                self.assertEqual(emitted, b"")
+                stats = folder / "mutation-stats.json"
+                subprocess.run([sys.executable, "-c", zero[0], str(stats)], cwd=root, check=True)
+                self.assertEqual(ci_shards.main([
+                    "mutation-record", "--assignment", str(assignment),
+                    "--meta", str(folder / "absent"), "--stats", str(stats),
+                    "--output", str(folder / "manifest.json"),
+                ]), 0)
+                manifest = json.loads((folder / "manifest.json").read_text())
+                self.assertEqual(manifest["identities"], [])
+                self.assertEqual(manifest["stats"]["total"], 0)
 
 if __name__ == "__main__":
     unittest.main()

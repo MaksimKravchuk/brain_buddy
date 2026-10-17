@@ -1454,10 +1454,10 @@ jobs:
           python3 scripts/ci_shards.py mutation-select --scope /tmp/present-scope.txt \
             --revision "${{ github.event.pull_request.base.sha }}" --index "${{ matrix.shard }}" \
             --output base-stats/assignment.json
-          python3 -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["assigned"]))' \
+          python3 -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["assigned"]), end="")' \
             base-stats/assignment.json > /tmp/assigned-scope.txt
           if [ ! -s /tmp/assigned-scope.txt ]; then
-            echo '{"killed":0,"survived":0}' > base-stats/mutation-stats.json
+            python3 -c 'import json,sys; from scripts.ci_shards import MUTATION_COUNTERS; json.dump(dict.fromkeys(MUTATION_COUNTERS,0),open(sys.argv[1],"w"))' base-stats/mutation-stats.json
             exit 0
           fi
           python3 scripts/mutation_gate.py scope \
@@ -1556,10 +1556,10 @@ jobs:
           python3 scripts/ci_shards.py mutation-select --scope /tmp/present-scope.txt \
             --revision "${BRAIN_BUDDY_CANDIDATE_SHA}" --index "${{ matrix.shard }}" \
             --output backend/mutation-artifacts/assignment.json
-          python3 -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["assigned"]))' \
+          python3 -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["assigned"]), end="")' \
             backend/mutation-artifacts/assignment.json > /tmp/assigned-scope.txt
           if [ ! -s /tmp/assigned-scope.txt ]; then
-            echo '{"killed":0,"survived":0}' > backend/mutation-artifacts/mutation-stats.json
+            python3 -c 'import json,sys; from scripts.ci_shards import MUTATION_COUNTERS; json.dump(dict.fromkeys(MUTATION_COUNTERS,0),open(sys.argv[1],"w"))' backend/mutation-artifacts/mutation-stats.json
             exit 0
           fi
           python3 scripts/mutation_gate.py scope \
