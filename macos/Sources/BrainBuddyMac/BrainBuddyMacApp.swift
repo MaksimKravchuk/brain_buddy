@@ -48,11 +48,11 @@ struct BrainBuddyMacApp: App {
             ContentView(launch: launch)
                 .tint(CarryOnColorStyle.coTextPrimary)
                 .environment(\.carryOnPlatform, .mac)
-                .frame(minWidth: 720, minHeight: 480)
+                .frame(minWidth: MacWindowGeometry.minimumWidth, minHeight: 480)
         }
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unified(showsTitle: false))
-        .defaultSize(width: 960, height: 640)
+        .defaultSize(width: 1280, height: 800)
         .windowResizability(.contentMinSize)
         .commands {
             SyncMenuCommands(launch: launch)

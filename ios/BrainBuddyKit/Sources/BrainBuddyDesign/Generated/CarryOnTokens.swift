@@ -255,6 +255,8 @@ public enum CarryOnLayout {
     public enum MacWindow {
         public static let sidebarColumnWidth: Double = 240
         public static let sidebarRowHeight: Double = 29
+        public static let sidebarOuterInset: Double = 8
+        public static let canvasMinimumWidth: Double = 560
     }
 }
 
@@ -515,6 +517,8 @@ public enum CarryOnTokenTable {
         "layout.mac-sidebar-row.height": CarryOnLayout.MacSidebarRow.height,
         "layout.mac-window.sidebar-column-width": CarryOnLayout.MacWindow.sidebarColumnWidth,
         "layout.mac-window.sidebar-row-height": CarryOnLayout.MacWindow.sidebarRowHeight,
+        "layout.mac-window.sidebar-outer-inset": CarryOnLayout.MacWindow.sidebarOuterInset,
+        "layout.mac-window.canvas-minimum-width": CarryOnLayout.MacWindow.canvasMinimumWidth,
     ]
     public static let strings: [String: String] = [
         "font.voice.family": CarryOnFontFace.voice.family,

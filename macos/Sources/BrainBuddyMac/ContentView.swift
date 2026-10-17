@@ -295,14 +295,19 @@ struct WorkspaceView: View {
                     min: CarryOnLayout.MacWindow.sidebarColumnWidth,
                     ideal: CarryOnLayout.MacWindow.sidebarColumnWidth, max: 400)
         } detail: {
-            detailCanvas
-                .inspector(isPresented: inspectorPresented) {
+            HStack(spacing: 0) {
+                detailCanvas
+                    .frame(minWidth: MacWindowGeometry.canvasMinimumWidth, maxWidth: .infinity)
+                if inspectorPresented.wrappedValue {
                     inspectorContent
-                        .inspectorColumnWidth(min: inspectorWidth, ideal: inspectorWidth, max: inspectorWidth)
+                        .frame(width: inspectorWidth)
+                        .accessibilityElement(children: .contain)
+                        .accessibilityIdentifier("workspace-inspector")
+                        .onExitCommand { inspectorPresented.wrappedValue = false }
                 }
-                // Keep the inspector safe area from being counted twice in the split minimum.
-                .frame(minWidth: 0, maxWidth: .infinity)
-                .navigationSplitViewColumnWidth(min: 560, ideal: 560, max: .infinity)
+            }
+            .navigationSplitViewColumnWidth(min: detailMinimumWidth,
+                ideal: detailMinimumWidth, max: .infinity)
         }
         .toolbar { toolbarContent }
         .toolbar(removing: .title)
@@ -415,6 +420,12 @@ struct WorkspaceView: View {
                 MacWindowToolbarButton(command: .quickOpen) { quickOpenPresented = true }
             }
             .sharedBackgroundVisibility(.hidden)
+            if inspectorPresented.wrappedValue {
+                ToolbarItem(placement: .primaryAction) {
+                    Color.clear.frame(width: inspectorWidth, height: 1).accessibilityHidden(true)
+                }
+                .sharedBackgroundVisibility(.hidden)
+            }
         }
     }
 
@@ -1243,7 +1254,7 @@ struct WorkspaceView: View {
                 errorText: model.error, onSubmit: submitFirstCapture, onSkip: { firstRun.skip() },
                 onMic: { voicePresented = true }
             )
-            .frame(minWidth: 560, minHeight: 480)
+            .frame(minWidth: MacWindowGeometry.canvasMinimumWidth, minHeight: 480)
             .background(.coBgGround)
         } else {
             routedCanvas
@@ -1344,7 +1355,7 @@ struct WorkspaceView: View {
                 .padding(.vertical, 8)
             }
         }
-        .frame(minWidth: 560, minHeight: 480)
+        .frame(minWidth: MacWindowGeometry.canvasMinimumWidth, minHeight: 480)
         .background(.coBgGround)
         .onChange(of: orders, initial: true) { _, new in shownOrders = new }
         .onChange(of: onScreen) { _, ids in keepSelection(in: ids) }
@@ -1367,6 +1378,10 @@ struct WorkspaceView: View {
             get: { selectedTaskID != nil },
             set: { shown in if !shown { requestNavigation(.task(nil)) } }
         )
+    }
+
+    private var detailMinimumWidth: CGFloat {
+        MacWindowGeometry.canvasMinimumWidth + (inspectorPresented.wrappedValue ? inspectorWidth : 0)
     }
 
     private var inspectorWidth: CGFloat {

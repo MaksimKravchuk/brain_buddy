@@ -32,10 +32,11 @@ struct WindowChromeSnapshotTests {
         await sidebar(firstRun: false, hasTags: true, appearance: appearance)
     }
 
-    @Test("Native main-window columns fit the initial and board viewports", arguments: [960.0, 1280.0])
-    func nativeWindowLayout(width: Double) async throws {
+    @Test("021-FR-009 native panes fit the minimum and board viewports", arguments: [false, true])
+    func nativeWindowLayout(boardViewport: Bool) async throws {
+        let width = boardViewport ? 1280.0 : MacWindowGeometry.minimumWidth
         _ = NSApplication.shared
-        let height = width == 960 ? 640.0 : 800.0
+        let height = 800.0
         let folder = TemporaryFolder()
         let host = WorkspaceHost(configuration: MacHostConfiguration(directory: folder.url, isDryRun: true), tokenStore: SpyTokenStore())
         await host.workspace.load()
@@ -43,7 +44,8 @@ struct WindowChromeSnapshotTests {
         model.decideFirstRun()
         await model.prepareVisibleQueries()
         let content = NSHostingView(rootView: WorkspaceView(model: model, sync: MacSyncController(host: host))
-            .frame(minWidth: 720, minHeight: 480))
+            .frame(minWidth: MacWindowGeometry.minimumWidth, minHeight: 480))
+        content.sceneBridgingOptions = .all
         let window = NSWindow(contentRect: NSRect(x: -10_000, y: -10_000, width: width, height: height),
                               styleMask: [.titled, .closable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -51,15 +53,13 @@ struct WindowChromeSnapshotTests {
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.toolbarStyle = .unified
-        let toolbar = NSToolbar(identifier: "NativeChromeRegression")
-        toolbar.insertItem(withItemIdentifier: .flexibleSpace, at: 0)
-        window.toolbar = toolbar
         window.contentView = content
         window.setFrame(NSRect(x: -10_000, y: -10_000, width: width, height: height), display: false)
         try await Task.sleep(for: .milliseconds(100))
         content.layoutSubtreeIfNeeded()
         func firstSplit(in view: NSView) -> NSSplitView? {
-            if let split = view as? NSSplitView { return split }
+            if let split = view as? NSSplitView, let controller = split.delegate as? NSSplitViewController,
+               controller.splitViewItems.contains(where: { $0.behavior == .sidebar }) { return split }
             return view.subviews.lazy.compactMap { firstSplit(in: $0) }.first
         }
         let split = try #require(firstSplit(in: content))
@@ -74,7 +74,57 @@ struct WindowChromeSnapshotTests {
         #expect(sidebar.maximumThickness == 400)
         #expect(abs(sidebar.viewController.view.frame.width - CarryOnLayout.MacWindow.sidebarColumnWidth) < 0.5)
         let detail = try #require(controller.splitViewItems.first { $0.behavior == .default })
-        #expect(detail.minimumThickness >= 560)
+        #expect(detail.minimumThickness >= MacWindowGeometry.canvasMinimumWidth)
+        #expect(window.contentMinSize.width >= MacWindowGeometry.minimumWidth)
+        #expect(window.minSize.width >= MacWindowGeometry.minimumWidth)
+
+        #expect(await model.firstRun.capture("Inspector width fixture", using: model))
+        guard case .firstStep(let id) = model.firstRun.phase else { Issue.record("First capture did not open the first step"); return }
+        try await assertInspectorFits(content: content, window: window, expectedWidth: 380)
+        split.setPosition(400, ofDividerAt: 0)
+        try await assertInspectorFits(content: content, window: window, expectedWidth: 380)
+        #expect(sidebar.viewController.view.frame.width + CarryOnLayout.MacWindow.sidebarOuterInset
+            + MacWindowGeometry.canvasMinimumWidth + 380 <= width + 0.5)
+        model.firstRun.notYet()
+        #expect(await model.moveTask(id, to: .next))
+        model.choose(.list(.next))
+        try await assertInspectorFits(content: content, window: window, expectedWidth: 340)
+        split.setPosition(400, ofDividerAt: 0)
+        try await assertInspectorFits(content: content, window: window, expectedWidth: 340)
+        #expect(sidebar.viewController.view.frame.width + CarryOnLayout.MacWindow.sidebarOuterInset
+            + MacWindowGeometry.canvasMinimumWidth + 340 <= width + 0.5)
+        #expect(model.task(id)?.title == "Inspector width fixture")
+    }
+
+    private func assertInspectorFits(content: NSView, window: NSWindow, expectedWidth: CGFloat) async throws {
+        try await Task.sleep(for: .seconds(1))
+        content.superview?.layoutSubtreeIfNeeded()
+        func fields(in view: NSView) -> [NSTextField] {
+            (view as? NSTextField).map { [$0] } ?? view.subviews.flatMap { fields(in: $0) }
+        }
+        let inspectorLeading = content.bounds.maxX - expectedWidth
+        let inspectorFields = fields(in: content).filter {
+            $0.isEditable && $0.convert($0.bounds, to: content).midX > inspectorLeading
+        }
+        #expect(!inspectorFields.isEmpty)
+        for field in fields(in: content) {
+            let bounds = field.convert(field.bounds, to: content)
+            #expect(bounds.minX >= 0)
+            #expect(bounds.maxX <= content.bounds.maxX + 0.5)
+        }
+        for field in inspectorFields {
+            let bounds = field.convert(field.bounds, to: content)
+            #expect(bounds.minX >= inspectorLeading)
+            #expect(bounds.maxX <= content.bounds.maxX + 0.5)
+        }
+        let toolbar = try #require(window.toolbar)
+        #expect(toolbar.items.count == 5)
+        var actions = NSRect.null
+        for item in toolbar.items.dropLast() where item.itemIdentifier != .flexibleSpace {
+            if let view = item.view { actions = actions.union(view.convert(view.bounds, to: content)) }
+        }
+        #expect(!actions.isNull)
+        #expect(actions.maxX <= inspectorLeading + 0.5)
     }
 
     private func sidebar(firstRun: Bool, hasTags: Bool = false, appearance: Appearance) async {

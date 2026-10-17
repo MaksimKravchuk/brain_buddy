@@ -7,6 +7,17 @@ import SwiftUI
 // The Mac window's chrome in the Carry On design system (board "07 Inbox · Mac"): the brand
 // mark, the sidebar's section headers and rows, and the list header. Presentation only.
 
+/// Keep every pane usable when an inspector opens, including the native sidebar's outer inset.
+@MainActor
+enum MacWindowGeometry {
+    static let canvasMinimumWidth: CGFloat = CarryOnLayout.MacWindow.canvasMinimumWidth
+    static let sidebarOuterInset: CGFloat = CarryOnLayout.MacWindow.sidebarOuterInset
+    static var minimumWidth: CGFloat {
+        CarryOnLayout.MacWindow.sidebarColumnWidth + sidebarOuterInset
+            + canvasMinimumWidth + TaskInspector.width(for: .inbox)
+    }
+}
+
 /// Instrument faces at the board's own sizes, which differ from the type scale in places.
 private enum MacChromeFont {
     static func action(size: CGFloat, weight: Int, relativeTo style: Font.TextStyle) -> Font {
