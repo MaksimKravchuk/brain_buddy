@@ -42,8 +42,10 @@ case "$PLATFORM" in
     ;;
 esac
 
+# The generator builds with `release`; the library that ships with `bridge` (rust/Cargo.toml),
+# which trades peak speed for a smaller app.
 cargo_build() {
-  cargo build --locked --release --manifest-path "$RUST/Cargo.toml" -p bb-swift "$@"
+  cargo build --locked --manifest-path "$RUST/Cargo.toml" -p bb-swift "$@"
 }
 
 WORK="$(mktemp -d)"
@@ -51,12 +53,12 @@ trap 'rm -rf "$WORK"' EXIT INT TERM
 
 # 1. The generator first (its feature set differs from the shipped library's), then
 #    the library for each platform, so the library that ships is built last and plain.
-cargo_build --features bindgen --bin uniffi-bindgen
+cargo_build --release --features bindgen --bin uniffi-bindgen
 BINDGEN="$TARGET_DIR/release/uniffi-bindgen"
 
 if [ "$PLATFORM" = linux ]; then
-  cargo_build
-  LIBS="$TARGET_DIR/release/libbb_swift.a"
+  cargo_build --profile bridge
+  LIBS="$TARGET_DIR/bridge/libbb_swift.a"
 else
   export IPHONEOS_DEPLOYMENT_TARGET=26.0
   export MACOSX_DEPLOYMENT_TARGET=26.0
@@ -66,8 +68,8 @@ else
     if command -v rustup >/dev/null 2>&1; then
       (cd "$RUST" && rustup target add "$target")
     fi
-    cargo_build --target "$target"
-    LIBS="$LIBS $TARGET_DIR/$target/release/libbb_swift.a"
+    cargo_build --profile bridge --target "$target"
+    LIBS="$LIBS $TARGET_DIR/$target/bridge/libbb_swift.a"
   done
   # One library per XCFramework platform variant: `-create-xcframework` accepts exactly
   # one, so the variants that need two architectures are joined into a universal library.
@@ -78,7 +80,7 @@ else
       case "$variant:$target" in
         ios:aarch64-apple-ios | sim:aarch64-apple-ios-sim | sim:x86_64-apple-ios | \
           macos:aarch64-apple-darwin | macos:x86_64-apple-darwin)
-          parts="$parts $TARGET_DIR/$target/release/libbb_swift.a"
+          parts="$parts $TARGET_DIR/$target/bridge/libbb_swift.a"
           ;;
       esac
     done
