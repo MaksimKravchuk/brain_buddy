@@ -235,6 +235,28 @@ class MutationMergeTests(unittest.TestCase):
 
 
 
+
+class MutmutExitStatusTests(unittest.TestCase):
+    def test_036_FR_003_records_all_exported_mutmut_statuses_and_rejects_incomplete_work(self) -> None:
+        # The statuses come from the installed mutmut 3.8.0 stats mapping.
+        supported = {1: "killed", 3: "killed", 0: "survived", 5: "no_tests", 33: "no_tests", 34: "skipped", 35: "suspicious", 36: "timeout", -24: "timeout", 24: "timeout", 152: "timeout", 255: "timeout", -11: "segfault", -9: "segfault", 99: "suspicious"}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            meta = root / "app/services/tree_service.py.meta"
+            meta.parent.mkdir(parents=True)
+            for code, expected in supported.items():
+                with self.subTest(code=code):
+                    meta.write_text(json.dumps({"exit_code_by_key": {"app.services.tree_service.x1": code}}))
+                    identities, counters, _ = ci_shards._meta_identities(root, ["app/services/tree_service.py"])
+                    self.assertEqual(identities, ["app.services.tree_service.x1"])
+                    self.assertEqual(counters, {expected: 1})
+            for code in (None, 2, 37, True):
+                with self.subTest(incomplete_or_unexported=code), self.assertRaises(ValueError):
+                    meta.write_text(json.dumps({"exit_code_by_key": {"app.services.tree_service.x1": code}}))
+                    ci_shards._meta_identities(root, ["app/services/tree_service.py"])
+
+
+
 class WorkflowEmptyMutationTests(unittest.TestCase):
     def test_036_FR_003_workflow_empty_assignment_records_complete_zero_evidence(self) -> None:
         root = Path(__file__).resolve().parents[1]

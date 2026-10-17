@@ -509,13 +509,23 @@ def _meta_identities(mutants_dir: Path, assigned: list[str]) -> tuple[list[str],
             raise ValueError("mutmut per-file metadata lacks exit_code_by_key")
         by_file[source] = []
         for identity, code in exit_codes.items():
-            if not isinstance(identity, str) or not isinstance(code, int):
+            if not isinstance(identity, str) or isinstance(code, bool) or not isinstance(code, int):
                 raise ValueError("mutmut per-file identity or exit code is corrupt")
             identities.append(identity)
             by_file[source].append(identity)
-            category = {1: "killed", 0: "survived", -24: "timeout", -11: "segfault", 5: "no_tests"}.get(code)
-            if category is None:
-                raise ValueError("mutmut per-file metadata has an unsupported exit status")
+            # mutmut 3.8.0 stats.status_by_exit_code, restricted to its CI/CD
+            # export categories. Unknown integer statuses are suspicious there.
+            if code == 2:
+                raise ValueError("mutation campaign was interrupted")
+            if code == 37:
+                # The existing CI export omits caught_by_type_check, while
+                # including it in total. Type-check prefilters remain out of scope.
+                raise ValueError("mutation type-check status is absent from exported counters")
+            category = {
+                1: "killed", 3: "killed", 0: "survived", 5: "no_tests", 33: "no_tests",
+                34: "skipped", 35: "suspicious", 36: "timeout", -24: "timeout",
+                24: "timeout", 152: "timeout", 255: "timeout", -11: "segfault", -9: "segfault",
+            }.get(code, "suspicious")
             module = source.removesuffix(".py").replace("/", ".") + "."
             if not identity.startswith(module):
                 raise ValueError("mutmut identity does not belong to its assigned source file")
