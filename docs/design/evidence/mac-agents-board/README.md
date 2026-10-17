@@ -1,7 +1,7 @@
 # M29 Agents manager board parity
 
-Accepted outcome: match the manager content to `docs/design/board/mac/M29-Mac.png`
-(board 1792165683-83f3, source PR #521), preserving existing actions and restrictions.
+Accepted outcome: match the manager content to [M29-Mac.png](https://github.com/maxk-lab/brain_buddy/blob/c0e6e638c28695ad19905f4bf5b018a990c7fb85/docs/design/board/mac/M29-Mac.png)
+(board 1792165683-83f3, pinned source PR #521), preserving existing actions and restrictions.
 The owner confirmed that PNG appearance takes precedence over the older textual
 layout description. Settings window and tab chrome are a separate finding.
 
