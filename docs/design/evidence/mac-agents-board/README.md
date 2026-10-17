@@ -27,3 +27,9 @@ same-owner reauthentication path did not refresh agent availability in this scra
 profile; a full sign-out/sign-in restored it. This layout change does not address
 that behavior. This record does not accept the remaining board screens or claim
 production verification.
+
+CI run `39022149434` exercised all 458 Mac tests; its only four issues were the
+initially missing `native1x-12h` manager baselines. These four images were decoded
+unchanged from that run's snapshot output, visually reviewed, and committed beside
+the local `native2x-24h` images. A new exact-head CI run must verify them; this
+record does not turn that failed first run into a pass.
