@@ -68,7 +68,7 @@ class BackendPartitionTests(unittest.TestCase):
             self.assertEqual((Path(directory) / "pytest-args.txt").read_bytes(), b"")
 
     def test_036_FR_001_rejects_empty_collection_but_allows_empty_assignment(self) -> None:
-        """SC-001: the complete selection is nonempty; an assigned part may be empty."""
+        """036-SC-001: the complete selection is nonempty; an assigned part may be empty."""
         with self.assertRaises(ValueError):
             ci_shards.partition_nodeids([], {}, count=2)
         parts = ci_shards.partition_nodeids(["only::test"], {}, count=2)
@@ -185,6 +185,7 @@ class MutationMergeTests(unittest.TestCase):
         }
 
     def test_036_FR_003_merges_disjoint_scope_and_sums_raw_counters(self) -> None:
+        """036-SC-002: preserve every mutant and judge the combined raw counts."""
         """SC-002: aggregate raw counters produce a weighted checked total."""
         parts = [
             self._part(0, ["app/services/tree_service.py"], ["app.services.tree_service.x1"]),

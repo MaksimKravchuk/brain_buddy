@@ -23,6 +23,210 @@ class ValidateCiArtifactsTests(unittest.TestCase):
             check=False,
         )
 
+    def replace_ci_job(self, workflow: str, job: str, transform) -> str:
+        pattern = re.compile(
+            rf"^  {re.escape(job)}:\n(?P<body>.*?)(?=^  [a-z0-9-]+:$|\Z)",
+            re.MULTILINE | re.DOTALL,
+        )
+        match = pattern.search(workflow)
+        if match is None:
+            self.fail(f"fixture has no {job} job")
+        return workflow[: match.start("body")] + transform(match.group("body")) + workflow[match.end("body") :]
+
+    def assert_ci_workflow_rejected(self, workflow: str, expected: str) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "ci.yml"
+            path.write_text(workflow, encoding="utf-8")
+            completed = self.run_validator("workflow", "--ci", str(path))
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(expected, completed.stderr)
+
+    def test_parallel_ci_validator_rejects_missing_failure_resilient_aggregators(self) -> None:
+        workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        without_backend_always = self.replace_ci_job(
+            workflow, "backend-results", lambda body: body.replace("    if: always()\n", "", 1)
+        )
+        self.assert_ci_workflow_rejected(
+            without_backend_always, "backend-results aggregation job must use job-level if: always()"
+        )
+        without_mutation_always = self.replace_ci_job(
+            workflow, "mutation-gate", lambda body: body.replace("    if: always()\n", "", 1)
+        )
+        self.assert_ci_workflow_rejected(
+            without_mutation_always, "mutation-gate aggregation job must use job-level if: always()"
+        )
+
+    def test_parallel_ci_validator_rejects_dropped_native_test_job(self) -> None:
+        """036-FR-004: both native build and full package tests remain required."""
+        workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        without_ios_tests = re.sub(
+            r"^  ios-tests:\n.*?(?=^  [a-z0-9-]+:$|\Z)",
+            "",
+            workflow,
+            count=1,
+            flags=re.MULTILINE | re.DOTALL,
+        )
+        self.assert_ci_workflow_rejected(without_ios_tests, "missing ios-tests job")
+
+    def test_parallel_ci_validator_rejects_per_shard_coverage_floor(self) -> None:
+        workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        without_deferred_floor = self.replace_ci_job(
+            workflow, "backend", lambda body: body.replace("--cov-fail-under=0", "", 1)
+        )
+        self.assert_ci_workflow_rejected(
+            without_deferred_floor, "backend shards must defer the coverage floor"
+        )
+
+    def test_parallel_ci_validator_rejects_missing_combined_coverage_floor(self) -> None:
+        """036-FR-002: defer the existing coverage floor until complete aggregation."""
+        workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        without_combined_floor = self.replace_ci_job(
+            workflow,
+            "backend-results",
+            lambda body: body.replace("validate_coverage_floor.py --stack backend", "", 1),
+        )
+        self.assert_ci_workflow_rejected(
+            without_combined_floor, "backend-results must enforce the combined backend coverage floor"
+        )
+
+    def test_parallel_ci_validator_rejects_skipped_diagnostic_upload(self) -> None:
+        workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        without_upload_always = self.replace_ci_job(
+            workflow,
+            "backend-results",
+            lambda body: body.replace(
+                "if: always() && env.RUN == 'true'\n        uses: actions/upload-artifact@v7\n        with:\n          name: backend-allure-results",
+                "if: env.RUN == 'true'\n        uses: actions/upload-artifact@v7\n        with:\n          name: backend-allure-results",
+                1,
+            ),
+        )
+        self.assert_ci_workflow_rejected(
+            without_upload_always, "backend-results must always upload canonical backend Allure diagnostics"
+        )
+
+    def test_parallel_ci_validator_rejects_removed_aggregate_mutation_score(self) -> None:
+        workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        without_score = self.replace_ci_job(
+            workflow, "mutation-gate", lambda body: body.replace("mutation_gate.py check", "mutation_gate.py skip", 1)
+        )
+        self.assert_ci_workflow_rejected(
+            without_score, "mutation-gate must run the existing aggregate score and base comparison"
+        )
+
+    def test_parallel_ci_validator_requires_two_fail_independent_shards(self) -> None:
+        workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        without_matrix_safety = self.replace_ci_job(
+            workflow,
+            "mutation-head",
+            lambda body: body.replace("fail-fast: false", "fail-fast: true", 1),
+        )
+        self.assert_ci_workflow_rejected(
+            without_matrix_safety, "mutation-head matrix must set fail-fast: false"
+        )
+        without_two_shards = self.replace_ci_job(
+            workflow,
+            "backend",
+            lambda body: body.replace("shard: [0, 1]", "shard: [0]", 1),
+        )
+        self.assert_ci_workflow_rejected(
+            without_two_shards, "backend matrix must include exactly shards [0, 1]"
+        )
+
+    def test_parallel_ci_validator_requires_backend_collection_and_always_upload(self) -> None:
+        workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        without_collector = self.replace_ci_job(
+            workflow,
+            "backend",
+            lambda body: body.replace("pytest -p scripts.ci_shards --collect-only", "pytest --collect-only", 1),
+        )
+        self.assert_ci_workflow_rejected(
+            without_collector, "backend shards must collect assignments with the scripts.ci_shards plugin"
+        )
+        without_upload_always = self.replace_ci_job(
+            workflow,
+            "backend",
+            lambda body: body.replace(
+                "if: always() && env.RUN == 'true'\n        uses: actions/upload-artifact@v7\n        with:\n          name: backend-shard-",
+                "if: env.RUN == 'true'\n        uses: actions/upload-artifact@v7\n        with:\n          name: backend-shard-",
+                1,
+            ),
+        )
+        self.assert_ci_workflow_rejected(
+            without_upload_always, "backend shards must always upload shard evidence"
+        )
+
+    def test_parallel_ci_validator_requires_helper_tests_in_workflow_lint(self) -> None:
+        workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        without_helper_tests = self.replace_ci_job(
+            workflow,
+            "workflow-lint",
+            lambda body: body.replace("python3 -m unittest scripts/test_ci_shards.py -v\n", "", 1),
+        )
+        self.assert_ci_workflow_rejected(
+            without_helper_tests, "workflow-lint must run the ci_shards contract tests"
+        )
+
+    def test_parallel_ci_validator_requires_always_run_diagnostic_downloads(self) -> None:
+        workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        without_backend_download = self.replace_ci_job(
+            workflow,
+            "backend-results",
+            lambda body: body.replace(
+                "if: always() && env.RUN == 'true'\n        uses: actions/download-artifact@v8.0.2\n        with:\n          pattern: backend-shard-*",
+                "if: env.RUN == 'true'\n        uses: actions/download-artifact@v8.0.2\n        with:\n          pattern: backend-shard-*",
+                1,
+            ),
+        )
+        self.assert_ci_workflow_rejected(
+            without_backend_download, "backend-results must always download available shard diagnostics"
+        )
+        without_mutation_download = self.replace_ci_job(
+            workflow,
+            "mutation-gate",
+            lambda body: body.replace(
+                "if: always() && env.RUN == 'true'\n        uses: actions/download-artifact@v8.0.2\n        with:\n          pattern: mutation-head-shard-*",
+                "if: env.RUN == 'true'\n        uses: actions/download-artifact@v8.0.2\n        with:\n          pattern: mutation-head-shard-*",
+                1,
+            ),
+        )
+        self.assert_ci_workflow_rejected(
+            without_mutation_download, "mutation-gate must always download available head diagnostics"
+        )
+
+    def test_parallel_ci_validator_requires_backend_and_mutation_merge_helpers(self) -> None:
+        workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        without_backend_merge = self.replace_ci_job(
+            workflow,
+            "backend-results",
+            lambda body: body.replace("ci_shards.py backend-merge", "ci_shards.py backend-version", 1),
+        )
+        self.assert_ci_workflow_rejected(
+            without_backend_merge, "backend-results must combine shards with the ci_shards merge helper"
+        )
+        without_mutation_select = self.replace_ci_job(
+            workflow,
+            "mutation-base",
+            lambda body: body.replace("ci_shards.py mutation-select", "ci_shards.py mutation-list", 1),
+        )
+        self.assert_ci_workflow_rejected(
+            without_mutation_select, "mutation-base must select and record its mutation shard assignment"
+        )
+
+    def test_parallel_ci_validator_requires_identical_ios_bridge_cache_identity(self) -> None:
+        workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        mismatched_paths = self.replace_ci_job(
+            workflow,
+            "ios-tests",
+            lambda body: body.replace(
+                "ios/BrainBuddyKit/Sources/BrainBuddyRustBindings/BrainBuddyRustBindings.swift",
+                "ios/BrainBuddyKit/Sources/BrainBuddyRustBindings/Changed.swift",
+                1,
+            ),
+        )
+        self.assert_ci_workflow_rejected(
+            mismatched_paths, "ios-app and ios-tests must use identical Apple bridge cache key and paths"
+        )
+
     def write_native_product_result(
         self,
         results_dir: Path,
@@ -944,6 +1148,10 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
+  workflow-lint:
+    name: Workflow lint
+    steps:
+      - run: python3 -m unittest scripts/test_ci_shards.py -v
   changes:
     name: Changed stacks
     outputs:
@@ -958,12 +1166,51 @@ jobs:
           printf '%s\\n' "${changed}" | grep -Eq '^(macos|ios/BrainBuddyKit|ios/scripts|rust)/' || macos=false
           echo "macos=${macos}" >> "$GITHUB_OUTPUT"
   backend:
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
+    needs: changes
+    runs-on: ubuntu-latest
     env:
       RUN: ${{ needs.changes.outputs.backend }}
     steps:
       - name: Ruff lint
         if: env.RUN == 'true'
         run: ruff check app tests
+      - name: Run assigned shard with deferred coverage floor
+        if: env.RUN == 'true'
+        run: pytest --cov-fail-under=0
+      - name: Collect backend assignments
+        if: env.RUN == 'true'
+        run: pytest -p scripts.ci_shards --collect-only
+      - name: Upload backend shard evidence
+        if: always() && env.RUN == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-shard-${{ matrix.shard }}
+  backend-results:
+    needs:
+      - changes
+      - backend
+    if: always()
+    steps:
+      - name: Download available backend diagnostics
+        if: always() && env.RUN == 'true'
+        uses: actions/download-artifact@v8.0.2
+        with:
+          pattern: backend-shard-*
+      - name: Combine backend shards
+        if: always() && env.RUN == 'true'
+        run: python3 scripts/ci_shards.py backend-merge
+      - name: Enforce combined coverage floor
+        run: python3 scripts/validate_coverage_floor.py --stack backend
+      - name: Upload backend Allure results
+        if: always() && env.RUN == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-allure-results
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
   ios-kit:
     needs: changes
     env:
@@ -973,13 +1220,71 @@ jobs:
         if: env.RUN == 'true'
         run: swift test --parallel
   ios-app:
+    runs-on: ${{ needs.changes.outputs.ios == 'true' && 'macos-26' || 'ubuntu-latest' }}
     needs: changes
     env:
       RUN: ${{ needs.changes.outputs.ios }}
     steps:
+      - name: Select the newest Xcode 26
+        if: env.RUN == 'true'
+        run: bash ios/scripts/select-xcode.sh
+      - name: Install pinned Rust
+        if: env.RUN == 'true'
+        uses: dtolnay/rust-toolchain@abc
+        with:
+          toolchain: 1.99.0
+      - name: Key the Rust bridge
+        id: bridge-key
+        if: env.RUN == 'true'
+        run: echo "same bridge key"
+      - name: Restore the Rust bridge
+        id: bridge-cache
+        if: env.RUN == 'true'
+        uses: actions/cache@v6
+        with:
+          key: ${{ steps.bridge-key.outputs.key }}
+          path: |
+            ios/BrainBuddyKit/Artifacts/Bridge.xcframework
+            ios/BrainBuddyKit/Sources/Bindings.swift
       - name: Build app and widgets for the iOS Simulator
         if: env.RUN == 'true'
         run: xcodebuild build
+  ios-tests:
+    runs-on: ${{ needs.changes.outputs.ios == 'true' && 'macos-26' || 'ubuntu-latest' }}
+    needs: changes
+    env:
+      RUN: ${{ needs.changes.outputs.ios }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact candidate checkout
+        run: test "$(git rev-parse HEAD)" = "$BRAIN_BUDDY_CANDIDATE_SHA"
+      - name: Select the newest Xcode 26
+        if: env.RUN == 'true'
+        run: bash ios/scripts/select-xcode.sh
+      - name: Install pinned Rust
+        if: env.RUN == 'true'
+        uses: dtolnay/rust-toolchain@abc
+        with:
+          toolchain: 1.99.0
+      - name: Key the Rust bridge
+        id: bridge-key
+        if: env.RUN == 'true'
+        run: echo "same bridge key"
+      - name: Restore the Rust bridge
+        id: bridge-cache
+        if: env.RUN == 'true'
+        uses: actions/cache@v6
+        with:
+          key: ${{ steps.bridge-key.outputs.key }}
+          path: |
+            ios/BrainBuddyKit/Artifacts/Bridge.xcframework
+            ios/BrainBuddyKit/Sources/Bindings.swift
+      - name: Test package on macOS
+        if: env.RUN == 'true'
+        run: swift test --parallel
   rust:
     needs: changes
     env:
@@ -1024,6 +1329,10 @@ jobs:
         run: python3 scripts/build_cli_release.py aggregate
   mutation-base:
     name: Backend mutation base measurement
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
     env:
       RUN: ${{ needs.changes.outputs.mutation }}
     steps:
@@ -1038,8 +1347,20 @@ jobs:
           python3 scripts/mutation_gate.py scope \
             --enforced backend/mutation-enforced-scope.txt \
             --changed /tmp/base-scope.txt --apply-to base/backend/pyproject.toml
+          python3 scripts/ci_shards.py mutation-select
+          python3 scripts/ci_shards.py mutation-record
+      - name: Upload mutation shard evidence
+        if: always() && env.RUN == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutation-base-shard-${{ matrix.shard }}
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
   mutation-head:
     name: Backend mutation head measurement
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
     env:
       RUN: ${{ needs.changes.outputs.mutation }}
     steps:
@@ -1049,6 +1370,14 @@ jobs:
           python3 scripts/mutation_gate.py scope \
             --enforced backend/mutation-enforced-scope.txt \
             --changed /tmp/head-scope.txt --apply-to backend/pyproject.toml
+          python3 scripts/ci_shards.py mutation-select
+          python3 scripts/ci_shards.py mutation-record
+      - name: Upload mutation shard evidence
+        if: always() && env.RUN == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutation-head-shard-${{ matrix.shard }}
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
       - name: Create blocking-gate Allure evidence
         if: always() && env.RUN == 'true'
         run: |
@@ -1061,21 +1390,45 @@ jobs:
           path: e
   mutation-gate:
     name: Backend mutation gate
+    if: always()
     env:
       RUN: ${{ needs.changes.outputs.mutation }}
     steps:
+      - name: Download available head measurements
+        if: always() && env.RUN == 'true'
+        uses: actions/download-artifact@v8.0.2
+        with:
+          pattern: mutation-head-shard-*
+      - name: Download available base measurements
+        if: always() && env.RUN == 'true'
+        uses: actions/download-artifact@v8.0.2
+        with:
+          pattern: mutation-base-shard-*
+      - name: Combine mutation measurements
+        if: always() && env.RUN == 'true'
+        run: python3 scripts/ci_shards.py mutation-merge
       - name: Enforce the mutation gate
         if: env.RUN == 'true'
         run: |
           python3 scripts/mutation_gate.py check --stats stats.json --base-stats base.json
+      - name: Upload blocking-gate Allure evidence
+        if: always() && env.RUN == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutation-gate-allure-results
+          path: e
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
   full-ci:
     needs:
       - changes
+      - workflow-lint
       - cli-native
       - cli-artifacts
       - backend
+      - backend-results
       - ios-kit
       - ios-app
+      - ios-tests
       - macos-app
       - rust
       - frontend
@@ -1136,11 +1489,14 @@ jobs:
     name: Allure Report
     needs:
       - changes
+      - workflow-lint
       - cli-native
       - cli-artifacts
       - backend
+      - backend-results
       - ios-kit
       - ios-app
+      - ios-tests
       - macos-app
       - rust
       - frontend
@@ -1779,20 +2135,14 @@ jobs:
         conformant = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8"
         )
-        head_job = (
-            "  mutation-head:\n"
-            "    name: Backend mutation head measurement\n"
-            "    runs-on: ubuntu-latest\n"
-            "    timeout-minutes: 90\n"
-            "    needs: changes\n"
-        )
-        serialised = conformant.replace(
-            head_job,
-            head_job.replace(
+        serialised = self.replace_ci_job(
+            conformant,
+            "mutation-head",
+            lambda body: body.replace(
                 "    needs: changes\n",
                 "    needs:\n      - changes\n      - mutation-base\n",
+                1,
             ),
-            1,
         )
         self.assertNotEqual(serialised, conformant, "fixture edit did not apply")
 
@@ -1881,6 +2231,7 @@ jobs:
         self.assertEqual(completed.returncode, 0, completed.stderr)
 
     def test_workflow_rejects_a_report_that_can_outrun_a_job(self) -> None:
+        """036-SC-003 structural prerequisite: timing must include the closing report; actual speedup requires live queue evidence."""
         # The report publishes the run's closing link. mutation-head runs up to
         # 90 minutes, so dropping it here would let the link be posted while the
         # mutation gate is still deciding.
@@ -2090,6 +2441,7 @@ class MacosAppLaneTests(unittest.TestCase):
     )
 
     def test_a_macos_lane_without_candidate_verification_is_rejected(self) -> None:
+        """036-FR-006 checkout prerequisite: the required native lane verifies candidate SHA; delivery identities additionally require live review/queue evidence."""
         # Without the proof a pull request's Mac lane tests GitHub's merge
         # commit, not the head the review approved.
         unverified = self.edit_job("macos-app", self.VERIFY_STEP, "")

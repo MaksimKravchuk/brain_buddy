@@ -145,6 +145,7 @@ validate-ci:
 	python3 -m unittest scripts/test_classify_path_risk.py -v
 	python3 -m unittest scripts/test_check_smoke_identity_cohort.py -v
 	python3 -m unittest scripts/test_select_backend_tests.py -v
+	python3 -m unittest scripts/test_ci_shards.py -v
 	python3 -m unittest scripts/test_release_graph.py -v
 	python3 -m unittest scripts/test_classify_changed_scripts.py -v
 	python3 -m unittest scripts/test_secret_scan_guardrails.py -v

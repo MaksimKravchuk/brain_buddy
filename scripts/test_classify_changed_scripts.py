@@ -93,6 +93,11 @@ class ClassifyTests(unittest.TestCase):
     def test_a_script_a_lane_job_runs_widens_that_lane(self) -> None:
         self.assertEqual(_classify("scripts/check_cli_native.py"), ["cli"])
 
+    def test_036_FR_005_aggregate_and_native_test_inputs_keep_their_lane(self) -> None:
+        workflow = "jobs:\n  changes:\n    steps: []\n  backend-results:\n    steps:\n      - run: python3 scripts/coverage_math.py\n  ios-tests:\n    steps:\n      - run: python3 scripts/standalone.py\n"
+        self.assertEqual(_classify("scripts/coverage_math.py", workflow=workflow), ["backend"])
+        self.assertEqual(_classify("scripts/standalone.py", workflow=workflow), ["ios"])
+
     def test_a_module_imported_by_a_lane_script_widens_its_lanes(self) -> None:
         self.assertEqual(_classify("scripts/coverage_math.py"), ["backend", "frontend"])
 
