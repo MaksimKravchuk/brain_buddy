@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
     # trunk-candidate/** refs run the same required full CI as main. This
     # workflow definition is candidate-controlled (it runs from the pushed
