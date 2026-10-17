@@ -56,7 +56,7 @@ class ValidateCiArtifactsTests(unittest.TestCase):
             without_mutation_always, "mutation-gate aggregation job must use job-level if: always()"
         )
 
-    def test_parallel_ci_validator_rejects_dropped_native_test_job(self) -> None:
+    def test_036_FR_004_parallel_ci_validator_rejects_dropped_native_test_job(self) -> None:
         """036-FR-004: both native build and full package tests remain required."""
         workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         without_ios_tests = re.sub(
@@ -2230,7 +2230,7 @@ jobs:
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
 
-    def test_workflow_rejects_a_report_that_can_outrun_a_job(self) -> None:
+    def test_036_SC_003_workflow_rejects_a_report_that_can_outrun_a_job(self) -> None:
         """036-SC-003 structural prerequisite: timing must include the closing report; actual speedup requires live queue evidence."""
         # The report publishes the run's closing link. mutation-head runs up to
         # 90 minutes, so dropping it here would let the link be posted while the
@@ -2440,7 +2440,7 @@ class MacosAppLaneTests(unittest.TestCase):
         '        run: test "$(git rev-parse HEAD)" = "$BRAIN_BUDDY_CANDIDATE_SHA"\n'
     )
 
-    def test_a_macos_lane_without_candidate_verification_is_rejected(self) -> None:
+    def test_036_FR_006_a_macos_lane_without_candidate_verification_is_rejected(self) -> None:
         """036-FR-006 checkout prerequisite: the required native lane verifies candidate SHA; delivery identities additionally require live review/queue evidence."""
         # Without the proof a pull request's Mac lane tests GitHub's merge
         # commit, not the head the review approved.
